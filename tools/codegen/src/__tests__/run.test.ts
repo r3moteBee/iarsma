@@ -11,6 +11,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { capability } from '../contract.js';
@@ -194,7 +195,9 @@ describe('loadCapabilities + writeArtifacts composability', () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'iarsma-rt-'));
     try {
       // Use the real project contracts/, write to a fresh tmpdir.
-      const here = path.dirname(new URL(import.meta.url).pathname);
+      // fileURLToPath decodes URL-encoded paths (handles spaces in directory
+      // names correctly); `new URL(...).pathname` does not.
+      const here = path.dirname(fileURLToPath(import.meta.url));
       const contractsDir = path.resolve(here, '..', '..', 'contracts');
       const caps = await loadCapabilities(contractsDir);
       const artifacts = generateArtifacts(caps, { title: 't', version: '0.0.0' });

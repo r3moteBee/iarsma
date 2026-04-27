@@ -24,7 +24,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import type { Capability } from './contract.js';
 import { jsonSchemaForCapability, type JSONSchema } from './generators/json-schema.js';
 import { mcpToolForCapability, type McpToolRegistration } from './generators/mcp-tool.js';
@@ -131,7 +131,10 @@ export async function loadCapabilities(contractsDir: string): Promise<Capability
   for (const file of entries.sort()) {
     if (!file.endsWith('.ts') && !file.endsWith('.js')) continue;
     const modPath = path.join(contractsDir, file);
-    const mod = (await import(pathToFileURL(modPath).href)) as Record<string, unknown>;
+    // Pass the raw absolute path (not a file:// URL) — Vite's resolver
+    // (under vitest) chokes on URL-encoded spaces in paths, and tsx + Node
+    // both handle absolute paths natively.
+    const mod = (await import(modPath)) as Record<string, unknown>;
     for (const exp of Object.values(mod)) {
       if (isCapability(exp)) {
         capabilities.push(exp.ast);

@@ -34,7 +34,7 @@ const tester = new RuleTester({
 // no-refine
 // ──────────────────────────────────────────────────────────────────────────
 
-tester.run('wit-clean/no-refine', noRefine, {
+tester.run('no-refine', noRefine, {
   valid: [
     // Clean schemas don't fire.
     `import { z } from 'zod'; z.string();`,
@@ -58,7 +58,7 @@ tester.run('wit-clean/no-refine', noRefine, {
 // no-transform
 // ──────────────────────────────────────────────────────────────────────────
 
-tester.run('wit-clean/no-transform', noTransform, {
+tester.run('no-transform', noTransform, {
   valid: [
     `import { z } from 'zod'; z.string();`,
     // z.coerce.* is WIT-clean, not a transform method call.
@@ -77,7 +77,7 @@ tester.run('wit-clean/no-transform', noTransform, {
 // no-intersection
 // ──────────────────────────────────────────────────────────────────────────
 
-tester.run('wit-clean/no-intersection', noIntersection, {
+tester.run('no-intersection', noIntersection, {
   valid: [
     `import { z } from 'zod'; z.object({ a: z.string() });`,
     // .merge() is fine.
@@ -96,7 +96,7 @@ tester.run('wit-clean/no-intersection', noIntersection, {
 // no-branded
 // ──────────────────────────────────────────────────────────────────────────
 
-tester.run('wit-clean/no-branded', noBranded, {
+tester.run('no-branded', noBranded, {
   valid: [
     `import { z } from 'zod'; z.string();`,
     // Casting at the consumption site is fine — that's not a .brand() call.
