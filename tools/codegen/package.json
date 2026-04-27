@@ -9,10 +9,11 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b --noEmit",
-    "fmt": "prettier --write src",
-    "fmt:check": "prettier --check src"
+    "fmt": "prettier --write src contracts",
+    "fmt:check": "prettier --check src contracts"
   },
   "dependencies": {
     "zod": "^3.23.8",

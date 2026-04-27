@@ -1,26 +1,33 @@
-// Capability-contract codegen pipeline.
-//
-// F-3 fills this in:
-//
-//   contracts/*.ts (Zod schemas)
-//        ↓ introspection (schema._def)
-//   intermediate AST
-//        ↓
-//   ┌────────────┬───────────────┬───────────────┬───────────────┐
-//   │ React hook │ MCP tool reg  │ JSON Schema   │ OpenAPI docs  │
-//   └────────────┴───────────────┴───────────────┴───────────────┘
-//
-// The intermediate AST is the seam that lets us migrate to WIT-everywhere later
-// (D-021). Generators consume the AST, never Zod directly.
-//
-// The WIT-clean lint runs alongside the codegen. It walks each schema and emits
-// warnings (never failures, per D-021) when it sees:
-//   - z.refine
-//   - z.transform (use z.coerce.* or implement in code)
-//   - z.intersection (use .merge() for objects)
-//   - branded types in schemas (use TS-only consumption-site brands)
-//
-// Authors override per-case with an `// @migration-cost` annotation comment
-// in the contract file.
+/**
+ * Iarsma capability-contract codegen.
+ *
+ * Public surface re-exported for contract authors and generator implementations.
+ * Authors only need `capability` and `z`. Generator implementations consume
+ * the AST types and the walker.
+ *
+ * The codegen entrypoint (walks `contracts/*.ts`, runs every generator,
+ * writes outputs) lands in a follow-up commit. F-3 foundation (this commit)
+ * provides the AST, walker, capability helper, and the first generator
+ * (JSON Schema) — enough for contracts to be defined and for the test
+ * pipeline to validate them.
+ */
 
-console.log('codegen scaffold — implementation lands in F-3');
+export type {
+  CapabilityAST,
+  TypeNode,
+  Field,
+  VariantCase,
+  ErrorVariant,
+  Example,
+} from './types.js';
+
+export { capability } from './contract.js';
+export type { Capability, CapabilityDef } from './contract.js';
+
+export { walkZod, UnhandledZodKind } from './walk.js';
+
+export {
+  jsonSchemaForCapability,
+  typeNodeToJsonSchema,
+} from './generators/json-schema.js';
+export type { JSONSchema, CapabilitySchemas } from './generators/json-schema.js';
