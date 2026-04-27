@@ -1,0 +1,22 @@
+[package]
+name = "action-log"
+version = "0.0.0"
+description = "Tamper-evident hash-chained action log. SHA-384 (D-027). OpenInference-compatible entries."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+wit-bindgen.workspace = true
+
+
+[package.metadata.component]
+package = "iarsma:action-log"

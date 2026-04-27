@@ -1,0 +1,12 @@
+// WIT contract for git-backend.
+//
+// Pluggable FileBackend trait. Tier-1 GitHub REST API. Tier-2 gitoxide-in-WASM lands later.
+//
+// Real interface lands in F-3 / Phase 0 work item 4.
+// This placeholder lets the workspace resolve.
+
+package iarsma:git-backend@0.0.0;
+
+world placeholder {
+    // export hello: func() -> string;
+}

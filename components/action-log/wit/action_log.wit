@@ -1,0 +1,12 @@
+// WIT contract for action-log.
+//
+// Tamper-evident hash-chained action log. SHA-384 (D-027). OpenInference-compatible entries.
+//
+// Real interface lands in F-3 / Phase 0 work item 4.
+// This placeholder lets the workspace resolve.
+
+package iarsma:action-log@0.0.0;
+
+world placeholder {
+    // export hello: func() -> string;
+}

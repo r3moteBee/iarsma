@@ -1,0 +1,24 @@
+# CI baseline lands in F-2.
+# This file is a placeholder so the workflows directory exists in the repo scaffold.
+#
+# F-2 will populate this with:
+#   - lint (TypeScript + Rust + Markdown)
+#   - typecheck
+#   - test (pnpm + cargo)
+#   - WASM component build (cargo + wasm32-wasip2 target)
+#   - axe-core a11y check on built bundle
+#   - bundle build (iarsma.zip)
+#   - Required checks before merge
+
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI baseline lands in F-2 — see docs/implementation-plan.md"

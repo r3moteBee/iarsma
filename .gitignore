@@ -1,0 +1,63 @@
+# Build artifacts
+/target
+**/target/
+/dist
+**/dist/
+**/build/
+*.wasm
+!**/wit/*.wit
+
+# Node
+node_modules/
+pnpm-debug.log*
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# Rust
+**/*.rs.bk
+# Ignore Cargo.lock everywhere except the workspace root.
+# We commit root Cargo.lock for reproducible builds.
+**/Cargo.lock
+!/Cargo.lock
+
+# Tauri (when added)
+src-tauri/target/
+
+# Codegen output (regenerated from contracts)
+/shell/src/generated/
+/mcp-server/src/generated/
+
+# Bundle output
+/iarsma.zip
+/webmail-*.zip
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+.zed/
+
+# Env / secrets — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Test / coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Logs
+*.log
+logs/
+
+# Stalwart / local dev fixtures
+/fixtures/local/
+/test-data/local/

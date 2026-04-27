@@ -1,0 +1,27 @@
+{
+  "name": "@iarsma/codegen",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Capability-contract codegen. Reads Zod schemas via introspection; emits React hooks, MCP tool registrations, JSON Schema, and OpenAPI docs from a single intermediate AST.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc -b --noEmit",
+    "fmt": "prettier --write src",
+    "fmt:check": "prettier --check src"
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "eslint": "^9.13.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

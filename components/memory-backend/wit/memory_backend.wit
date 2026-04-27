@@ -1,0 +1,12 @@
+// WIT contract for memory-backend.
+//
+// Pluggable MemoryBackend trait. Tier-1 default: SQLite-via-OPFS / Tauri filesystem. Tier-2 OB1 adapter lands in Phase 5+.
+//
+// Real interface lands in F-3 / Phase 0 work item 4.
+// This placeholder lets the workspace resolve.
+
+package iarsma:memory-backend@0.0.0;
+
+world placeholder {
+    // export hello: func() -> string;
+}

@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "components/jmap-client",
+    "components/html-sanitizer",
+    "components/markdown",
+    "components/action-log",
+    "components/memory-backend",
+    "components/git-backend",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/r3moteBee/iarsma"
+authors = ["Brent Ellis <brent@r3motely.com>"]
+rust-version = "1.78"
+
+[workspace.dependencies]
+# Shared dependency versions for components.
+# Add as needed; keep narrow.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+wit-bindgen = "0.34"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,5 @@
+packages:
+  - 'shell'
+  - 'mcp-server'
+  - 'token-exchange'
+  - 'tools/*'

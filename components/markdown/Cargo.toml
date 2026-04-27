@@ -1,0 +1,22 @@
+[package]
+name = "markdown"
+version = "0.0.0"
+description = "Markdown ↔ HTML converter using pulldown-cmark. Pure function."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+wit-bindgen.workspace = true
+pulldown-cmark = { version = "0.12", default-features = false }
+
+[package.metadata.component]
+package = "iarsma:markdown"
