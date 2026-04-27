@@ -172,6 +172,24 @@ When an existing decision is reversed or refined, edit the entry and add an "Upd
 **Decision:** No proactive outreach to Stalwart Labs. If the project matures into something they'd value, contact is a one-message later. No pre-existing relationship to leverage; they don't run a marketplace.
 **Why:** Lower coupling to upstream cadence. The project's positioning as complementary (agent-native + WASM-component) holds whether or not Stalwart cares.
 
+## D-035 — F-3 codegen intermediate AST is a custom typed AST
+**Date:** 2026-04-26
+**Decision:** The codegen pipeline reads Zod schemas, walks them through introspection (`schema._def`) into a custom typed AST that mirrors the WIT type system (`record`, `option`, `list`, `variant`, `enum`, etc.), and feeds that AST into multiple generators. JSON Schema is one of the generator *outputs* (consumed by MCP tool registrations and OpenAPI), not the AST itself.
+**Why:** The custom AST gives precise control over how each output is generated (no JSON Schema ambiguity to disambiguate), and the WIT-shaped node kinds make a future migration to WIT-everywhere a serializer addition rather than a redesign. JSON Schema as an output is still standard-compliant for external consumers.
+**How to apply:** Generators pattern-match on the AST's `kind` discriminator. Adding a new generator is an O(N-kinds) operation, never an O(generators) refactor.
+
+## D-036 — WIT-clean discipline as local lint rules
+**Date:** 2026-04-26
+**Decision:** The four WIT-clean checks (`z.refine`, `z.transform`, `z.intersection`, branded types in capability schemas) live as a custom local rule set in `tools/codegen/eslint-rules/wit-clean/`. Loaded from the project's `eslintrc`. Warnings only, never failures (per D-021). Not published to npm.
+**Why:** No existing community plugin covers exactly these four anti-patterns — they encode an architectural decision specific to this project, not a general "Zod best practices" idea. Belt-and-suspenders: the AST walker also throws `UnhandledZodKind` on these, so even if the lint rule is bypassed the codegen itself fails loud.
+**How to apply:** Authors override per-occurrence with an `// @migration-cost: <reason>` comment. The lint rule respects the override; the codegen walker does not (the walker always fails loud — overrides require writing the implementation in a different shape).
+
+## D-037 — Documentation is a first-class generator output
+**Date:** 2026-04-26
+**Decision:** The `iarsma.io` docs site is generated from the same capability contracts that produce React hooks, MCP tools, and JSON Schema. Capability contracts gain a required `examples` field (each example: `{title, input, output}`). The site exposes `/llms.txt` for AI-readable indexing, downloadable `openapi.json` and per-tool `*.schema.json` for machine consumption, and renders without JavaScript so curl/wget/agents work natively.
+**Why:** Iarsma's audience explicitly includes agents reading documentation to learn how to interact with the system. Auto-generating docs from contracts eliminates code-doc drift; making the site machine-readable from day one means agents are first-class consumers, matching the project's collaboration thesis. The `examples` field doubles as test data — example round-trip tests catch doc-rot on the same axis as code-rot.
+**How to apply:** Add `examples` to every contract (Phase 0). Build the docs generator as a separate pipeline output starting in Phase 1 (when there are real capabilities to document). The site stack (Astro / Docusaurus / mkdocs) is a Phase 1 decision.
+
 ## D-034 — Project name: Iarsma
 **Date:** 2026-04-26
 **Decision:** The project is named **Iarsma** (Irish, "EER-sma" — *relic, artifact, durable remnant*). Domains owned: `iarsma.com` (primary user-facing) and `iarsma.io` (developer-facing). The `.ai` TLD was deliberately *not* purchased — Iarsma is communication infrastructure, not an AI product, and the `.ai` framing would mis-position it. Use `Iarsma` as the proper noun in prose and titles; `iarsma` as the lowercase identifier in package names, URNs (`urn:iarsma:agent-context`), and component namespaces (`iarsma:jmap-client@0.0.0`).

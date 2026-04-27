@@ -38,6 +38,22 @@ These are cross-cutting prerequisites. None are user-visible; all of them shape 
 
 **Definition of done:** adding a new capability is a matter of writing one Zod schema file and running `just codegen`. Both the React side and the MCP server side appear automatically. The lint catches non-WIT-clean usage.
 
+**AST shape (D-035):** custom typed AST internally; JSON Schema as one of the generator outputs (not the AST).
+**Lint shape (D-036):** four custom local rules in `tools/codegen/eslint-rules/wit-clean/`, warnings only.
+**Docs as a generator output (D-037):** capability contracts include an `examples` field; docs site is a Phase 1 deliverable consuming the same AST.
+
+### F-3 test coverage (Phase 0 work item 4a)
+The codegen pipeline gets six categories of preliminary tests, all passing before F-3 closes:
+
+1. **Generator snapshot tests** — each generator (React hook, MCP tool, JSON Schema, OpenAPI) produces a deterministic string for a given AST. Snapshot committed; regression caught at the diff.
+2. **AST walker exhaustiveness** — encountering a Zod feature the walker doesn't handle throws `UnhandledZodKind`, never silently produces wrong output. Tested per anti-pattern (refine/transform/intersection/branded types) and per genuinely-unhandled kind (e.g., `z.bigint`, `z.date`).
+3. **Idempotency** — running codegen twice produces byte-identical output.
+4. **Schema parity** — JSON Schema and the Zod runtime validator agree on accept/reject for the same inputs (property-tested with random samples).
+5. **Lint rule positive/negative** — `RuleTester` pattern. Each anti-pattern fires; clean code does not.
+6. **End-to-end round-trip for `session.get`** — React hook (`useSessionGet`) and MCP tool (`session.get`) both return the same Session object when the agent identity has the right scope. Action log records both with distinct identities.
+
+These tests are the *F-3 definition-of-done check*. They also stay relevant per-contract through Phase 0+: each new capability adds a snapshot fixture and an example round-trip.
+
 ### F-4. Config and bundle conventions
 - Define `config.json` schema: `{ jmapEndpoint, oidcIssuer, clientId, ... }` with same-origin defaults.
 - Bundle structure documented: what's in `iarsma.zip`, where `config.json` lives, how the shell loads it at startup.
