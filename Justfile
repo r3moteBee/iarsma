@@ -84,10 +84,9 @@ fmt:
 
 # --- Codegen ------------------------------------------------------------
 
-# Run the capability-contract codegen.
+# Run the capability-contract codegen — walks contracts/, writes to dist/.
 codegen:
-    pnpm --filter '@iarsma/codegen' run build
-    @echo "Codegen pipeline implementation lands in F-3."
+    pnpm --filter '@iarsma/codegen' run codegen
 
 # --- Cleanup ------------------------------------------------------------
 

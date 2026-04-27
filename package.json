@@ -25,7 +25,7 @@
     "fmt:check": "pnpm -r run fmt:check && cargo fmt --all -- --check",
     "typecheck": "pnpm -r run typecheck",
     "wasm": "cargo build --workspace --target wasm32-wasip2 --release",
-    "codegen": "pnpm --filter '@iarsma/codegen' run build",
+    "codegen": "pnpm --filter '@iarsma/codegen' run codegen",
     "clean": "pnpm -r exec rm -rf dist node_modules && cargo clean"
   },
   "devDependencies": {

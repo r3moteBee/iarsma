@@ -1,15 +1,11 @@
 /**
  * Iarsma capability-contract codegen.
  *
- * Public surface re-exported for contract authors and generator implementations.
- * Authors only need `capability` and `z`. Generator implementations consume
- * the AST types and the walker.
+ * Public surface re-exported for contract authors and generator
+ * implementations. Authors only need `capability` (and `z` from zod).
+ * Generator implementations consume the AST types and the walker.
  *
- * The codegen entrypoint (walks `contracts/*.ts`, runs every generator,
- * writes outputs) lands in a follow-up commit. F-3 foundation (this commit)
- * provides the AST, walker, capability helper, and the first generator
- * (JSON Schema) — enough for contracts to be defined and for the test
- * pipeline to validate them.
+ * The CLI entrypoint is `src/run.ts` — invoked by `pnpm codegen`.
  */
 
 export type {
@@ -26,8 +22,30 @@ export type { Capability, CapabilityDef } from './contract.js';
 
 export { walkZod, UnhandledZodKind } from './walk.js';
 
+// Generators
 export {
   jsonSchemaForCapability,
   typeNodeToJsonSchema,
 } from './generators/json-schema.js';
 export type { JSONSchema, CapabilitySchemas } from './generators/json-schema.js';
+
+export { mcpToolForCapability } from './generators/mcp-tool.js';
+export type { McpToolRegistration } from './generators/mcp-tool.js';
+
+export { openApiForCapabilities } from './generators/openapi.js';
+export type { OpenAPIDoc } from './generators/openapi.js';
+
+// Pipeline
+export {
+  generateArtifacts,
+  loadCapabilities,
+  writeArtifacts,
+  run,
+  safeName,
+  isCapability,
+} from './run.js';
+export type {
+  GeneratedArtifacts,
+  PerCapabilityArtifacts,
+  RunOptions,
+} from './run.js';

@@ -20,6 +20,6 @@
     "sourceMap": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "contracts"],
+  "include": ["src", "contracts", "eslint-rules"],
   "exclude": ["node_modules", "dist"]
 }
