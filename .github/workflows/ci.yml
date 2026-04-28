@@ -1,24 +1,132 @@
-# CI baseline lands in F-2.
-# This file is a placeholder so the workflows directory exists in the repo scaffold.
+# Iarsma CI — runs on every push to main and every PR.
 #
-# F-2 will populate this with:
-#   - lint (TypeScript + Rust + Markdown)
-#   - typecheck
-#   - test (pnpm + cargo)
-#   - WASM component build (cargo + wasm32-wasip2 target)
-#   - axe-core a11y check on built bundle
-#   - bundle build (iarsma.zip)
-#   - Required checks before merge
+# Three jobs run in parallel; main blocks until all pass:
+#   - ts:           typecheck + tests across all TypeScript workspaces
+#   - rust:         cargo fmt --check + cargo check + cargo test on the
+#                   Rust component workspace
+#   - shell-build:  smoke-test the shell's Vite build (depends on ts)
+#
+# Concurrency control cancels in-progress runs when a new commit lands on
+# the same ref — useful for tight feedback on PRs.
 
 name: ci
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: '9.12.0'
+  NODE_VERSION: '20'
+
 jobs:
-  placeholder:
+  # ──────────────────────────────────────────────────────────────────────
+  # TypeScript: typecheck + tests across all workspaces
+  # ──────────────────────────────────────────────────────────────────────
+  ts:
+    name: TypeScript (typecheck + tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - run: echo "CI baseline lands in F-2 — see docs/implementation-plan.md"
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run codegen (so generated artifacts exist for downstream typecheck)
+        run: pnpm codegen
+
+      - name: Typecheck all workspaces
+        run: pnpm -r --workspace-concurrency=1 typecheck
+
+      - name: Run tests in all workspaces
+        run: pnpm -r --workspace-concurrency=1 run test
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Rust: workspace fmt + check + test across the WASM component crates
+  # ──────────────────────────────────────────────────────────────────────
+  rust:
+    name: Rust (fmt + check + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache cargo target dir
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Workspace check
+        run: cargo check --workspace
+        # Note: deliberately not `--all-targets` because the component crates
+        # are `crate-type = ["cdylib"]` only, which means building test
+        # targets needs `rlib` added. We have no Rust tests yet; add them
+        # back when Phase 0 work item 5 (JMAP client) lands real Rust code.
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Shell bundle build smoke
+  # Verifies the Vite build succeeds end-to-end including the codegen-
+  # produced files. Depends on ts (there's no point bundling if typecheck
+  # is broken).
+  # ──────────────────────────────────────────────────────────────────────
+  shell-build:
+    name: Shell bundle (Vite build smoke)
+    runs-on: ubuntu-latest
+    needs: ts
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run codegen
+        run: pnpm codegen
+
+      - name: Build the shell bundle
+        run: pnpm --filter '@iarsma/shell' run build
+
+      - name: Verify dist/ output
+        run: |
+          test -d shell/dist || (echo "::error::shell/dist missing"; exit 1)
+          test -f shell/dist/index.html || (echo "::error::shell/dist/index.html missing"; exit 1)
+          ls -la shell/dist
+          du -sh shell/dist

@@ -33,7 +33,7 @@ type WriteAction =
 
 const INITIAL_STATE: WriteState = { isLoading: false, error: undefined };
 
-function reducer(state: WriteState, action: WriteAction): WriteState {
+function reducer(_state: WriteState, action: WriteAction): WriteState {
   switch (action.type) {
     case 'start':
       return { isLoading: true, error: undefined };
