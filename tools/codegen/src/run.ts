@@ -27,6 +27,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Capability } from './contract.js';
 import { jsonSchemaForCapability, type JSONSchema } from './generators/json-schema.js';
+import {
+  llmsTxtForCapabilities,
+  markdownForCapability,
+  markdownIndexForCapabilities,
+} from './generators/markdown.js';
 import { mcpToolForCapability, type McpToolRegistration } from './generators/mcp-tool.js';
 import { openApiForCapabilities, type OpenAPIDoc } from './generators/openapi.js';
 import type { CapabilityAST } from './types.js';
@@ -38,6 +43,10 @@ import type { CapabilityAST } from './types.js';
 export type GeneratedArtifacts = {
   /** Combined OpenAPI 3.1 doc. */
   readonly openapi: OpenAPIDoc;
+  /** Markdown index page listing all capabilities. */
+  readonly markdownIndex: string;
+  /** llms.txt content for AI-readable site indexing (D-037). */
+  readonly llmsTxt: string;
   /** Per-capability artifacts, keyed by safe-filename (cap.name with dots → dashes). */
   readonly perCapability: ReadonlyMap<string, PerCapabilityArtifacts>;
 };
@@ -47,6 +56,7 @@ export type PerCapabilityArtifacts = {
   readonly inputSchema: JSONSchema;
   readonly outputSchema: JSONSchema;
   readonly mcpTool: McpToolRegistration;
+  readonly markdown: string;
 };
 
 export type RunOptions = {
@@ -101,16 +111,20 @@ export function generateArtifacts(
   for (const cap of sorted) {
     const schemas = jsonSchemaForCapability(cap);
     const mcpTool = mcpToolForCapability(cap);
+    const markdown = markdownForCapability(cap);
     perCapability.set(safeName(cap.name), {
       capability: cap,
       inputSchema: schemas.input,
       outputSchema: schemas.output,
       mcpTool,
+      markdown,
     });
   }
 
   return {
     openapi: openApiForCapabilities(sorted, meta),
+    markdownIndex: markdownIndexForCapabilities(sorted),
+    llmsTxt: llmsTxtForCapabilities(sorted),
     perCapability,
   };
 }
@@ -156,14 +170,20 @@ export async function writeArtifacts(
 ): Promise<void> {
   const schemasDir = path.join(distDir, 'schemas');
   const toolsDir = path.join(distDir, 'tools');
+  const docsDir = path.join(distDir, 'docs');
   await fs.mkdir(schemasDir, { recursive: true });
   await fs.mkdir(toolsDir, { recursive: true });
+  await fs.mkdir(docsDir, { recursive: true });
 
   // OpenAPI
   await fs.writeFile(
     path.join(distDir, 'openapi.json'),
     JSON.stringify(artifacts.openapi, null, 2) + '\n',
   );
+
+  // Docs index + llms.txt
+  await fs.writeFile(path.join(docsDir, 'index.md'), artifacts.markdownIndex);
+  await fs.writeFile(path.join(distDir, 'llms.txt'), artifacts.llmsTxt);
 
   // Per-capability files
   for (const [name, art] of artifacts.perCapability) {
@@ -179,6 +199,7 @@ export async function writeArtifacts(
       path.join(toolsDir, `${name}.json`),
       JSON.stringify(art.mcpTool, null, 2) + '\n',
     );
+    await fs.writeFile(path.join(docsDir, `${name}.md`), art.markdown);
   }
 }
 

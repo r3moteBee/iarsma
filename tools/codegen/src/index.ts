@@ -35,6 +35,13 @@ export type { McpToolRegistration } from './generators/mcp-tool.js';
 export { openApiForCapabilities } from './generators/openapi.js';
 export type { OpenAPIDoc } from './generators/openapi.js';
 
+export {
+  markdownForCapability,
+  markdownIndexForCapabilities,
+  llmsTxtForCapabilities,
+  typeNodeToInlineMarkdown,
+} from './generators/markdown.js';
+
 // Pipeline
 export {
   generateArtifacts,

@@ -173,6 +173,31 @@ describe('run (integration with the project contracts)', () => {
     expect(reg.isDestructive).toBe(false);
   });
 
+  it('produces a markdown docs page per capability', async () => {
+    const md = await fs.readFile(
+      path.join(tmp, 'docs', 'session-get.md'),
+      'utf-8',
+    );
+    expect(md).toContain('# `session.get`');
+    expect(md).toContain('**Scopes:** `session:read`');
+    expect(md).toContain('## Input');
+    expect(md).toContain('## Output');
+  });
+
+  it('produces a markdown docs index', async () => {
+    const md = await fs.readFile(path.join(tmp, 'docs', 'index.md'), 'utf-8');
+    expect(md).toContain('# Iarsma Capabilities');
+    expect(md).toContain('## session');
+    expect(md).toContain('[`session.get`](./session-get.md)');
+  });
+
+  it('produces llms.txt at the dist root (D-037)', async () => {
+    const txt = await fs.readFile(path.join(tmp, 'llms.txt'), 'utf-8');
+    expect(txt).toContain('# Iarsma');
+    expect(txt).toContain('urn:iarsma:agent-context');
+    expect(txt).toContain('`session.get`');
+  });
+
   it('is idempotent on disk — running twice produces identical bytes', async () => {
     const tmp2 = await fs.mkdtemp(path.join(os.tmpdir(), 'iarsma-codegen-b-'));
     try {
