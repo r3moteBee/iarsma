@@ -41,13 +41,13 @@ export const sessionGet = capability({
       title: 'Fetch session for the signed-in user',
       input: {},
       output: {
-        username: 'brent@r3motely.net',
-        apiUrl: 'https://sw-mail.r3motely.net/jmap/',
+        username: 'user@example.net',
+        apiUrl: 'https://sw-mail.example.net/jmap/',
         downloadUrl:
-          'https://sw-mail.r3motely.net/jmap/download/{accountId}/{blobId}/{name}?accept={type}',
-        uploadUrl: 'https://sw-mail.r3motely.net/jmap/upload/{accountId}/',
+          'https://sw-mail.example.net/jmap/download/{accountId}/{blobId}/{name}?accept={type}',
+        uploadUrl: 'https://sw-mail.example.net/jmap/upload/{accountId}/',
         eventSourceUrl:
-          'https://sw-mail.r3motely.net/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}',
+          'https://sw-mail.example.net/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}',
         state: '817d3028',
         primaryAccountIdMail: 'c',
       },

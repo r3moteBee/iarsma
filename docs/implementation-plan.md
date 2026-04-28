@@ -86,7 +86,7 @@ Operational, mostly already verified during the 2026-04-26 admin walkthrough. Th
 - **Definition of done:** the webmail's OAuth dance against this `client_id` returns a valid access token in a manual `curl` or browser test.
 
 ### P-1.2. Verify JMAP capabilities
-- `curl -u 'brent@r3motely.net:<password>' https://sw-mail.r3motely.net/.well-known/jmap | jq '.capabilities'`.
+- `curl -u '<your-email>:<password>' https://<your-mail-server>/.well-known/jmap | jq '.capabilities'`.
 - Record the returned URN list in `docs/stalwart-setup.md`. Required: `urn:ietf:params:jmap:core`, `urn:ietf:params:jmap:mail`, `urn:ietf:params:jmap:submission`.
 - Note which optional URNs (calendar, contacts, files) are present and at what draft level. This determines what's available to Phase 4 / Phase 5.
 - **Definition of done:** the capability list is in version control; phases that depend on specific URNs reference this file.
@@ -99,7 +99,7 @@ Operational, mostly already verified during the 2026-04-26 admin walkthrough. Th
 ### P-1.4. Seed the dev mailbox
 - Create a deterministic test corpus in `tests/fixtures/mailbox/`: 5 plain-text messages, 3 HTML messages with quoted replies, 2 forwarded threads with inline images, 1 calendar invite (`text/calendar`), 1 message with attachments, 1 spam-suspect, 1 with non-ASCII characters.
 - Script (`tests/fixtures/seed.ts` or shell script) that uses JMAP `Email/import` to load the corpus into a target account.
-- Run against `brent@r3motely.net` for dev; against a Docker Stalwart for CI.
+- Run against the author's dev account for personal verification; against a Docker Stalwart for CI.
 - **Definition of done:** `just seed-mailbox` populates a fresh account with the corpus in under 30 seconds.
 
 ### P-1.5. Clean up the duplicate SendGrid route
@@ -134,10 +134,10 @@ Operational, mostly already verified during the 2026-04-26 admin walkthrough. Th
 10a. **Token-exchange sidecar scaffold.** Node + TypeScript binary at `token-exchange/`. Single route: `POST /auth/token` exchanging an auth code + PKCE verifier for tokens against Stalwart's OIDC endpoint. Holds the `client_secret` server-side. Co-deployable with the webmail (single VM) or as a serverless function. Required because Stalwart treats the OAuth client as confidential. *AI session: token-exchange.*
 11. **Tauri 2 desktop wrap.** Minimal `tauri.conf.json` that wraps the existing Vite dev server. `cargo tauri dev` launches a native window. No native APIs called yet — just packaging. *AI session: tauri-scaffold.*
 12. **Bundle build → `iarsma.zip`.** Justfile target runs Vite build, copies `config.json`, zips the `dist/` directory. Tag-driven release publishes to GitHub Releases. *AI session: bundle-pipeline.*
-13. **Reference deployment to Stalwart Web Applications.** Configure a `webmail` Web Application entry pointing at the GitHub Releases zip. Confirm the bundle loads at `https://sw-mail.r3motely.net/webmail/`. *AI session: deploy-reference.*
+13. **Reference deployment to Stalwart Web Applications.** Configure a `webmail` Web Application entry pointing at the GitHub Releases zip. Confirm the bundle loads at `https://<your-mail-server>/webmail/`. *AI session: deploy-reference.*
 
 ### Definition of done
-A user navigates to `https://sw-mail.r3motely.net/webmail/`, clicks "Sign in", completes OAuth via Stalwart's OIDC Provider, and sees their account email displayed. The action log records the login. The MCP server, run separately, exposes `session.get` and returns the same data when called with a valid Bearer token. `iarsma.zip` is reproducible from a tag.
+A user navigates to `https://<your-mail-server>/webmail/`, clicks "Sign in", completes OAuth via Stalwart's OIDC Provider, and sees their account email displayed. The action log records the login. The MCP server, run separately, exposes `session.get` and returns the same data when called with a valid Bearer token. `iarsma.zip` is reproducible from a tag.
 
 ### Phase 0 risks
 - **`jco` toolchain rough edges.** Browser-side WASM Component composition is rapidly evolving in 2026; budget a day for transpilation issues. Mitigation: have a non-Component WASM fallback path (regular `wasm-bindgen` modules) ready to swap in if blocked.

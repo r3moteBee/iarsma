@@ -52,7 +52,7 @@ Required environment variables (see the repo-root `.env.example`):
 
 | Var | Required | Purpose |
 |---|---|---|
-| `OIDC_ISSUER` | yes | Base URL of the OIDC provider, e.g. `https://sw-mail.r3motely.net` |
+| `OIDC_ISSUER` | yes | Base URL of the OIDC provider, e.g. `https://sw-mail.example.net` |
 | `OIDC_CLIENT_ID` | yes | Registered client id (e.g. `webmail`) |
 | `OIDC_CLIENT_SECRET` | yes | Registered client secret. **Never** ship to browser |
 | `TOKEN_EXCHANGE_ALLOWED_REDIRECT_URIS` | yes | CSV of redirect URIs the sidecar accepts |

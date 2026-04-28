@@ -520,8 +520,8 @@ The webmail extends the JMAP session resource with a custom capability URN (work
 
 ```json
 {
-  "webmailMcpUrl": "https://sw-mail.r3motely.net/webmail/mcp",
-  "actionLogUrl": "https://sw-mail.r3motely.net/webmail/mcp/action-log",
+  "webmailMcpUrl": "https://sw-mail.example.net/webmail/mcp",
+  "actionLogUrl": "https://sw-mail.example.net/webmail/mcp/action-log",
   "memoryBackendUrl": "https://memory.r3motely.net/mcp"
 }
 ```
@@ -772,7 +772,7 @@ Verified directly against the deployed Stalwart admin on 2026-04-26. Status refl
 
 **To do:**
 - **Pre-register an OAuth client for the webmail.** Dynamic Client Registration is currently OFF on the OIDC Provider (both "Require client registration" and "Allow anonymous registration" disabled). Pre-register a stable `client_id` for the webmail with `token_endpoint_auth_method = "none"` and PKCE required. Find the canonical path (admin UI vs CLI vs config file).
-- **Verify JMAP capabilities advertisement** with `curl -u 'brent@r3motely.net:<password>' https://sw-mail.r3motely.net/.well-known/jmap | jq '.capabilities'`. Expect: `urn:ietf:params:jmap:core`, `urn:ietf:params:jmap:mail`, `urn:ietf:params:jmap:submission`, plus calendar/contacts/files draft URNs as available.
+- **Verify JMAP capabilities advertisement** with `curl -u '<your-email>:<password>' https://<your-mail-server>/.well-known/jmap | jq '.capabilities'`. Expect: `urn:ietf:params:jmap:core`, `urn:ietf:params:jmap:mail`, `urn:ietf:params:jmap:submission`, plus calendar/contacts/files draft URNs as available.
 - **Pick a deployment model** (see Deployment Models above). Recommended default: register a Stalwart Web Application entry pointing at the GitHub Releases URL for `iarsma.zip` once the bundle exists. No separate VM, no Caddy, no CORS — strictly simpler than the original brief assumed.
 - **Seed the test mailbox** with development messages: a few threads, a calendar invite, an inline-image attachment, a forwarded HTML message with quoted reply, a plain-text message. Used to exercise the inbox/composer/sanitizer in Phase 1–2.
 

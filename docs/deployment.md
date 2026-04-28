@@ -262,4 +262,4 @@ Open Brain is FSL-1.1-MIT (Functional Source License → MIT after 2 years), com
 
 ## Reference Deployment
 
-The project's reference deployment lives at `https://sw-mail.r3motely.net/webmail/` and uses Path A (Stalwart Web Application). Treat it as documentation-by-example — the configuration matches what's documented above.
+The project author maintains a reference deployment using Path A (Stalwart Web Application) — its hostname is documented in `docs/project-brief.md` Phase -1 if you want to look. Treat it as documentation-by-example — the configuration matches what's documented above. Operators of their own Iarsma instance should substitute their own hostname throughout this guide.

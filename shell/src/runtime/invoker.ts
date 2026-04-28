@@ -58,7 +58,7 @@ export const IarsmaProvider = InvokerContext.Provider;
 // ──────────────────────────────────────────────────────────────────────────
 
 export type McpInvokerOptions = {
-  /** Base URL of the MCP server, e.g. 'https://sw-mail.r3motely.net/mcp'. */
+  /** Base URL of the MCP server, e.g. 'https://sw-mail.example.net/mcp'. */
   readonly baseUrl: string;
   /** Returns the current Bearer token. Called on each invocation. */
   readonly getAuthToken: () => string | null;
