@@ -34,6 +34,7 @@ import {
 } from './generators/markdown.js';
 import { mcpToolForCapability, type McpToolRegistration } from './generators/mcp-tool.js';
 import { openApiForCapabilities, type OpenAPIDoc } from './generators/openapi.js';
+import { reactHookForCapability } from './generators/react-hook.js';
 import type { CapabilityAST } from './types.js';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -57,13 +58,20 @@ export type PerCapabilityArtifacts = {
   readonly outputSchema: JSONSchema;
   readonly mcpTool: McpToolRegistration;
   readonly markdown: string;
+  /** TypeScript source for the React hook (lives in shell/src/generated/capabilities/). */
+  readonly reactHook: string;
 };
 
 export type RunOptions = {
   /** Directory containing contract `.ts` files. Defaults to `<package>/contracts`. */
   readonly contractsDir?: string;
-  /** Output directory. Defaults to `<package>/dist`. */
+  /** Output directory for JSON / OpenAPI / docs. Defaults to `<package>/dist`. */
   readonly distDir?: string;
+  /**
+   * Directory where React hook `.ts` files are written. Defaults to
+   * `<repo>/shell/src/generated/capabilities`. Pass `null` to skip.
+   */
+  readonly shellGenDir?: string | null;
   /** OpenAPI doc metadata. */
   readonly meta?: { title: string; version: string; description?: string };
 };
@@ -112,12 +120,14 @@ export function generateArtifacts(
     const schemas = jsonSchemaForCapability(cap);
     const mcpTool = mcpToolForCapability(cap);
     const markdown = markdownForCapability(cap);
+    const reactHook = reactHookForCapability(cap);
     perCapability.set(safeName(cap.name), {
       capability: cap,
       inputSchema: schemas.input,
       outputSchema: schemas.output,
       mcpTool,
       markdown,
+      reactHook,
     });
   }
 
@@ -167,6 +177,7 @@ export async function loadCapabilities(contractsDir: string): Promise<Capability
 export async function writeArtifacts(
   artifacts: GeneratedArtifacts,
   distDir: string,
+  shellGenDir?: string | null,
 ): Promise<void> {
   const schemasDir = path.join(distDir, 'schemas');
   const toolsDir = path.join(distDir, 'tools');
@@ -174,6 +185,10 @@ export async function writeArtifacts(
   await fs.mkdir(schemasDir, { recursive: true });
   await fs.mkdir(toolsDir, { recursive: true });
   await fs.mkdir(docsDir, { recursive: true });
+
+  if (shellGenDir !== undefined && shellGenDir !== null) {
+    await fs.mkdir(shellGenDir, { recursive: true });
+  }
 
   // OpenAPI
   await fs.writeFile(
@@ -186,6 +201,7 @@ export async function writeArtifacts(
   await fs.writeFile(path.join(distDir, 'llms.txt'), artifacts.llmsTxt);
 
   // Per-capability files
+  const hookFilenames: string[] = [];
   for (const [name, art] of artifacts.perCapability) {
     await fs.writeFile(
       path.join(schemasDir, `${name}.input.schema.json`),
@@ -200,6 +216,25 @@ export async function writeArtifacts(
       JSON.stringify(art.mcpTool, null, 2) + '\n',
     );
     await fs.writeFile(path.join(docsDir, `${name}.md`), art.markdown);
+
+    if (shellGenDir !== undefined && shellGenDir !== null) {
+      await fs.writeFile(path.join(shellGenDir, `${name}.ts`), art.reactHook);
+      hookFilenames.push(name);
+    }
+  }
+
+  // Index file in the shell-generated directory re-exporting every hook.
+  if (shellGenDir !== undefined && shellGenDir !== null) {
+    const indexLines = [
+      '// Generated index. Do not edit by hand — re-run `pnpm codegen`.',
+      '',
+      ...hookFilenames
+        .slice()
+        .sort()
+        .map((n) => `export * from './${n}.js';`),
+      '',
+    ];
+    await fs.writeFile(path.join(shellGenDir, 'index.ts'), indexLines.join('\n'));
   }
 }
 
@@ -210,8 +245,13 @@ export async function writeArtifacts(
 export async function run(opts: RunOptions = {}): Promise<{ capabilities: number }> {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const packageRoot = path.resolve(here, '..');
+  const repoRoot = path.resolve(packageRoot, '..', '..');
   const contractsDir = opts.contractsDir ?? path.join(packageRoot, 'contracts');
   const distDir = opts.distDir ?? path.join(packageRoot, 'dist');
+  const shellGenDir =
+    opts.shellGenDir === undefined
+      ? path.join(repoRoot, 'shell', 'src', 'generated', 'capabilities')
+      : opts.shellGenDir;
   const meta = opts.meta ?? {
     title: 'Iarsma — MCP Tool Surface',
     version: '0.0.0',
@@ -222,7 +262,7 @@ export async function run(opts: RunOptions = {}): Promise<{ capabilities: number
 
   const caps = await loadCapabilities(contractsDir);
   const artifacts = generateArtifacts(caps, meta);
-  await writeArtifacts(artifacts, distDir);
+  await writeArtifacts(artifacts, distDir, shellGenDir);
   return { capabilities: caps.length };
 }
 

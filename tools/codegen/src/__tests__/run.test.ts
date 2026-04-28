@@ -141,7 +141,9 @@ describe('run (integration with the project contracts)', () => {
   });
 
   it('walks the real contracts/ dir and writes to tmpdir', async () => {
-    const r = await run({ distDir: tmp });
+    // Pass shellGenDir: null to skip writing into shell/src/generated/.
+    // Tests should be hermetic — they shouldn't pollute the shell tree.
+    const r = await run({ distDir: tmp, shellGenDir: null });
     expect(r.capabilities).toBeGreaterThanOrEqual(1);
     expect(r.capabilities).toBe(1); // session.get is the only contract today
   });
@@ -201,13 +203,40 @@ describe('run (integration with the project contracts)', () => {
   it('is idempotent on disk — running twice produces identical bytes', async () => {
     const tmp2 = await fs.mkdtemp(path.join(os.tmpdir(), 'iarsma-codegen-b-'));
     try {
-      await run({ distDir: tmp2 });
+      await run({ distDir: tmp2, shellGenDir: null });
       const a = await fs.readFile(path.join(tmp, 'openapi.json'), 'utf-8');
       const b = await fs.readFile(path.join(tmp2, 'openapi.json'), 'utf-8');
       expect(a).toBe(b);
     } finally {
       await fs.rm(tmp2, { recursive: true, force: true });
     }
+  });
+});
+
+describe('run — React hook output to a shell-gen dir', () => {
+  let tmpDist: string;
+  let tmpShell: string;
+
+  beforeAll(async () => {
+    tmpDist = await fs.mkdtemp(path.join(os.tmpdir(), 'iarsma-rh-dist-'));
+    tmpShell = await fs.mkdtemp(path.join(os.tmpdir(), 'iarsma-rh-shell-'));
+  });
+
+  afterAll(async () => {
+    await fs.rm(tmpDist, { recursive: true, force: true });
+    await fs.rm(tmpShell, { recursive: true, force: true });
+  });
+
+  it('writes a hook .ts per capability into the shellGenDir', async () => {
+    await run({ distDir: tmpDist, shellGenDir: tmpShell });
+    const hook = await fs.readFile(path.join(tmpShell, 'session-get.ts'), 'utf-8');
+    expect(hook).toContain('export function useSessionGet(');
+    expect(hook).toContain('useReadHook');
+  });
+
+  it('writes an index.ts barrel re-exporting each hook', async () => {
+    const idx = await fs.readFile(path.join(tmpShell, 'index.ts'), 'utf-8');
+    expect(idx).toContain("export * from './session-get.js';");
   });
 });
 

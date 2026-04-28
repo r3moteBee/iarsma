@@ -42,6 +42,10 @@ export {
   typeNodeToInlineMarkdown,
 } from './generators/markdown.js';
 
+export { typeNodeToTypeScript } from './generators/ts-types.js';
+
+export { reactHookForCapability, pascalCase } from './generators/react-hook.js';
+
 // Pipeline
 export {
   generateArtifacts,
