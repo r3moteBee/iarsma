@@ -34,6 +34,11 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import {
+  AGENT_CONTEXT_URN,
+  agentContextCapability,
+  type AgentContextUrn,
+} from './agent-context.js';
 import { createDispatcher, type DispatcherDeps } from './invocation.js';
 import { makeScopeSet } from './scope-filter.js';
 import type { ToolRegistration } from './tool-loader.js';
@@ -47,6 +52,12 @@ export type IarsmaServerOptions = {
   readonly name?: string;
   /** Server version reported in MCP handshake. */
   readonly version?: string;
+  /**
+   * Discovery URN value (D-032 / Phase 0 work item 14). When provided, the
+   * server advertises `urn:iarsma:agent-context` alongside `tools` in its
+   * MCP capability map. Omit to skip advertisement (dev/test default).
+   */
+  readonly agentContext?: AgentContextUrn;
 };
 
 export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
@@ -58,14 +69,17 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
     ...(opts.handlers !== undefined ? { handlers: opts.handlers } : {}),
   });
 
+  const capabilities: Record<string, unknown> = { tools: {} };
+  if (opts.agentContext !== undefined) {
+    Object.assign(capabilities, agentContextCapability(opts.agentContext));
+  }
+
   const server = new Server(
     {
       name: opts.name ?? '@iarsma/mcp-server',
       version: opts.version ?? '0.0.0',
     },
-    {
-      capabilities: { tools: {} },
-    },
+    { capabilities },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -127,6 +141,9 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
 
   return server;
 }
+
+/** Re-export for callers wiring up server options. */
+export { AGENT_CONTEXT_URN };
 
 function stripIarsmaArgs(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

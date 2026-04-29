@@ -11,6 +11,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { loadAgentContext } from './agent-context.js';
 import { createIarsmaMcpServer } from './server.js';
 import { loadTools } from './tool-loader.js';
 
@@ -32,7 +33,24 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-console
   console.error(`[iarsma-mcp] loaded ${tools.size} tool(s): ${[...tools.keys()].join(', ')}`);
 
-  const server = createIarsmaMcpServer({ tools });
+  const agentContext = loadAgentContext(process.env);
+  if (agentContext === null) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[iarsma-mcp] IARSMA_WEBMAIL_MCP_URL unset — discovery URN ' +
+        'urn:iarsma:agent-context will NOT be advertised this run.',
+    );
+  } else {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[iarsma-mcp] advertising urn:iarsma:agent-context: ${JSON.stringify(agentContext)}`,
+    );
+  }
+
+  const server = createIarsmaMcpServer({
+    tools,
+    ...(agentContext !== null ? { agentContext } : {}),
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // eslint-disable-next-line no-console
@@ -51,7 +69,13 @@ if (isMain) {
   });
 }
 
-export { createIarsmaMcpServer } from './server.js';
+export { createIarsmaMcpServer, AGENT_CONTEXT_URN } from './server.js';
+export {
+  agentContextCapability,
+  loadAgentContext,
+  AgentContextError,
+} from './agent-context.js';
+export type { AgentContextUrn } from './agent-context.js';
 export { loadTools, ToolLoadError } from './tool-loader.js';
 export type { ToolRegistration } from './tool-loader.js';
 export { extractIdentity, AuthError, headersFromObject } from './auth.js';
