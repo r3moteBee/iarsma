@@ -9,14 +9,20 @@ authors.workspace = true
 rust-version.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+# `rlib` so `cargo test` can link the crate on the host target; `cdylib` so
+# `cargo component build` can produce the WASM component artifact.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-wit-bindgen.workspace = true
+wit-bindgen-rt.workspace = true
 
 
 [package.metadata.component]
 package = "iarsma:jmap-client"
+
+[package.metadata.component.target]
+path = "wit"
+world = "jmap-client"

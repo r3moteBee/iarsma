@@ -20,6 +20,7 @@
  */
 
 import { createContext, useContext } from 'react';
+import { fetchSession, type JmapClientOptions, type Session } from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
 
 export type InvocationOptions = {
@@ -109,18 +110,30 @@ export function mcpInvoker(opts: McpInvokerOptions): Invoker {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// JMAP invoker — placeholder; lands with Phase 0 work item 5
+// JMAP invoker — calls the JMAP server directly via the jmap-client component.
+// Used when the shell talks to JMAP without going through an MCP server.
 // ──────────────────────────────────────────────────────────────────────────
 
-export function jmapInvoker(): Invoker {
+export type JmapInvokerOptions = JmapClientOptions;
+
+export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
   return {
-    invoke() {
-      return Promise.reject(
-        makeToolError(
-          'not_implemented',
-          'jmapInvoker lands with Phase 0 work item 5 (JMAP client component).',
-        ),
-      );
+    async invoke<I, O>(
+      name: string,
+      _input: I,
+      _options: InvocationOptions = {},
+    ): Promise<O | DryRunPreview<O>> {
+      switch (name) {
+        case 'session.get': {
+          const session: Session = await fetchSession(opts);
+          return session as unknown as O;
+        }
+        default:
+          throw makeToolError(
+            'tool_not_found',
+            `jmapInvoker has no handler for '${name}'.`,
+          );
+      }
     },
   };
 }

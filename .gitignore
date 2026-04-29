@@ -29,6 +29,12 @@ src-tauri/target/
 /shell/src/generated/
 /mcp-server/src/generated/
 
+# WASM transpiled bindings (regenerated from components/* via `just wasm`).
+/shell/src/wasm/
+
+# cargo-component bindings (regenerated from each component's WIT on build).
+components/*/src/bindings.rs
+
 # Bundle output
 /iarsma.zip
 /webmail-*.zip
