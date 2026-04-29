@@ -30,6 +30,23 @@ export type {
 export { fetchSession, parseSession } from './jmap-client.js';
 export type { JmapClientOptions, Session } from './jmap-client.js';
 
+export {
+  createActionLog,
+  inMemoryActionLogStore,
+  webCryptoSha384,
+} from './action-log.js';
+export type {
+  ActionLog,
+  ActionLogOptions,
+  ActionLogStore,
+  AppendInput,
+  ChainVerificationError,
+  EntryInput,
+  Identity,
+  Sha384,
+  StoredEntry,
+} from './action-log.js';
+
 export { useReadHook } from './read-hook.js';
 export type { UseReadHookOptions, UseReadHookResult } from './read-hook.js';
 
