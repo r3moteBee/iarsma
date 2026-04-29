@@ -1,0 +1,47 @@
+{
+  "capabilities": {
+    "urn:ietf:params:jmap:core": {
+      "maxSizeUpload": 50000000,
+      "maxConcurrentUpload": 4,
+      "maxSizeRequest": 10000000,
+      "maxConcurrentRequests": 4,
+      "maxCallsInRequest": 16,
+      "maxObjectsInGet": 500,
+      "maxObjectsInSet": 500,
+      "collationAlgorithms": ["i;ascii-numeric", "i;ascii-casemap", "i;unicode-casemap"]
+    },
+    "urn:ietf:params:jmap:mail": {
+      "maxMailboxesPerEmail": null,
+      "maxMailboxDepth": null,
+      "maxSizeMailboxName": 490,
+      "maxSizeAttachmentsPerEmail": 50000000,
+      "emailQuerySortOptions": ["receivedAt", "from", "to", "subject", "size", "header.x-spam-score"],
+      "mayCreateTopLevelMailbox": true
+    },
+    "urn:ietf:params:jmap:submission": {
+      "maxDelayedSend": 86400,
+      "submissionExtensions": []
+    }
+  },
+  "accounts": {
+    "c": {
+      "name": "user@example.net",
+      "isPersonal": true,
+      "isReadOnly": false,
+      "accountCapabilities": {
+        "urn:ietf:params:jmap:mail": {},
+        "urn:ietf:params:jmap:submission": {}
+      }
+    }
+  },
+  "primaryAccounts": {
+    "urn:ietf:params:jmap:mail": "c",
+    "urn:ietf:params:jmap:submission": "c"
+  },
+  "username": "user@example.net",
+  "apiUrl": "https://sw-mail.example.net/jmap/",
+  "downloadUrl": "https://sw-mail.example.net/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+  "uploadUrl": "https://sw-mail.example.net/jmap/upload/{accountId}/",
+  "eventSourceUrl": "https://sw-mail.example.net/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}",
+  "state": "817d3028"
+}

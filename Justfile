@@ -53,10 +53,17 @@ dev-all:
 build:
     pnpm --filter '@iarsma/shell' build
 
-# Build all WASM components for the wasm32-wasip2 target.
+# Build the jmap-client WASM component and transpile to JS bindings via jco.
+# cargo-component emits to target/wasm32-wasip1/ — the outer artifact is a
+# Component Model component despite the wasip1 inner core module (D-038).
 wasm:
-    cargo build --workspace --target wasm32-wasip2 --release
-    @echo "✓ WASM components built. jco transpilation lands in F-3."
+    cargo component build -p jmap-client --release
+    rm -rf shell/src/wasm/jmap-client
+    mkdir -p shell/src/wasm/jmap-client
+    jco transpile target/wasm32-wasip1/release/jmap_client.wasm \
+        -o shell/src/wasm/jmap-client \
+        --name jmap_client
+    @echo "✓ jmap-client transpiled to shell/src/wasm/jmap-client/"
 
 # Produce iarsma.zip from the shell's dist/.
 package:
@@ -70,17 +77,28 @@ check:
     pnpm lint
     pnpm fmt:check
     cargo check --workspace
-    cargo fmt --all -- --check
+    just fmt-check
 
 # Run all tests.
 test:
     pnpm -r run test
     cargo test --workspace
 
-# Format everything.
+# Format everything (skips cargo-component-generated bindings.rs files).
 fmt:
     pnpm fmt
-    cargo fmt --all
+    just _rustfmt --edition 2021
+
+# Format-check Rust code (mirrors CI). Skips bindings.rs because it's
+# regenerated on every component build.
+fmt-check:
+    just _rustfmt --check --edition 2021
+
+# Internal helper: run rustfmt over every source file we own.
+_rustfmt *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git ls-files -z '*.rs' | xargs -0 rustfmt {{args}}
 
 # --- Codegen ------------------------------------------------------------
 
