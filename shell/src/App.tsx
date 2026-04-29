@@ -1,7 +1,7 @@
 // Phase 0 work items 6 + 7 — OAuth 2.1 + PKCE flow + login UI.
 
 import { Provider as JotaiProvider, useAtomValue, useSetAtom } from 'jotai';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { authStorage, authVersionAtom, tokensAtom, isSignedInAtom } from './auth-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
@@ -193,13 +193,29 @@ function CallbackView({
 }) {
   const [error, setError] = useState<string | null>(null);
   const bumpAuth = useSetAtom(authVersionAtom);
+  // The OAuth callback handler MUST run exactly once per mount: it
+  // consumes the one-shot PKCE entry from storage and exchanges the
+  // single-use authorization code. React StrictMode invokes effects
+  // twice in dev to surface side-effect bugs — without this gate the
+  // first invocation succeeds and clears storage, the second invocation
+  // sees no PKCE entry and reports `pkce_mismatch`, overwriting the
+  // success. The ref persists across the StrictMode rerun so only the
+  // first execution touches storage / network. (Production runs the
+  // effect once, so the gate is a no-op there.)
+  //
+  // Deliberately no `cancelled` flag: StrictMode's simulated cleanup
+  // would flip it true on the first run's behalf and abort the success
+  // path even though the call did succeed. The handler is one-shot and
+  // mutates global storage atoms, so completing it after a simulated
+  // unmount is the correct behavior.
+  const hasHandledRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    if (hasHandledRef.current) return;
+    hasHandledRef.current = true;
     (async () => {
       try {
         await handleCallback({ config }, url);
-        if (cancelled) return;
         // Strip the callback params from the URL so a refresh doesn't
         // replay the (now-spent) authorization code.
         if (typeof window !== 'undefined') {
@@ -210,13 +226,9 @@ function CallbackView({
         bumpAuth((v) => v + 1);
         onDone();
       } catch (e) {
-        if (cancelled) return;
         setError(e instanceof Error ? e.message : describe(e));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [config, url, onDone, bumpAuth]);
 
   return (

@@ -35,6 +35,11 @@ src-tauri/target/
 # cargo-component bindings (regenerated from each component's WIT on build).
 components/*/src/bindings.rs
 
+# Playwright E2E artifacts.
+/shell/test-results/
+/shell/playwright-report/
+/shell/playwright/.cache/
+
 # Bundle output
 /iarsma.zip
 /webmail-*.zip
