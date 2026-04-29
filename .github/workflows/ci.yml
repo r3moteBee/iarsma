@@ -144,7 +144,10 @@ jobs:
       - name: Format check
         run: |
           set -euo pipefail
-          git ls-files -z '*.rs' | xargs -0 rustfmt --check --edition 2021
+          echo "--- files git ls-files -- '*.rs' returns: ---"
+          git ls-files -- '*.rs'
+          echo "--- end ---"
+          git ls-files -z -- '*.rs' | xargs -0 rustfmt --check --edition 2021
 
       - name: Workspace check
         run: cargo check --workspace
