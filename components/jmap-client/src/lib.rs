@@ -12,9 +12,16 @@ mod parse;
 // suppresses dead-code warnings on non-wasm builds.
 pub use parse::{parse_session, ParseError, ParseErrorCode, SessionData};
 
+// `include!` instead of `mod bindings;` so rustfmt doesn't recurse into
+// the cargo-component-generated file. rustfmt follows `mod x;` even
+// under cfg-gating; `include!` is opaque to it. The wrapping module
+// preserves the `bindings::exports::iarsma::...` import path the
+// component shell below relies on.
 #[cfg(target_arch = "wasm32")]
 #[allow(warnings)]
-mod bindings;
+mod bindings {
+    include!("bindings.rs");
+}
 
 #[cfg(target_arch = "wasm32")]
 mod component {
