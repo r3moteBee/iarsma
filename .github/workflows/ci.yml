@@ -136,20 +136,15 @@ jobs:
             cargo component build -p "$comp_name" --release
           done
 
-      # Run rustfmt directly on the source files we own, excluding the
-      # `bindings.rs` files cargo-component auto-generates. (`cargo fmt`'s
-      # `ignore` config in rustfmt.toml is unstable / nightly-only as of
-      # rustfmt 1.x — we steer around it via an explicit file list.)
+      # Run rustfmt over the Rust files we actually own. `git ls-files`
+      # excludes the cargo-component-generated `bindings.rs` automatically
+      # because those are gitignored — no fragile `find -not` filter
+      # needed. (`cargo fmt`'s `ignore` config is nightly-only on stable
+      # rustfmt, which is why we drive `rustfmt` directly.)
       - name: Format check
         run: |
           set -euo pipefail
-          mapfile -t files < <(
-            find . -name '*.rs' \
-              -not -path './target/*' \
-              -not -path '*/node_modules/*' \
-              -not -name 'bindings.rs'
-          )
-          rustfmt --check --edition 2021 "${files[@]}"
+          git ls-files -z '*.rs' | xargs -0 rustfmt --check --edition 2021
 
       - name: Workspace check
         run: cargo check --workspace

@@ -98,13 +98,7 @@ fmt-check:
 _rustfmt *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    mapfile -t files < <(
-        find . -name '*.rs' \
-          -not -path './target/*' \
-          -not -path '*/node_modules/*' \
-          -not -name 'bindings.rs'
-    )
-    rustfmt {{args}} "${files[@]}"
+    git ls-files -z '*.rs' | xargs -0 rustfmt {{args}}
 
 # --- Codegen ------------------------------------------------------------
 
