@@ -8,6 +8,14 @@
 #
 # Concurrency control cancels in-progress runs when a new commit lands on
 # the same ref — useful for tight feedback on PRs.
+#
+# WASM components: `ts`, `rust`, and `shell-build` all build the WASM
+# component crates with cargo-component before their main steps. Both
+# `cargo fmt` (which parses module trees including cfg-gated `mod
+# bindings;` declarations) and the shell typecheck (which imports the
+# transpiled JS bindings) need the generated artifacts to exist. The
+# build step iterates every `components/*` crate so adding a new
+# component to the workspace doesn't require touching this file.
 
 name: ci
 
@@ -24,15 +32,18 @@ concurrency:
 env:
   PNPM_VERSION: '9.12.0'
   NODE_VERSION: '20'
+  CARGO_COMPONENT_VERSION: '0.21.1'
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────
-  # TypeScript: typecheck + tests across all workspaces
+  # TypeScript: typecheck + tests across all workspaces.
+  # Builds + transpiles WASM components first so the shell can resolve
+  # its `../wasm/<name>/<name>.js` imports.
   # ──────────────────────────────────────────────────────────────────────
   ts:
     name: TypeScript (typecheck + tests)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -48,8 +59,29 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+
+      - name: Cache cargo build state
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-${{ env.CARGO_COMPONENT_VERSION }}
+
+      - name: Install cargo-component
+        run: |
+          if ! command -v cargo-component >/dev/null; then
+            cargo install --locked --version ${{ env.CARGO_COMPONENT_VERSION }} cargo-component
+          fi
+          cargo component --version
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build + transpile WASM components
+        run: bash .github/scripts/build-wasm.sh
 
       - name: Run codegen (so generated artifacts exist for downstream typecheck)
         run: pnpm codegen
@@ -61,12 +93,14 @@ jobs:
         run: pnpm -r --workspace-concurrency=1 run test
 
   # ──────────────────────────────────────────────────────────────────────
-  # Rust: workspace fmt + check + test across the WASM component crates
+  # Rust: workspace fmt + check + test across the WASM component crates.
+  # The component build is a prereq for `cargo fmt --check`, which walks
+  # `mod bindings;` declarations even under cfg-gating.
   # ──────────────────────────────────────────────────────────────────────
   rust:
     name: Rust (fmt + check + test)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,30 +110,64 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Cache cargo target dir
-        uses: Swatinem/rust-cache@v2
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
 
+      - name: Cache cargo build state
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-${{ env.CARGO_COMPONENT_VERSION }}
+
+      - name: Install cargo-component
+        run: |
+          if ! command -v cargo-component >/dev/null; then
+            cargo install --locked --version ${{ env.CARGO_COMPONENT_VERSION }} cargo-component
+          fi
+          cargo component --version
+
+      # Generates each component's src/bindings.rs so the cfg-gated
+      # `mod bindings;` declarations resolve during fmt + check.
+      - name: Build WASM components (generates bindings.rs)
+        run: |
+          set -euo pipefail
+          for cargo_toml in components/*/Cargo.toml; do
+            comp_name=$(basename "$(dirname "$cargo_toml")")
+            echo "→ cargo component build -p $comp_name"
+            cargo component build -p "$comp_name" --release
+          done
+
+      # Run rustfmt directly on the source files we own, excluding the
+      # `bindings.rs` files cargo-component auto-generates. (`cargo fmt`'s
+      # `ignore` config in rustfmt.toml is unstable / nightly-only as of
+      # rustfmt 1.x — we steer around it via an explicit file list.)
       - name: Format check
-        run: cargo fmt --all -- --check
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(
+            find . -name '*.rs' \
+              -not -path './target/*' \
+              -not -path '*/node_modules/*' \
+              -not -name 'bindings.rs'
+          )
+          rustfmt --check --edition 2021 "${files[@]}"
 
       - name: Workspace check
         run: cargo check --workspace
-        # Note: deliberately not `--all-targets` because the component crates
-        # are `crate-type = ["cdylib"]` only, which means building test
-        # targets needs `rlib` added. We have no Rust tests yet; add them
-        # back when Phase 0 work item 5 (JMAP client) lands real Rust code.
+
+      - name: Workspace test (host target)
+        run: cargo test --workspace
 
   # ──────────────────────────────────────────────────────────────────────
-  # Shell bundle build smoke
-  # Verifies the Vite build succeeds end-to-end including the codegen-
-  # produced files. Depends on ts (there's no point bundling if typecheck
-  # is broken).
+  # Shell bundle build smoke.
+  # Verifies the Vite build succeeds end-to-end including codegen-produced
+  # files and transpiled WASM bindings. Depends on ts (no point bundling
+  # if typecheck is broken).
   # ──────────────────────────────────────────────────────────────────────
   shell-build:
     name: Shell bundle (Vite build smoke)
     runs-on: ubuntu-latest
     needs: ts
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -115,13 +183,40 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+
+      - name: Cache cargo build state
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-${{ env.CARGO_COMPONENT_VERSION }}
+
+      - name: Install cargo-component
+        run: |
+          if ! command -v cargo-component >/dev/null; then
+            cargo install --locked --version ${{ env.CARGO_COMPONENT_VERSION }} cargo-component
+          fi
+          cargo component --version
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build + transpile WASM components
+        run: bash .github/scripts/build-wasm.sh
 
       - name: Run codegen
         run: pnpm codegen
 
       - name: Build the shell bundle
+        env:
+          # Build-only smoke — values are placeholders, never reach a real
+          # auth server. Production deploys ship a `config.json` instead.
+          VITE_OIDC_ISSUER: 'https://example.invalid'
+          VITE_OAUTH_CLIENT_ID: 'webmail'
+          VITE_OAUTH_REDIRECT_URI: 'http://localhost:5173/auth/callback'
         run: pnpm --filter '@iarsma/shell' run build
 
       - name: Verify dist/ output

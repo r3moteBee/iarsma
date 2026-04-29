@@ -77,17 +77,34 @@ check:
     pnpm lint
     pnpm fmt:check
     cargo check --workspace
-    cargo fmt --all -- --check
+    just fmt-check
 
 # Run all tests.
 test:
     pnpm -r run test
     cargo test --workspace
 
-# Format everything.
+# Format everything (skips cargo-component-generated bindings.rs files).
 fmt:
     pnpm fmt
-    cargo fmt --all
+    just _rustfmt --edition 2021
+
+# Format-check Rust code (mirrors CI). Skips bindings.rs because it's
+# regenerated on every component build.
+fmt-check:
+    just _rustfmt --check --edition 2021
+
+# Internal helper: run rustfmt over every source file we own.
+_rustfmt *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mapfile -t files < <(
+        find . -name '*.rs' \
+          -not -path './target/*' \
+          -not -path '*/node_modules/*' \
+          -not -name 'bindings.rs'
+    )
+    rustfmt {{args}} "${files[@]}"
 
 # --- Codegen ------------------------------------------------------------
 

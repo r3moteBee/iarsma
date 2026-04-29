@@ -75,13 +75,14 @@ pub fn parse_session(json: &str) -> Result<SessionData, ParseError> {
     let state = require(raw.state, "state")?;
 
     let primary_accounts = require(raw.primary_accounts, "primaryAccounts")?;
-    let primary_account_id_mail = primary_accounts
-        .get(URN_MAIL)
-        .cloned()
-        .ok_or_else(|| ParseError {
-            code: ParseErrorCode::NoMailAccount,
-            message: format!("primaryAccounts is missing {URN_MAIL}"),
-        })?;
+    let primary_account_id_mail =
+        primary_accounts
+            .get(URN_MAIL)
+            .cloned()
+            .ok_or_else(|| ParseError {
+                code: ParseErrorCode::NoMailAccount,
+                message: format!("primaryAccounts is missing {URN_MAIL}"),
+            })?;
 
     Ok(SessionData {
         username,
