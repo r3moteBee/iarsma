@@ -19,7 +19,16 @@ export {
   jmapInvoker,
   mockInvoker,
 } from './invoker.js';
-export type { Invoker, InvocationOptions, McpInvokerOptions, MockInvokerHandler } from './invoker.js';
+export type {
+  Invoker,
+  InvocationOptions,
+  JmapInvokerOptions,
+  McpInvokerOptions,
+  MockInvokerHandler,
+} from './invoker.js';
+
+export { fetchSession, parseSession } from './jmap-client.js';
+export type { JmapClientOptions, Session } from './jmap-client.js';
 
 export { useReadHook } from './read-hook.js';
 export type { UseReadHookOptions, UseReadHookResult } from './read-hook.js';

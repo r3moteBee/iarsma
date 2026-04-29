@@ -1,12 +1,59 @@
-// WIT contract for jmap-client.
+// WIT contract for iarsma:jmap-client.
 //
-// Thin JMAP client wrapper. Wraps stalwartlabs/jmap-client (D-025). Reused by shell + MCP server.
+// Thin JMAP client wrapper. Per D-038 the component is parse-only — HTTP
+// transport lives in the host. The component's job is "JMAP wire bytes →
+// typed records" and "typed records → JMAP wire bytes". Host code does the
+// fetch and supplies the auth header.
 //
-// Real interface lands in F-3 / Phase 0 work item 4.
-// This placeholder lets the workspace resolve.
+// First capability: `session.get`. Mirrors tools/codegen/contracts/session.ts.
+// Field order and naming are aligned: WIT kebab-case ↔ TS camelCase via the
+// codegen / jco mapping (api-url ↔ apiUrl, etc.).
 
 package iarsma:jmap-client@0.0.0;
 
-world placeholder {
-    // export hello: func() -> string;
+interface session {
+    /// Narrow projection of a JMAP session resource (RFC 8620 §2). Matches
+    /// the Session schema in the capability contract; new fields are added
+    /// here only when a consumer needs them.
+    record session {
+        username: string,
+        api-url: string,
+        download-url: string,
+        upload-url: string,
+        event-source-url: string,
+        state: string,
+        /// `primaryAccounts["urn:ietf:params:jmap:mail"]` — extracted at
+        /// parse time so consumers don't have to re-walk the JMAP shape.
+        primary-account-id-mail: string,
+    }
+
+    /// Why a `parse-session` call rejected the input. The host should
+    /// surface `code` + `message` to the caller; `message` includes the
+    /// offending field path when applicable.
+    record parse-error {
+        code: parse-error-code,
+        message: string,
+    }
+
+    enum parse-error-code {
+        /// JSON was syntactically invalid.
+        malformed-json,
+        /// JSON parsed but a required field was absent.
+        missing-field,
+        /// JSON parsed but a field had the wrong shape (e.g., expected
+        /// string, found number).
+        wrong-type,
+        /// `primaryAccounts` was present but didn't include
+        /// `urn:ietf:params:jmap:mail`.
+        no-mail-account,
+    }
+
+    /// Parse a JMAP session resource (the response body from
+    /// `GET /.well-known/jmap`) into the narrowed `session` record. Pure;
+    /// no I/O.
+    parse-session: func(json: string) -> result<session, parse-error>;
+}
+
+world jmap-client {
+    export session;
 }
