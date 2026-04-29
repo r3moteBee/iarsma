@@ -229,22 +229,14 @@ mod tests {
 
     #[test]
     fn rejects_broken_link() {
-        let err = verify_links(&[
-            entry(0, "", "h0"),
-            entry(1, "WRONG", "h1"),
-        ])
-        .unwrap_err();
+        let err = verify_links(&[entry(0, "", "h0"), entry(1, "WRONG", "h1")]).unwrap_err();
         assert_eq!(err.seq, 1);
         assert!(err.message.contains("broken link"), "{}", err.message);
     }
 
     #[test]
     fn rejects_seq_skip() {
-        let err = verify_links(&[
-            entry(0, "", "h0"),
-            entry(2, "h0", "h2"),
-        ])
-        .unwrap_err();
+        let err = verify_links(&[entry(0, "", "h0"), entry(2, "h0", "h2")]).unwrap_err();
         assert_eq!(err.seq, 2);
         assert!(err.message.contains("out-of-order"), "{}", err.message);
     }

@@ -9,9 +9,14 @@ mod canonical;
 
 pub use canonical::{canonicalize, verify_links, ChainError, Entry, EntryData};
 
+// `include!` instead of `mod bindings;` so rustfmt doesn't recurse into
+// the cargo-component-generated file. See the matching comment in
+// jmap-client/src/lib.rs.
 #[cfg(target_arch = "wasm32")]
 #[allow(warnings)]
-mod bindings;
+mod bindings {
+    include!("bindings.rs");
+}
 
 #[cfg(target_arch = "wasm32")]
 mod component {
