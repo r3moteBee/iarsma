@@ -23,7 +23,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # Run on every PR — including those stacked on a feature branch
+    # rather than `main` — so we catch breakage before retargeting.
+    branches: ['**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
