@@ -1,0 +1,22 @@
+{
+  "$comment": "Drop this file (renamed to `config.json`) inside the iarsma/ directory after extraction, alongside index.html. Schema lives in shell/src/config.ts. Comments are not standard JSON; strip the `$comment` keys before deploying or use jsonc.",
+
+  "$comment_oidcIssuer": "Stalwart base URL — the OIDC issuer. The shell hits {oidcIssuer}/.well-known/openid-configuration at startup.",
+  "oidcIssuer": "https://mail.example.net",
+
+  "$comment_clientId": "OAuth client id registered in Stalwart admin (Authentication → OAuth → OAuth Clients). Public client, PKCE-only — no client_secret (D-039).",
+  "clientId": "webmail",
+
+  "$comment_redirectUri": "Must exactly match one of the redirect URIs registered on the OAuth client. For the same-origin Stalwart Web Application path, this is `<your-mail-server>/<prefix>/auth/callback`.",
+  "redirectUri": "https://mail.example.net/iarsma/auth/callback",
+
+  "$comment_jmapBaseUrl": "Optional — defaults to `oidcIssuer` because Stalwart serves OIDC and JMAP from the same host. Override if your deployment splits them.",
+  "jmapBaseUrl": "https://mail.example.net",
+
+  "$comment_agentContext": "Optional — `urn:iarsma:agent-context` URN value (D-032). Mirrors what the MCP server advertises at connect time. Omit if the operator hasn't stood up the MCP / OB1 surfaces yet.",
+  "agentContext": {
+    "webmailMcpUrl": "https://mail.example.net/iarsma/mcp",
+    "$comment_actionLogUrl": "Phase 0 leaves this unset — the action-log component doesn't yet expose a network surface.",
+    "$comment_memoryBackendUrl": "Set when an OB1 instance is running for this user (D-031); leave unset otherwise."
+  }
+}
