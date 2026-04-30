@@ -162,6 +162,16 @@ clean:
 
 # --- Stalwart / dev fixtures (Phase -1, P-1.4) --------------------------
 
+# Verify a deployed Iarsma bundle. Confirms the bundle is reachable,
+# version.json parses, config.json has the required fields, the OIDC
+# discovery endpoint sends CORS headers for the deploy origin, and
+# the JMAP endpoint resolves. Run after a tag-driven release lands
+# in Stalwart's Web Apps.
+#
+# Usage: `just verify-deployment https://<your-mail-server>/iarsma`
+verify-deployment url:
+    bash .github/scripts/verify-deployment.sh {{url}}
+
 # Verify the configured Stalwart's JMAP capabilities (uses .env).
 verify-jmap:
     @if [ -z "${JMAP_HOST:-}" ] || [ -z "${JMAP_USER:-}" ]; then \

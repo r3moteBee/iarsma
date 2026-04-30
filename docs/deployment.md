@@ -51,23 +51,67 @@ Simplest path. Stalwart serves the bundle directly at a URL prefix on the same o
 
 ### Prerequisites
 - A running Stalwart Mail Server with admin access.
-- A published `iarsma.zip` accessible over HTTPS (typically GitHub Releases) or sitting on the Stalwart host's filesystem.
-- An OAuth client registered for the webmail (see "OAuth Client Registration" below).
+- A published `iarsma.zip` accessible over HTTPS (a GitHub Release tag is the canonical source) or sitting on the Stalwart host's filesystem.
+- An OAuth client registered for the webmail (see [`docs/stalwart-setup.md`](stalwart-setup.md) for the P-1.1 registration flow).
 
-### Steps
-1. **Sign in to the Stalwart admin** at `https://<your-mail-server>/admin/`.
-2. **Settings → Web Applications → Create application.**
-3. Fill in:
-   - **Resource URL:** `https://github.com/<your-fork>/iarsma/releases/latest/download/iarsma.zip` (or `file:///path/to/iarsma.zip` for air-gapped installs)
-   - **Enabled:** ON
-   - **Description:** `Iarsma`
-   - **URL Prefix:** `/iarsma` (or `/webmail`, or any path you prefer — the bundle works at any prefix)
-   - **Update Frequency:** `30 d` for production, `1 d` for active dev
-4. **Save.** Stalwart fetches the zip, caches it, and serves it at the chosen prefix.
-5. **Verify** by navigating to `https://<your-mail-server>/iarsma/`. You should see Iarsma's sign-in screen.
+### Reference-deployment runbook (Phase 0 work item 13b)
+
+This is the precise sequence that closes Phase 0's definition of done — "a user navigates to `https://<your-mail-server>/iarsma/`, clicks Sign in, completes OAuth, and sees their email displayed." Adapt the prefix to whatever you prefer; `iarsma` is the convention used throughout this guide.
+
+#### Step 1 — Cut a release
+On a clean main:
+```bash
+git tag v0.1.0    # or whatever semver applies
+git push --tags
+```
+The `release` workflow (`.github/workflows/release.yml`) builds + publishes `iarsma-0.1.0.zip` and `iarsma-0.1.0.zip.sha256` to a new GitHub Release. Wait for the green check.
+
+#### Step 2 — Register the production redirect URI on the OAuth client
+In Stalwart admin → **Authentication → OAuth → OAuth Clients → webmail**, add `https://<your-mail-server>/iarsma/auth/callback` to the **Redirect URIs** list. Keep the existing dev URIs (`http://localhost:5173/auth/callback`, `http://localhost:1420/auth/callback`). Save.
+
+#### Step 3 — Update the CORS allowed-origin
+In Stalwart admin → **HTTP → General → Custom Response Headers** (the location where the existing dev origin lives), add `https://<your-mail-server>` to `Access-Control-Allow-Origin`. (For same-origin deploys, the browser doesn't actually require CORS — but JMAP-from-XHR still does, and the value persists across the dev / prod transitions.)
+
+#### Step 4 — Create the Web Application entry
+In Stalwart admin → **Network → Services → Web Applications → Create application**:
+
+| Field | Value |
+|---|---|
+| **Resource URL** | `https://github.com/<your-org>/iarsma/releases/download/v0.1.0/iarsma-0.1.0.zip` (pin the tag; don't use `latest` for production) |
+| **Enabled** | ON |
+| **Description** | `Iarsma` |
+| **URL Prefix** | `/iarsma` |
+| **Update Frequency** | `30 d` for production, `1 d` for active dev |
+
+Save. Stalwart fetches the zip and serves it at the chosen prefix.
+
+#### Step 5 — Drop `config.json` next to the bundle
+The bundle reads `/<prefix>/config.json` at startup. There is no default — Iarsma refuses to load without one. Use [`deployment/iarsma-web-app/config.json.example`](../deployment/iarsma-web-app/config.json.example) as a template:
+
+```json
+{
+  "oidcIssuer": "https://<your-mail-server>",
+  "clientId": "webmail",
+  "redirectUri": "https://<your-mail-server>/iarsma/auth/callback",
+  "agentContext": {
+    "webmailMcpUrl": "https://<your-mail-server>/iarsma/mcp"
+  }
+}
+```
+
+How to actually deliver it depends on your Stalwart version's Web Apps fetcher: some versions fetch the zip and serve it as-is (you'd need to bake `config.json` into the zip before publishing); others let the operator drop additional files into a per-app overrides directory. Check the Stalwart admin UI — there's usually a "files" or "overrides" pane on the Web Application entry.
+
+#### Step 6 — Smoke check
+```bash
+just verify-deployment https://<your-mail-server>/iarsma
+```
+That's [`./.github/scripts/verify-deployment.sh`](../.github/scripts/verify-deployment.sh) — confirms the bundle is reachable, `version.json` parses, `config.json` has the required fields, the OIDC discovery doc is reachable + sends CORS headers for the deploy origin, and the JMAP endpoint resolves.
+
+#### Step 7 — Manual sign-in
+Open `https://<your-mail-server>/iarsma/` in a browser, click **Sign in with Stalwart**, complete the OAuth round-trip, and confirm "Signed in as &lt;you@example.net&gt;" appears.
 
 ### Updating
-Stalwart re-fetches the zip at the configured frequency. To force an immediate update, edit the Web Application entry (no field needs to change) and save — that triggers a refetch.
+Stalwart re-fetches the zip at the configured frequency. To pin a new release, edit the Web Application entry, change the Resource URL to the new tag's asset, and save — that triggers a refetch. Re-run `just verify-deployment` afterward to catch any version skew.
 
 ### Pros and trade-offs
 - Single VM, same-origin, no CORS, no Caddy.
