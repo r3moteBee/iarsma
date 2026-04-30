@@ -9,7 +9,9 @@ authors.workspace = true
 rust-version.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+# `rlib` so `cargo test` can link the crate on the host target; `cdylib`
+# so `cargo component build` can produce the WASM component artifact.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 serde.workspace = true
@@ -20,3 +22,7 @@ wit-bindgen-rt.workspace = true
 
 [package.metadata.component]
 package = "iarsma:memory-backend"
+
+[package.metadata.component.target]
+path = "wit"
+world = "memory-backend"
