@@ -77,7 +77,7 @@ tauri-build:
 wasm:
     #!/usr/bin/env bash
     set -euo pipefail
-    COMPONENTS=(jmap-client action-log)
+    COMPONENTS=(jmap-client action-log memory-backend)
     for c in "${COMPONENTS[@]}"; do
         cargo component build -p "$c" --release
         out="shell/src/wasm/$c"
@@ -90,9 +90,32 @@ wasm:
         echo "✓ $c transpiled to $out/"
     done
 
-# Produce iarsma.zip from the shell's dist/.
-package:
-    @echo "Packaging iarsma.zip — wired up in F-2 / Phase 0 work item 12."
+# Produce iarsma.zip from the shell's dist/. Idempotent: rebuilds wasm
+# bindings, codegen artifacts, and the Vite bundle from scratch so the
+# zip is reproducible from any commit (D-028 — bundle versioning matches
+# the git tag). The zip is laid out so a deployer drops `config.json`
+# next to the bundle root after extraction. See docs/deployment.md.
+package version="0.0.0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just codegen
+    just wasm
+    pnpm --filter '@iarsma/shell' run build
+    out="iarsma-{{version}}.zip"
+    rm -f "$out" iarsma.zip
+    # Stage the bundle in a clean directory so the zip's top level is
+    # a single `iarsma/` folder — predictable for operators using
+    # `unzip` and for Stalwart's Web Apps fetcher.
+    staging="$(mktemp -d)"
+    trap 'rm -rf "$staging"' EXIT
+    cp -r shell/dist "$staging/iarsma"
+    # Stamp a version marker so a deployed bundle can self-identify.
+    echo "{\"version\":\"{{version}}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+        > "$staging/iarsma/version.json"
+    (cd "$staging" && zip -qr "$OLDPWD/$out" iarsma)
+    # Convenience symlink for unversioned consumers (`just dev` etc.).
+    ln -sf "$out" iarsma.zip
+    echo "✓ packaged $out ($(du -h "$out" | cut -f1))"
 
 # --- Quality checks -----------------------------------------------------
 
