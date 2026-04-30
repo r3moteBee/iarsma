@@ -2,18 +2,22 @@
  * Shell runtime configuration.
  *
  * Resolution order (first hit wins):
- *   1. `/config.json` fetched at startup — the production path. Bundle ships
- *      with no defaults; the deployer drops a `config.json` next to the
- *      bundle. Schema validated with Zod (CT-6 schema versioning).
+ *   1. `/config.json` fetched at startup — the explicit-override path. The
+ *      deployer drops a `config.json` next to the bundle for cross-origin
+ *      deploys (Path B / C / E in docs/deployment.md). Schema validated
+ *      with Zod (CT-6 schema versioning).
  *   2. Vite environment variables (`VITE_*`) — the dev path. `vite.config.ts`
  *      reads `.env.local` etc. The shell never sees a real env, only the
  *      build-time replacement.
- *   3. Hard error — production must ship a `config.json`; dev must set
- *      env vars. There are no fallback URLs, by design.
- *
- * F-4 will formalize the `config.json` schema and same-origin defaults
- * across the whole bundle (JMAP endpoint, action-log URL, memory backend,
- * etc.). This module covers only the OIDC bits Phase 0 needs today.
+ *   3. **Same-origin defaults** — the canonical Stalwart Web Apps deploy
+ *      path. When the bundle is served at `https://<your-mail-server>/<prefix>/`
+ *      and Stalwart is the same host, the shell derives `oidcIssuer` from
+ *      `window.location.origin`, `clientId` from `VITE_DEFAULT_CLIENT_ID`
+ *      (built-in default `webmail`), and `redirectUri` from the deploy
+ *      origin + `<prefix>/auth/callback`. This is the design contract
+ *      from docs/deployment.md ("with same-origin defaults").
+ *   4. Hard error — only when none of the above produce a usable config
+ *      (e.g., SSR with no window, or a misconfigured non-browser host).
  */
 
 import { z } from 'zod';
@@ -65,7 +69,7 @@ let cached: ShellConfig | null = null;
 
 /**
  * Load and cache the shell's runtime config. Idempotent — first call
- * fetches; subsequent calls return the cached value.
+ * resolves; subsequent calls return the cached value.
  */
 export async function loadConfig(): Promise<ShellConfig> {
   if (cached !== null) return cached;
@@ -79,10 +83,16 @@ export async function loadConfig(): Promise<ShellConfig> {
     cached = fromEnv;
     return cached;
   }
+  const fromOrigin = tryLoadFromSameOrigin();
+  if (fromOrigin !== null) {
+    cached = fromOrigin;
+    return cached;
+  }
   throw new Error(
-    'Iarsma: no runtime config found. Provide /config.json (deployed) ' +
-      'or set VITE_OIDC_ISSUER + VITE_OAUTH_CLIENT_ID + VITE_OAUTH_REDIRECT_URI ' +
-      '(dev). See docs/stalwart-setup.md.',
+    'Iarsma: no runtime config found. Provide /config.json or set ' +
+      'VITE_OIDC_ISSUER + VITE_OAUTH_CLIENT_ID + VITE_OAUTH_REDIRECT_URI, ' +
+      'or deploy at the same origin as your JMAP server so same-origin ' +
+      'defaults apply. See docs/stalwart-setup.md and docs/deployment.md.',
   );
 }
 
@@ -103,6 +113,41 @@ async function tryLoadConfigJson(): Promise<ShellConfig | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Derive a config from `window.location` + Vite's `import.meta.env.BASE_URL`
+ * (the deploy URL prefix). Works when the shell is served from the same
+ * origin as Stalwart — the canonical Stalwart Web Apps deployment shape
+ * (Path A in docs/deployment.md). Returns null in non-browser contexts.
+ *
+ * Defaults derived:
+ *   - `oidcIssuer`     ← `window.location.origin`
+ *   - `clientId`       ← built-in default `webmail` (override via the
+ *                        VITE_DEFAULT_CLIENT_ID env var at build time)
+ *   - `redirectUri`    ← `${origin}${BASE_URL}auth/callback`
+ *   - `jmapBaseUrl`    ← left optional; consumers default to `oidcIssuer`
+ *   - `agentContext`   ← left optional; the operator opts in via
+ *                        config.json or env if they have an MCP endpoint
+ *
+ * Vite's `BASE_URL` is the build-time `base` config option (set via
+ * `VITE_BASE_PATH` in `vite.config.ts`). It always starts and ends with
+ * `/`, so the redirectUri composition is safe.
+ */
+function tryLoadFromSameOrigin(): ShellConfig | null {
+  if (typeof window === 'undefined' || typeof window.location !== 'object') {
+    return null;
+  }
+  const origin = window.location.origin;
+  if (origin === '' || origin === 'null') return null;
+  const baseUrl = import.meta.env.BASE_URL ?? '/';
+  const clientId = import.meta.env.VITE_DEFAULT_CLIENT_ID ?? 'webmail';
+  const redirectUri = `${origin}${baseUrl}auth/callback`;
+  return ConfigSchema.parse({
+    oidcIssuer: origin,
+    clientId,
+    redirectUri,
+  });
 }
 
 function tryLoadFromViteEnv(): ShellConfig | null {
