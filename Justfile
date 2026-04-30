@@ -34,6 +34,15 @@ wasm-target:
 dev:
     pnpm --filter '@iarsma/shell' dev
 
+# Run the Tauri 2 native shell in dev mode. Spawns Vite on port 1420
+# (per `tauri.conf.json`'s `beforeDevCommand`) and opens a native
+# window pointed at it. Requires the Tauri 2 system deps —
+# https://v2.tauri.app/start/prerequisites/ has the per-OS package
+# list (Debian/Ubuntu: libwebkit2gtk-4.1-dev, libgtk-3-dev,
+# libayatana-appindicator3-dev, librsvg2-dev, xdotool, patchelf).
+tauri-dev:
+    cd shell && pnpm exec tauri dev
+
 # Run the MCP server in dev mode.
 dev-mcp:
     pnpm --filter '@iarsma/mcp-server' dev
@@ -52,6 +61,13 @@ dev-all:
 # Build the production webmail bundle (iarsma.zip target lives here).
 build:
     pnpm --filter '@iarsma/shell' build
+
+# Build the Tauri 2 native bundle for the host platform. Produces
+# `.AppImage` / `.deb` (Linux), `.dmg` (macOS), `.msi` (Windows). Code
+# signing is configured per platform when those builds light up in
+# Phase 6.
+tauri-build:
+    cd shell && pnpm exec tauri build
 
 # Build all real WASM components and transpile to JS bindings via jco.
 # cargo-component emits to target/wasm32-wasip1/ — the outer artifacts are

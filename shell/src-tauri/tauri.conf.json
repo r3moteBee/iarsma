@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Iarsma",
+  "version": "0.0.0",
+  "identifier": "com.r3motely.iarsma",
+  "build": {
+    "beforeDevCommand": "pnpm --filter '@iarsma/shell' dev --port 1420 --strictPort",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm --filter '@iarsma/shell' build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Iarsma",
+        "width": 1100,
+        "height": 800,
+        "minWidth": 600,
+        "minHeight": 400
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "JMAP webmail + agent collaboration substrate"
+  }
+}

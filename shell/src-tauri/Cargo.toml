@@ -1,0 +1,33 @@
+# Iarsma — Tauri 2 desktop wrap (Phase 0 work item 11).
+#
+# Standalone workspace so the Tauri runtime's deps don't compete with the
+# WASM-component crates' deps in the root workspace. cargo-component
+# resolves a different cargo universe than tauri does — keeping them
+# separate keeps both fast.
+[workspace]
+
+[package]
+name = "iarsma"
+version = "0.0.0"
+description = "Iarsma — JMAP webmail + agent collaboration substrate, native shell"
+authors = ["Brent Ellis <brent@r3motely.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/r3moteBee/iarsma"
+edition = "2021"
+rust-version = "1.78"
+
+[lib]
+# `tauri build` consumes this crate as a library so the `mobile_entry_point`
+# macros and the desktop entry point can share an implementation; the
+# `staticlib` and `cdylib` crate types are required for iOS / Android
+# builds when those land in Phase 6.
+name = "iarsma_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
