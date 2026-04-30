@@ -42,6 +42,7 @@ components/*/src/bindings.rs
 
 # Bundle output
 /iarsma.zip
+/iarsma-*.zip
 /webmail-*.zip
 
 # Editor / OS
