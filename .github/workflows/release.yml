@@ -96,11 +96,14 @@ jobs:
           set -euo pipefail
           version="${{ steps.ver.outputs.version }}"
           out="iarsma-${version}.zip"
-          staging="$(mktemp -d)"
-          cp -r shell/dist "$staging/iarsma"
+          # Stamp version metadata into dist/ before zipping so the
+          # deployed bundle self-identifies via /version.json.
           echo "{\"version\":\"${version}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
-            > "$staging/iarsma/version.json"
-          (cd "$staging" && zip -qr "$GITHUB_WORKSPACE/$out" iarsma)
+            > shell/dist/version.json
+          # Zip with files at root — Stalwart Web Apps serves the zip's
+          # root at the configured URL prefix, so any wrapper directory
+          # would land URLs at `<prefix>/<wrapper>/...` (wrong).
+          (cd shell/dist && zip -qr "$GITHUB_WORKSPACE/$out" .)
           ls -la "$out"
           du -h "$out"
           echo "asset=$out" >> "$GITHUB_OUTPUT"

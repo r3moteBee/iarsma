@@ -15,7 +15,7 @@ Two paths — the GitHub Release path is canonical for production; the local pat
 
 ### Tag-driven GitHub Release (canonical)
 1. From `main`, push a semver tag: `git tag v0.1.0 && git push --tags`.
-2. The `release` workflow (`.github/workflows/release.yml`) builds the bundle reproducibly: codegen → cargo-component → jco transpile → Vite build → zip with a versioned `iarsma/version.json` stamped inside.
+2. The `release` workflow (`.github/workflows/release.yml`) builds the bundle reproducibly: codegen → cargo-component → jco transpile → Vite build → zip with a versioned `version.json` stamped at the bundle root.
 3. The release publishes `iarsma-<version>.zip` and an `iarsma-<version>.zip.sha256` companion to the GitHub Releases page.
 4. Operators consume the asset URL — the `latest` channel resolves to whatever tag was last pushed.
 
@@ -27,21 +27,22 @@ just package 0.1.0
 Useful for testing a build before tagging, or for air-gapped operators who pull the tagged commit and build their own zip.
 
 ### Bundle layout
-After unzip, the artifact extracts to a single top-level `iarsma/` directory:
+The zip's files live **at the root** — no wrapper directory. Stalwart's Web Apps fetcher serves the zip's root at the configured URL prefix; nesting under a folder would land URLs at `<prefix>/<folder>/...` (wrong).
 
 ```
-iarsma/
-├─ index.html
-├─ version.json          # { "version": "...", "builtAt": "..." }
-└─ assets/
-   ├─ index-<hash>.js    # Vite bundle, gzip-friendly
-   ├─ index-<hash>.css
-   ├─ jmap_client.core-<hash>.wasm
-   ├─ action_log.core-<hash>.wasm
-   └─ ...
+index.html
+version.json            # { "version": "...", "builtAt": "..." }
+assets/
+├─ index-<hash>.js      # Vite bundle, gzip-friendly
+├─ index-<hash>.css
+├─ jmap_client.core-<hash>.wasm
+├─ action_log.core-<hash>.wasm
+└─ ...
 ```
 
-The deployer drops their `config.json` next to `index.html` (i.e. inside the `iarsma/` directory after extraction). Schema lives in `shell/src/config.ts`.
+The deployer drops their `config.json` alongside `index.html` (or bakes it into the zip before distribution). Schema lives in `shell/src/config.ts`.
+
+For non-Stalwart consumers using bare `unzip`, the equivalent of "extract into a named directory" is `unzip -d iarsma/ iarsma.zip`.
 
 ---
 

@@ -93,8 +93,17 @@ wasm:
 # Produce iarsma.zip from the shell's dist/. Idempotent: rebuilds wasm
 # bindings, codegen artifacts, and the Vite bundle from scratch so the
 # zip is reproducible from any commit (D-028 — bundle versioning matches
-# the git tag). The zip is laid out so a deployer drops `config.json`
-# next to the bundle root after extraction. See docs/deployment.md.
+# the git tag).
+#
+# Bundle layout: files live at the zip root (index.html, version.json,
+# assets/...). Stalwart's Web Apps fetcher serves the zip's root at the
+# configured URL prefix; nesting under a folder makes URLs land at
+# `<prefix>/<folder>/...` which is wrong. Operators using bare `unzip`
+# get a flat dump into the current dir — for that case, `unzip -d
+# iarsma/ iarsma.zip` is the equivalent of the old layout.
+#
+# `config.json` is dropped next to `index.html` after extraction (or
+# baked into the zip, depending on operator preference).
 package version="0.0.0":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -103,16 +112,12 @@ package version="0.0.0":
     pnpm --filter '@iarsma/shell' run build
     out="iarsma-{{version}}.zip"
     rm -f "$out" iarsma.zip
-    # Stage the bundle in a clean directory so the zip's top level is
-    # a single `iarsma/` folder — predictable for operators using
-    # `unzip` and for Stalwart's Web Apps fetcher.
-    staging="$(mktemp -d)"
-    trap 'rm -rf "$staging"' EXIT
-    cp -r shell/dist "$staging/iarsma"
-    # Stamp a version marker so a deployed bundle can self-identify.
+    # Stamp a version marker into dist/ so the deployed bundle can
+    # self-identify. Idempotent — overwrites any prior stamp.
     echo "{\"version\":\"{{version}}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
-        > "$staging/iarsma/version.json"
-    (cd "$staging" && zip -qr "$OLDPWD/$out" iarsma)
+        > shell/dist/version.json
+    # Zip with files at the root level (no wrapper directory).
+    (cd shell/dist && zip -qr "$OLDPWD/$out" .)
     # Convenience symlink for unversioned consumers (`just dev` etc.).
     ln -sf "$out" iarsma.zip
     echo "✓ packaged $out ($(du -h "$out" | cut -f1))"
