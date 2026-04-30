@@ -2,7 +2,14 @@
 
 import { Provider as JotaiProvider, useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { authStorage, authVersionAtom, tokensAtom, isSignedInAtom } from './auth-state.js';
+import {
+  actionLog,
+  agentContextAtom,
+  authStorage,
+  authVersionAtom,
+  isSignedInAtom,
+  tokensAtom,
+} from './auth-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { IarsmaProvider, jmapInvoker, type Invoker } from './runtime/index.js';
@@ -84,6 +91,7 @@ export function App() {
 }
 
 function ConnectedApp({ config }: { readonly config: ShellConfig }) {
+  const setAgentContext = useSetAtom(agentContextAtom);
   const invoker = useMemo<Invoker>(
     () =>
       jmapInvoker({
@@ -92,6 +100,11 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
       }),
     [config],
   );
+  // Populate the agent-context atom from config so capabilities and
+  // agent-facing surfaces can read it without re-walking the config.
+  useEffect(() => {
+    setAgentContext(config.agentContext ?? null);
+  }, [config, setAgentContext]);
 
   return (
     <IarsmaProvider value={invoker}>
@@ -215,7 +228,30 @@ function CallbackView({
     hasHandledRef.current = true;
     (async () => {
       try {
-        await handleCallback({ config }, url);
+        const tokens = await handleCallback({ config }, url);
+        // Record the sign-in to the tamper-evident action log (item 8).
+        // Identity is the verified id_token subject when available, then
+        // email, then a "unknown" sentinel — we never want this append to
+        // fail loud and break the otherwise-successful sign-in.
+        if (tokens !== null) {
+          const id = tokens.subject ?? tokens.email ?? 'unknown';
+          try {
+            await actionLog.append({
+              identity: { id },
+              action: 'auth.signin',
+              params: {
+                ...(tokens.email !== undefined ? { email: tokens.email } : {}),
+                ...(tokens.subject !== undefined ? { sub: tokens.subject } : {}),
+              },
+            });
+          } catch (e) {
+            // Best-effort — log to console, don't block sign-in. Real
+            // failure handling lands when the action-log gains an
+            // alerting/escalation surface (Phase 1+).
+            // eslint-disable-next-line no-console
+            console.warn('[iarsma] failed to append sign-in event to action log:', e);
+          }
+        }
         // Strip the callback params from the URL so a refresh doesn't
         // replay the (now-spent) authorization code.
         if (typeof window !== 'undefined') {

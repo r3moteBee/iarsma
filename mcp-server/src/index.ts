@@ -12,6 +12,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
+import {
+  createSessionGetHandler,
+  loadSessionGetDeps,
+} from './handlers/session-get.js';
+import type { ToolHandler } from './invocation.js';
 import { createIarsmaMcpServer } from './server.js';
 import { loadTools } from './tool-loader.js';
 
@@ -47,8 +52,28 @@ async function main(): Promise<void> {
     );
   }
 
+  // Wire real handlers for Phase 0. Currently only `session.get`. As more
+  // capabilities land, each gets its own factory in `handlers/` and a
+  // line below mapping the tool name to the resolved handler.
+  const handlers = new Map<string, ToolHandler>();
+  const sessionGetDeps = loadSessionGetDeps(process.env);
+  if (sessionGetDeps === null) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[iarsma-mcp] IARSMA_JMAP_BASE_URL or IARSMA_AGENT_TOKEN unset — ' +
+        '`session.get` will surface as not_implemented this run.',
+    );
+  } else {
+    handlers.set('session.get', createSessionGetHandler(sessionGetDeps));
+    // eslint-disable-next-line no-console
+    console.error(
+      `[iarsma-mcp] session.get wired against ${sessionGetDeps.jmapBaseUrl}`,
+    );
+  }
+
   const server = createIarsmaMcpServer({
     tools,
+    handlers,
     ...(agentContext !== null ? { agentContext } : {}),
   });
   const transport = new StdioServerTransport();
@@ -76,6 +101,12 @@ export {
   AgentContextError,
 } from './agent-context.js';
 export type { AgentContextUrn } from './agent-context.js';
+export {
+  createSessionGetHandler,
+  loadSessionGetDeps,
+  SessionGetConfigError,
+} from './handlers/session-get.js';
+export type { Session, SessionGetDeps } from './handlers/session-get.js';
 export { loadTools, ToolLoadError } from './tool-loader.js';
 export type { ToolRegistration } from './tool-loader.js';
 export { extractIdentity, AuthError, headersFromObject } from './auth.js';

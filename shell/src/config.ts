@@ -18,6 +18,30 @@
 
 import { z } from 'zod';
 
+/**
+ * `urn:iarsma:agent-context` value mirror (D-032). The MCP server side
+ * advertises this URN at connect time (Phase 0 work item 14); the shell
+ * exposes the same bundle so capabilities running in-shell can hand it
+ * to downstream consumers without each computing it from scratch. JMAP-
+ * session-side injection — splicing this value into the actual JMAP
+ * session resource the shell receives from Stalwart — is a Phase 1
+ * deliverable that depends on the shell becoming an authoritative
+ * session-resource issuer (today Stalwart serves it directly and we
+ * can't modify its response).
+ */
+const AgentContextSchema = z.object({
+  /** MCP endpoint that exposes the webmail's tools. Always populated. */
+  webmailMcpUrl: z.string().url(),
+  /** Action log endpoint. Optional in Phase 0 — the action-log component
+   *  doesn't yet expose a network surface. */
+  actionLogUrl: z.string().url().optional(),
+  /** Memory backend MCP endpoint (e.g., an OB1 instance, per D-031).
+   *  Set when configured. */
+  memoryBackendUrl: z.string().url().optional(),
+});
+
+export type AgentContext = z.infer<typeof AgentContextSchema>;
+
 const ConfigSchema = z.object({
   /** Stalwart base URL — the OIDC issuer. */
   oidcIssuer: z.string().url(),
@@ -29,6 +53,10 @@ const ConfigSchema = z.object({
   /** Optional: explicit JMAP base URL. Defaults to `oidcIssuer` because
    *  Stalwart serves JMAP and OIDC from the same host. */
   jmapBaseUrl: z.string().url().optional(),
+  /** Optional: `urn:iarsma:agent-context` URN value. When set, must
+   *  agree with the MCP server's `IARSMA_*_URL` env vars or agents will
+   *  see divergent endpoints across the two surfaces. */
+  agentContext: AgentContextSchema.optional(),
 });
 
 export type ShellConfig = z.infer<typeof ConfigSchema>;
@@ -93,10 +121,22 @@ function tryLoadFromViteEnv(): ShellConfig | null {
     return null;
   }
   const jmapBaseUrl = env.VITE_JMAP_BASE_URL;
+  const webmailMcpUrl = env.VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL;
+  const actionLogUrl = env.VITE_AGENT_CONTEXT_ACTION_LOG_URL;
+  const memoryBackendUrl = env.VITE_AGENT_CONTEXT_MEMORY_BACKEND_URL;
+  const agentContext: AgentContext | undefined =
+    webmailMcpUrl !== undefined
+      ? {
+          webmailMcpUrl,
+          ...(actionLogUrl !== undefined ? { actionLogUrl } : {}),
+          ...(memoryBackendUrl !== undefined ? { memoryBackendUrl } : {}),
+        }
+      : undefined;
   return ConfigSchema.parse({
     oidcIssuer: issuer,
     clientId,
     redirectUri,
     ...(jmapBaseUrl !== undefined ? { jmapBaseUrl } : {}),
+    ...(agentContext !== undefined ? { agentContext } : {}),
   });
 }
