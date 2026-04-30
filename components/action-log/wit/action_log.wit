@@ -1,12 +1,66 @@
-// WIT contract for action-log.
+// WIT contract for iarsma:action-log.
 //
-// Tamper-evident hash-chained action log. SHA-384 (D-027). OpenInference-compatible entries.
-//
-// Real interface lands in F-3 / Phase 0 work item 4.
-// This placeholder lets the workspace resolve.
+// Tamper-evident, hash-chained action log. Per D-027 the chain hash is
+// SHA-384, and per D-038 the component is pure: canonicalization and
+// link-integrity verification live here; SHA-384 computation and
+// persistence live in the host (Web Crypto / Node Web Crypto, IndexedDB
+// or equivalent). Hashes are exchanged as lower-case hex strings —
+// transport-friendly and self-describing.
 
 package iarsma:action-log@0.0.0;
 
-world placeholder {
-    // export hello: func() -> string;
+interface chain {
+    /// Caller-provided fields for a single action-log entry. The
+    /// component never invents these; the host knows the identity and
+    /// timestamp.
+    record entry-data {
+        /// Milliseconds since the Unix epoch.
+        timestamp-ms: u64,
+        /// Stable identifier of the agent or user who took the action.
+        identity: string,
+        /// Tool / capability name (e.g. `session.get`).
+        action: string,
+        /// Tool params, already serialized to JSON by the caller. The
+        /// component doesn't need to inspect them — only fold them into
+        /// the canonical bytes.
+        params-json: string,
+    }
+
+    /// A finalized entry: the input + its sequence number + the link to
+    /// the previous entry + the SHA-384 hash the host computed over the
+    /// canonical bytes.
+    record entry {
+        seq: u64,
+        data: entry-data,
+        /// Hex-encoded SHA-384 of the previous entry. Empty string at
+        /// genesis (`seq == 0`).
+        prev-hash-hex: string,
+        /// Hex-encoded SHA-384 of this entry's canonical bytes.
+        hash-hex: string,
+    }
+
+    /// Why a chain failed verification. `seq` points at the offending
+    /// entry; `message` describes the breakage in operator-friendly
+    /// terms.
+    record chain-error {
+        seq: u64,
+        message: string,
+    }
+
+    /// Produce the canonical byte representation that the host should
+    /// SHA-384 to obtain `hash-hex`. Pure; deterministic; sorted-key
+    /// JSON-with-no-whitespace under the hood, but treat it as opaque
+    /// bytes from the host side.
+    canonicalize: func(seq: u64, data: entry-data, prev-hash-hex: string) -> list<u8>;
+
+    /// Verify chain *link integrity* — sequence numbers are 0..N
+    /// monotonic, each entry's `prev-hash-hex` matches the prior
+    /// entry's `hash-hex`, and the genesis entry has an empty
+    /// `prev-hash-hex`. Does NOT recompute SHA-384; the host should
+    /// also re-canonicalize and re-hash to detect payload tampering.
+    verify-links: func(entries: list<entry>) -> result<_, chain-error>;
+}
+
+world action-log {
+    export chain;
 }

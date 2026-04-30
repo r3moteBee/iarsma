@@ -11,6 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b --noEmit",
     "fmt": "prettier --write src",
@@ -19,12 +21,14 @@
   "dependencies": {
     "@bytecodealliance/preview2-shim": "^0.17.9",
     "jotai": "^2.10.1",
+    "oauth4webapi": "^3.8.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.27.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.0.1",
     "@types/react": "^18.3.12",

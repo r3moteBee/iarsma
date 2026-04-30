@@ -53,17 +53,26 @@ dev-all:
 build:
     pnpm --filter '@iarsma/shell' build
 
-# Build the jmap-client WASM component and transpile to JS bindings via jco.
-# cargo-component emits to target/wasm32-wasip1/ — the outer artifact is a
-# Component Model component despite the wasip1 inner core module (D-038).
+# Build all real WASM components and transpile to JS bindings via jco.
+# cargo-component emits to target/wasm32-wasip1/ — the outer artifacts are
+# Component Model components despite the wasip1 inner core modules (D-038).
+# Add a new component by appending its name to COMPONENTS below; the rest
+# follows the same recipe.
 wasm:
-    cargo component build -p jmap-client --release
-    rm -rf shell/src/wasm/jmap-client
-    mkdir -p shell/src/wasm/jmap-client
-    jco transpile target/wasm32-wasip1/release/jmap_client.wasm \
-        -o shell/src/wasm/jmap-client \
-        --name jmap_client
-    @echo "✓ jmap-client transpiled to shell/src/wasm/jmap-client/"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    COMPONENTS=(jmap-client action-log)
+    for c in "${COMPONENTS[@]}"; do
+        cargo component build -p "$c" --release
+        out="shell/src/wasm/$c"
+        rm -rf "$out"
+        mkdir -p "$out"
+        wasm_underscored="${c//-/_}"
+        jco transpile "target/wasm32-wasip1/release/${wasm_underscored}.wasm" \
+            -o "$out" \
+            --name "$wasm_underscored"
+        echo "✓ $c transpiled to $out/"
+    done
 
 # Produce iarsma.zip from the shell's dist/.
 package:
