@@ -1,13 +1,16 @@
 # Iarsma release pipeline.
 #
-# Triggered by pushing a `v*` tag (e.g., `v0.1.0`). Builds the same
-# bundle `just package` produces locally — codegen → wasm components →
-# Vite production build → versioned `iarsma-<version>.zip` — and
-# attaches it to a new GitHub Release.
+# Triggered by pushing a `v*` tag (e.g. `v0.1.0`). Builds the bundle for
+# every base-path variant in `BASE_PATHS` below, attaches versioned +
+# stable filenames to a single GitHub Release, and stamps each variant
+# with `version.json` so the deployed artifact self-identifies.
 #
-# Bundle versioning matches the git tag (D-028). The version stamped
-# inside `iarsma/version.json` is derived from the tag, not from
-# `package.json`, so the artifact is self-identifying once unzipped.
+# Stable filenames pin once. Operators set Stalwart's Resource URL to
+# `https://github.com/<owner>/<repo>/releases/latest/download/<stable>`
+# once and never edit it again — GitHub's `latest` redirect sends each
+# new release through automatically.
+#
+# Bundle versioning matches the git tag (D-028).
 
 name: release
 
@@ -16,9 +19,9 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    # Manual trigger — useful for cutting a deploy-prefix-specific build
-    # without a new git tag (e.g., `iarsma-0.1.2-webmail.zip` for a
-    # `/webmail/` deploy alongside the canonical root-deployed `0.1.2`).
+    # Manual trigger for an off-tag custom build (e.g., a deploy-prefix
+    # variant the canonical matrix doesn't already cover). Uploads as a
+    # workflow artifact only — no Release record.
     inputs:
       version:
         description: 'Version string for the artifact (no leading `v`)'
@@ -43,7 +46,7 @@ jobs:
   release:
     name: Build + publish iarsma.zip
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -80,31 +83,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Derive version + base_path from trigger
-        id: ver
+      - name: Derive trigger context
+        id: trig
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            version="${{ inputs.version }}"
-            tag=""   # workflow_dispatch builds don't create a Release
-            base_path="${{ inputs.base_path }}"
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
           else
             tag="${GITHUB_REF_NAME}"
-            version="${tag#v}"
-            base_path='/'
+            echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
-          # Append `-base<slug>` to the artifact filename for non-root
-          # builds so multiple base-path variants of the same version
-          # don't collide on the Releases page.
-          if [[ "$base_path" != '/' ]]; then
-            slug="$(echo "$base_path" | tr -c 'a-zA-Z0-9' '-' | sed 's/^-*//;s/-*$//')"
-            asset_suffix="-base-${slug}"
-          else
-            asset_suffix=""
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "base_path=$base_path" >> "$GITHUB_OUTPUT"
-          echo "asset_suffix=$asset_suffix" >> "$GITHUB_OUTPUT"
 
       - name: Build + transpile WASM components
         run: bash .github/scripts/build-wasm.sh
@@ -112,79 +101,127 @@ jobs:
       - name: Run codegen
         run: pnpm codegen
 
-      - name: Build the shell bundle
-        env:
-          # Vite `base` — controls the prefix asset URLs reference. `/`
-          # for root-deployed bundles, `/<prefix>/` for sub-path deploys.
-          VITE_BASE_PATH: ${{ steps.ver.outputs.base_path }}
-        run: pnpm --filter '@iarsma/shell' run build
-
-      - name: Stage + zip the bundle
-        id: pkg
+      # ────────────────────────────────────────────────────────────────
+      # Tag-driven path: build EVERY canonical base-path variant +
+      # publish all artifacts (versioned + stable filenames) to one
+      # Release. The matrix is a bash array because GitHub matrix jobs
+      # can't easily share a single Release-creation step; doing the
+      # builds sequentially in one job keeps the workflow simple.
+      # ────────────────────────────────────────────────────────────────
+      - name: Build + zip every canonical variant (tag-driven)
+        if: ${{ steps.trig.outputs.tag != '' }}
+        id: tag_assets
         run: |
           set -euo pipefail
-          version="${{ steps.ver.outputs.version }}"
-          suffix="${{ steps.ver.outputs.asset_suffix }}"
-          out="iarsma-${version}${suffix}.zip"
-          base_path="${{ steps.ver.outputs.base_path }}"
-          # Stamp version metadata + the base path into dist/ so the
-          # deployed bundle self-identifies via /version.json.
-          echo "{\"version\":\"${version}\",\"basePath\":\"${base_path}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
-            > shell/dist/version.json
-          # Zip with files at root — Stalwart Web Apps serves the zip's
-          # root at the configured URL prefix, so any wrapper directory
-          # would land URLs at `<prefix>/<wrapper>/...` (wrong).
-          (cd shell/dist && zip -qr "$GITHUB_WORKSPACE/$out" .)
-          ls -la "$out"
-          du -h "$out"
-          echo "asset=$out" >> "$GITHUB_OUTPUT"
+          version="${{ steps.trig.outputs.version }}"
+          # Each entry: "<base_path>|<stable_suffix>". Stable suffix is
+          # what gets prepended to `iarsma.zip` in the stable filename.
+          # Add a row when a new canonical deploy prefix joins the fleet.
+          variants=(
+            "/|"
+            "/webmail/|-base-webmail"
+          )
+          assets=()
+          for entry in "${variants[@]}"; do
+            base_path="${entry%%|*}"
+            stable_suffix="${entry##*|}"
+            slug=""
+            if [[ "$base_path" != '/' ]]; then
+              slug="$(echo "$base_path" | tr -c 'a-zA-Z0-9' '-' | sed 's/^-*//;s/-*$//')"
+              versioned="iarsma-${version}-base-${slug}.zip"
+              stable="iarsma-base-${slug}.zip"
+            else
+              versioned="iarsma-${version}.zip"
+              stable="iarsma.zip"
+            fi
+            echo "::group::Building base=$base_path → $versioned + $stable"
+            VITE_BASE_PATH="$base_path" pnpm --filter '@iarsma/shell' run build
+            echo "{\"version\":\"${version}\",\"basePath\":\"${base_path}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+              > shell/dist/version.json
+            (cd shell/dist && zip -qr "$GITHUB_WORKSPACE/$versioned" .)
+            cp "$versioned" "$stable"
+            sha256sum "$versioned" | tee "${versioned}.sha256"
+            sha256sum "$stable"    | tee "${stable}.sha256"
+            assets+=("$versioned" "${versioned}.sha256" "$stable" "${stable}.sha256")
+            echo "::endgroup::"
+          done
+          # Emit newline-separated list for the upload step.
+          printf '%s\n' "${assets[@]}" > /tmp/release-assets.list
+          ls -la iarsma-*.zip iarsma-*.sha256 iarsma.zip 2>/dev/null
 
-      - name: Compute SHA-256 for downstream verification
-        id: sum
-        run: |
-          asset="${{ steps.pkg.outputs.asset }}"
-          sha=$(sha256sum "$asset" | awk '{print $1}')
-          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
-          echo "$sha  $asset" > "${asset}.sha256"
-
-      # Tag-driven runs publish to the Release page; workflow_dispatch
-      # runs upload as a workflow artifact only (no Release record).
-      # Operators producing a base-path-specific build dispatch manually,
-      # download from the workflow run, and upload to a Release of their
-      # choice.
-      - name: Create release + upload asset (tag-driven only)
-        if: ${{ steps.ver.outputs.tag != '' }}
+      - name: Create Release + upload all variants (tag-driven only)
+        if: ${{ steps.trig.outputs.tag != '' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: ${{ steps.ver.outputs.tag }}
+          tag_name: ${{ steps.trig.outputs.tag }}
+          name: ${{ steps.trig.outputs.tag }}
           generate_release_notes: true
           files: |
-            ${{ steps.pkg.outputs.asset }}
-            ${{ steps.pkg.outputs.asset }}.sha256
+            iarsma-${{ steps.trig.outputs.version }}.zip
+            iarsma-${{ steps.trig.outputs.version }}.zip.sha256
+            iarsma.zip
+            iarsma.zip.sha256
+            iarsma-${{ steps.trig.outputs.version }}-base-webmail.zip
+            iarsma-${{ steps.trig.outputs.version }}-base-webmail.zip.sha256
+            iarsma-base-webmail.zip
+            iarsma-base-webmail.zip.sha256
           body: |
-            ## Iarsma ${{ steps.ver.outputs.tag }}
+            ## Iarsma ${{ steps.trig.outputs.tag }}
 
             Reproducible static-bundle build of the Iarsma webmail.
 
-            **Asset:** `${{ steps.pkg.outputs.asset }}`
-            **SHA-256:** `${{ steps.sum.outputs.sha256 }}`
-            **Base path:** `/` (root-deployed)
+            ### Stable URLs (pin once, auto-update on release)
+
+            Operators set Stalwart's Resource URL to a stable URL — GitHub redirects `releases/latest/download/<asset>` to whichever release is marked Latest, so the next tag-driven publish drops in automatically on the next "Update applications" tick.
+
+            | Deploy posture | Stable URL |
+            |---|---|
+            | Root deploy | `https://github.com/${{ github.repository }}/releases/latest/download/iarsma.zip` |
+            | `/webmail/` prefix | `https://github.com/${{ github.repository }}/releases/latest/download/iarsma-base-webmail.zip` |
+
+            ### Versioned (archival)
+
+            - `iarsma-${{ steps.trig.outputs.version }}.zip` (root)
+            - `iarsma-${{ steps.trig.outputs.version }}-base-webmail.zip` (`/webmail/` prefix)
+            - Both have a `.sha256` companion.
 
             ### Deploy
 
-            See [docs/deployment.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/deployment.md) for the full guide. Same-origin Stalwart Web Apps deploys at `/` need no `config.json` — the bundle uses same-origin defaults. For a non-root prefix, dispatch the workflow manually with `base_path=/<prefix>/` to get a build whose asset URLs target that prefix.
+            See [docs/deployment.md](https://github.com/${{ github.repository }}/blob/${{ steps.trig.outputs.tag }}/docs/deployment.md). Same-origin Stalwart Web Apps deploys need no `config.json` — the bundle uses same-origin defaults derived from `window.location`. Adding a new canonical deploy prefix to the matrix is a one-line addition to `.github/workflows/release.yml`.
 
-            Bundle self-identifies via `version.json` after extraction.
+      # ────────────────────────────────────────────────────────────────
+      # workflow_dispatch path: single ad-hoc build, uploaded as a
+      # workflow artifact (no Release record). For one-off custom
+      # prefixes outside the canonical matrix.
+      # ────────────────────────────────────────────────────────────────
+      - name: Build single variant (workflow_dispatch)
+        if: ${{ steps.trig.outputs.tag == '' }}
+        id: dispatch_pkg
+        env:
+          VITE_BASE_PATH: ${{ inputs.base_path }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.trig.outputs.version }}"
+          base_path="${{ inputs.base_path }}"
+          if [[ "$base_path" != '/' ]]; then
+            slug="$(echo "$base_path" | tr -c 'a-zA-Z0-9' '-' | sed 's/^-*//;s/-*$//')"
+            out="iarsma-${version}-base-${slug}.zip"
+          else
+            out="iarsma-${version}.zip"
+          fi
+          pnpm --filter '@iarsma/shell' run build
+          echo "{\"version\":\"${version}\",\"basePath\":\"${base_path}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+            > shell/dist/version.json
+          (cd shell/dist && zip -qr "$GITHUB_WORKSPACE/$out" .)
+          sha256sum "$out" | tee "${out}.sha256"
+          echo "asset=$out" >> "$GITHUB_OUTPUT"
 
-      # workflow_dispatch builds upload as workflow artifacts so the
-      # operator can attach them to whatever Release they want.
-      - name: Upload as workflow artifact (workflow_dispatch only)
-        if: ${{ steps.ver.outputs.tag == '' }}
+      - name: Upload single variant as workflow artifact
+        if: ${{ steps.trig.outputs.tag == '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.pkg.outputs.asset }}
+          name: ${{ steps.dispatch_pkg.outputs.asset }}
           path: |
-            ${{ steps.pkg.outputs.asset }}
-            ${{ steps.pkg.outputs.asset }}.sha256
+            ${{ steps.dispatch_pkg.outputs.asset }}
+            ${{ steps.dispatch_pkg.outputs.asset }}.sha256
           retention-days: 30
