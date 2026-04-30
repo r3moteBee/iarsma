@@ -1,12 +1,86 @@
-// WIT contract for memory-backend.
+// WIT contract for iarsma:memory-backend.
 //
-// Pluggable MemoryBackend trait. Tier-1 default: SQLite-via-OPFS / Tauri filesystem. Tier-2 OB1 adapter lands in Phase 5+.
+// Pluggable memory substrate (D-030 — three-layer perception surface).
+// Tier-1 default: Rust→WASM component scaffolded here, backed in
+// production by SQLite-via-OPFS (web) or Tauri filesystem (native).
+// Tier-2 OB1 adapter is co-deployed (D-031) and lands in Phase 5+.
 //
-// Real interface lands in F-3 / Phase 0 work item 4.
-// This placeholder lets the workspace resolve.
+// Per D-038 the component is pure: it canonicalizes / validates the
+// structured records the host stores. Persistence (SQLite, OPFS, OB1)
+// lives in the host. The Phase 0 deliverable is the *contract* and
+// the seam — Empty implementations OK.
 
 package iarsma:memory-backend@0.0.0;
 
-world placeholder {
-    // export hello: func() -> string;
+interface store {
+    /// Free-form structured note bound to a target resource (a thread,
+    /// contact, file, etc.). The body is opaque JSON so individual
+    /// capabilities lock their own per-target schema without
+    /// changing this contract. The host generates the `id` on insert.
+    record annotation {
+        id: string,
+        /// e.g. "thread:abc123", "contact:xyz789", "file:repo/path".
+        target: string,
+        body-json: string,
+        identity: string,
+        created-at-ms: u64,
+    }
+
+    /// Caller-side input for `canonicalize-annotation`. The store
+    /// generates `id`; consumers don't.
+    record annotation-input {
+        target: string,
+        body-json: string,
+        identity: string,
+        created-at-ms: u64,
+    }
+
+    /// Per-identity structured metadata. Exactly one entry per
+    /// identity — upserts replace the body.
+    record profile {
+        identity: string,
+        body-json: string,
+        updated-at-ms: u64,
+    }
+
+    /// Behavior signal — D-030's third layer. Opt-in, sensitive.
+    /// Phase 0 reserves the surface; the per-`kind` schema is
+    /// defined as memory-using capabilities ship (Phase 4+).
+    record behavior-signal {
+        identity: string,
+        /// e.g. "compose-style", "reading-rate", "label-affinity".
+        kind: string,
+        body-json: string,
+        observed-at-ms: u64,
+    }
+
+    record memory-error {
+        code: memory-error-code,
+        message: string,
+    }
+
+    enum memory-error-code {
+        /// Input failed shape / required-field validation.
+        invalid-input,
+        /// `body-json` was syntactically invalid JSON.
+        malformed-json,
+        /// Phase 0 stub — the operation isn't lit up yet.
+        not-implemented,
+    }
+
+    /// Validate + canonicalize an annotation for storage. Returns the
+    /// canonical bytes the host should hash + persist. Pure; no I/O.
+    canonicalize-annotation: func(
+        input: annotation-input,
+    ) -> result<list<u8>, memory-error>;
+
+    /// Validate + canonicalize a profile entry for upsert.
+    canonicalize-profile: func(input: profile) -> result<list<u8>, memory-error>;
+
+    /// Validate + canonicalize a behavior signal.
+    canonicalize-signal: func(input: behavior-signal) -> result<list<u8>, memory-error>;
+}
+
+world memory-backend {
+    export store;
 }

@@ -34,6 +34,15 @@ wasm-target:
 dev:
     pnpm --filter '@iarsma/shell' dev
 
+# Run the Tauri 2 native shell in dev mode. Spawns Vite on port 1420
+# (per `tauri.conf.json`'s `beforeDevCommand`) and opens a native
+# window pointed at it. Requires the Tauri 2 system deps —
+# https://v2.tauri.app/start/prerequisites/ has the per-OS package
+# list (Debian/Ubuntu: libwebkit2gtk-4.1-dev, libgtk-3-dev,
+# libayatana-appindicator3-dev, librsvg2-dev, xdotool, patchelf).
+tauri-dev:
+    cd shell && pnpm exec tauri dev
+
 # Run the MCP server in dev mode.
 dev-mcp:
     pnpm --filter '@iarsma/mcp-server' dev
@@ -53,6 +62,13 @@ dev-all:
 build:
     pnpm --filter '@iarsma/shell' build
 
+# Build the Tauri 2 native bundle for the host platform. Produces
+# `.AppImage` / `.deb` (Linux), `.dmg` (macOS), `.msi` (Windows). Code
+# signing is configured per platform when those builds light up in
+# Phase 6.
+tauri-build:
+    cd shell && pnpm exec tauri build
+
 # Build all real WASM components and transpile to JS bindings via jco.
 # cargo-component emits to target/wasm32-wasip1/ — the outer artifacts are
 # Component Model components despite the wasip1 inner core modules (D-038).
@@ -61,7 +77,7 @@ build:
 wasm:
     #!/usr/bin/env bash
     set -euo pipefail
-    COMPONENTS=(jmap-client action-log)
+    COMPONENTS=(jmap-client action-log memory-backend)
     for c in "${COMPONENTS[@]}"; do
         cargo component build -p "$c" --release
         out="shell/src/wasm/$c"
@@ -74,9 +90,32 @@ wasm:
         echo "✓ $c transpiled to $out/"
     done
 
-# Produce iarsma.zip from the shell's dist/.
-package:
-    @echo "Packaging iarsma.zip — wired up in F-2 / Phase 0 work item 12."
+# Produce iarsma.zip from the shell's dist/. Idempotent: rebuilds wasm
+# bindings, codegen artifacts, and the Vite bundle from scratch so the
+# zip is reproducible from any commit (D-028 — bundle versioning matches
+# the git tag). The zip is laid out so a deployer drops `config.json`
+# next to the bundle root after extraction. See docs/deployment.md.
+package version="0.0.0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just codegen
+    just wasm
+    pnpm --filter '@iarsma/shell' run build
+    out="iarsma-{{version}}.zip"
+    rm -f "$out" iarsma.zip
+    # Stage the bundle in a clean directory so the zip's top level is
+    # a single `iarsma/` folder — predictable for operators using
+    # `unzip` and for Stalwart's Web Apps fetcher.
+    staging="$(mktemp -d)"
+    trap 'rm -rf "$staging"' EXIT
+    cp -r shell/dist "$staging/iarsma"
+    # Stamp a version marker so a deployed bundle can self-identify.
+    echo "{\"version\":\"{{version}}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+        > "$staging/iarsma/version.json"
+    (cd "$staging" && zip -qr "$OLDPWD/$out" iarsma)
+    # Convenience symlink for unversioned consumers (`just dev` etc.).
+    ln -sf "$out" iarsma.zip
+    echo "✓ packaged $out ($(du -h "$out" | cut -f1))"
 
 # --- Quality checks -----------------------------------------------------
 

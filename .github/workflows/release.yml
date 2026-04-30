@@ -1,0 +1,140 @@
+# Iarsma release pipeline.
+#
+# Triggered by pushing a `v*` tag (e.g., `v0.1.0`). Builds the same
+# bundle `just package` produces locally — codegen → wasm components →
+# Vite production build → versioned `iarsma-<version>.zip` — and
+# attaches it to a new GitHub Release.
+#
+# Bundle versioning matches the git tag (D-028). The version stamped
+# inside `iarsma/version.json` is derived from the tag, not from
+# `package.json`, so the artifact is self-identifying once unzipped.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  # Required to create releases and upload assets.
+  contents: write
+
+env:
+  PNPM_VERSION: '9.12.0'
+  NODE_VERSION: '20'
+  CARGO_COMPONENT_VERSION: '0.21.1'
+
+jobs:
+  release:
+    name: Build + publish iarsma.zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+
+      - name: Cache cargo build state
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-${{ env.CARGO_COMPONENT_VERSION }}
+
+      - name: Install cargo-component
+        run: |
+          if ! command -v cargo-component >/dev/null; then
+            cargo install --locked --version ${{ env.CARGO_COMPONENT_VERSION }} cargo-component
+          fi
+          cargo component --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Derive version from the git tag (strip leading `v`)
+        id: ver
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build + transpile WASM components
+        run: bash .github/scripts/build-wasm.sh
+
+      - name: Run codegen
+        run: pnpm codegen
+
+      - name: Build the shell bundle
+        env:
+          # Build-time placeholders — the deployed bundle reads its real
+          # values from `/config.json` at runtime. These are present only
+          # so the build doesn't fail on the env-var fallback path.
+          VITE_OIDC_ISSUER: 'https://example.invalid'
+          VITE_OAUTH_CLIENT_ID: 'webmail'
+          VITE_OAUTH_REDIRECT_URI: 'http://localhost:5173/auth/callback'
+        run: pnpm --filter '@iarsma/shell' run build
+
+      - name: Stage + zip the bundle
+        id: pkg
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          out="iarsma-${version}.zip"
+          staging="$(mktemp -d)"
+          cp -r shell/dist "$staging/iarsma"
+          echo "{\"version\":\"${version}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+            > "$staging/iarsma/version.json"
+          (cd "$staging" && zip -qr "$GITHUB_WORKSPACE/$out" iarsma)
+          ls -la "$out"
+          du -h "$out"
+          echo "asset=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA-256 for downstream verification
+        id: sum
+        run: |
+          asset="${{ steps.pkg.outputs.asset }}"
+          sha=$(sha256sum "$asset" | awk '{print $1}')
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "$sha  $asset" > "${asset}.sha256"
+
+      - name: Create release + upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.pkg.outputs.asset }}
+            ${{ steps.pkg.outputs.asset }}.sha256
+          body: |
+            ## Iarsma ${{ steps.ver.outputs.tag }}
+
+            Reproducible static-bundle build of the Iarsma webmail.
+
+            **Asset:** `${{ steps.pkg.outputs.asset }}`
+            **SHA-256:** `${{ steps.sum.outputs.sha256 }}`
+
+            ### Deploy
+
+            See [docs/deployment.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/deployment.md) for the full guide. Quick path:
+
+            1. Drop the URL of this asset into Stalwart admin → **Web Applications → Create application** with `URL Prefix: /iarsma`.
+            2. Drop a `config.json` next to the bundle root (under the URL prefix) with `oidcIssuer`, `clientId`, `redirectUri`, and the optional `agentContext` block. Schema: `shell/src/config.ts`.
+
+            Bundle self-identifies via `iarsma/version.json` after extraction.
