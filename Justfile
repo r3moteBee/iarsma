@@ -61,7 +61,7 @@ build:
 wasm:
     #!/usr/bin/env bash
     set -euo pipefail
-    COMPONENTS=(jmap-client action-log)
+    COMPONENTS=(jmap-client action-log memory-backend)
     for c in "${COMPONENTS[@]}"; do
         cargo component build -p "$c" --release
         out="shell/src/wasm/$c"
