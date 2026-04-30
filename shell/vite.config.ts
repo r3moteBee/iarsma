@@ -15,6 +15,14 @@ import { readFileSync } from 'node:fs';
 // `VITE_TLS_KEY` (paths to PEM files; mkcert is the easy generator) and
 // the dev server flips to HTTPS automatically. Without those env vars,
 // dev stays on plain HTTP for the contributors who don't need OAuth.
+//
+// Deploy prefix: when the bundle is served at a non-root URL (e.g.,
+// `https://your-host/webmail/` via Stalwart Web Apps), Vite's `base`
+// option must match the prefix so asset URLs in the built HTML
+// (`/assets/...`) resolve correctly under the prefix
+// (`/webmail/assets/...`). Set `VITE_BASE_PATH=/webmail/` at build time.
+// Default is `/` — works for root-deployed bundles and for Vite's dev
+// server which always serves at the root.
 
 const tlsCertPath = process.env['VITE_TLS_CERT'];
 const tlsKeyPath = process.env['VITE_TLS_KEY'];
@@ -26,7 +34,14 @@ const httpsConfig =
       }
     : undefined;
 
+// Vite expects `base` to start AND end with `/` (or be `./`). Tolerate
+// missing trailing slash in the env var value because operators commonly
+// type `/webmail` rather than `/webmail/`.
+const rawBase = process.env['VITE_BASE_PATH'] ?? '/';
+const basePath = rawBase === '/' || rawBase === './' ? rawBase : rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+
 export default defineConfig({
+  base: basePath,
   plugins: [react()],
   server: {
     port: 5173,

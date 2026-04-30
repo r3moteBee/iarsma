@@ -104,17 +104,24 @@ wasm:
 #
 # `config.json` is dropped next to `index.html` after extraction (or
 # baked into the zip, depending on operator preference).
-package version="0.0.0":
+package version="0.0.0" base_path="/":
     #!/usr/bin/env bash
     set -euo pipefail
     just codegen
     just wasm
-    pnpm --filter '@iarsma/shell' run build
-    out="iarsma-{{version}}.zip"
+    VITE_BASE_PATH={{base_path}} pnpm --filter '@iarsma/shell' run build
+    # Append a base-path slug to the filename for non-root builds so
+    # multiple base-path variants don't collide.
+    if [[ "{{base_path}}" == "/" ]]; then
+        out="iarsma-{{version}}.zip"
+    else
+        slug="$(echo "{{base_path}}" | tr -c 'a-zA-Z0-9' '-' | sed 's/^-*//;s/-*$//')"
+        out="iarsma-{{version}}-base-${slug}.zip"
+    fi
     rm -f "$out" iarsma.zip
-    # Stamp a version marker into dist/ so the deployed bundle can
+    # Stamp version + base path into dist/ so the deployed bundle can
     # self-identify. Idempotent — overwrites any prior stamp.
-    echo "{\"version\":\"{{version}}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+    echo "{\"version\":\"{{version}}\",\"basePath\":\"{{base_path}}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
         > shell/dist/version.json
     # Zip with files at the root level (no wrapper directory).
     (cd shell/dist && zip -qr "$OLDPWD/$out" .)

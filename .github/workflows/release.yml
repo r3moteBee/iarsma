@@ -15,6 +15,20 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    # Manual trigger — useful for cutting a deploy-prefix-specific build
+    # without a new git tag (e.g., `iarsma-0.1.2-webmail.zip` for a
+    # `/webmail/` deploy alongside the canonical root-deployed `0.1.2`).
+    inputs:
+      version:
+        description: 'Version string for the artifact (no leading `v`)'
+        required: true
+        type: string
+      base_path:
+        description: 'Vite `base` for the build (path the bundle is deployed at — must start AND end with `/`)'
+        required: false
+        default: '/'
+        type: string
 
 permissions:
   # Required to create releases and upload assets.
@@ -66,13 +80,31 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Derive version from the git tag (strip leading `v`)
+      - name: Derive version + base_path from trigger
         id: ver
         run: |
-          tag="${GITHUB_REF_NAME}"
-          version="${tag#v}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+            tag=""   # workflow_dispatch builds don't create a Release
+            base_path="${{ inputs.base_path }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+            base_path='/'
+          fi
+          # Append `-base<slug>` to the artifact filename for non-root
+          # builds so multiple base-path variants of the same version
+          # don't collide on the Releases page.
+          if [[ "$base_path" != '/' ]]; then
+            slug="$(echo "$base_path" | tr -c 'a-zA-Z0-9' '-' | sed 's/^-*//;s/-*$//')"
+            asset_suffix="-base-${slug}"
+          else
+            asset_suffix=""
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "base_path=$base_path" >> "$GITHUB_OUTPUT"
+          echo "asset_suffix=$asset_suffix" >> "$GITHUB_OUTPUT"
 
       - name: Build + transpile WASM components
         run: bash .github/scripts/build-wasm.sh
@@ -82,12 +114,9 @@ jobs:
 
       - name: Build the shell bundle
         env:
-          # Build-time placeholders — the deployed bundle reads its real
-          # values from `/config.json` at runtime. These are present only
-          # so the build doesn't fail on the env-var fallback path.
-          VITE_OIDC_ISSUER: 'https://example.invalid'
-          VITE_OAUTH_CLIENT_ID: 'webmail'
-          VITE_OAUTH_REDIRECT_URI: 'http://localhost:5173/auth/callback'
+          # Vite `base` — controls the prefix asset URLs reference. `/`
+          # for root-deployed bundles, `/<prefix>/` for sub-path deploys.
+          VITE_BASE_PATH: ${{ steps.ver.outputs.base_path }}
         run: pnpm --filter '@iarsma/shell' run build
 
       - name: Stage + zip the bundle
@@ -95,10 +124,12 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ steps.ver.outputs.version }}"
-          out="iarsma-${version}.zip"
-          # Stamp version metadata into dist/ before zipping so the
+          suffix="${{ steps.ver.outputs.asset_suffix }}"
+          out="iarsma-${version}${suffix}.zip"
+          base_path="${{ steps.ver.outputs.base_path }}"
+          # Stamp version metadata + the base path into dist/ so the
           # deployed bundle self-identifies via /version.json.
-          echo "{\"version\":\"${version}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+          echo "{\"version\":\"${version}\",\"basePath\":\"${base_path}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
             > shell/dist/version.json
           # Zip with files at root — Stalwart Web Apps serves the zip's
           # root at the configured URL prefix, so any wrapper directory
@@ -116,7 +147,13 @@ jobs:
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
           echo "$sha  $asset" > "${asset}.sha256"
 
-      - name: Create release + upload asset
+      # Tag-driven runs publish to the Release page; workflow_dispatch
+      # runs upload as a workflow artifact only (no Release record).
+      # Operators producing a base-path-specific build dispatch manually,
+      # download from the workflow run, and upload to a Release of their
+      # choice.
+      - name: Create release + upload asset (tag-driven only)
+        if: ${{ steps.ver.outputs.tag != '' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
@@ -132,12 +169,22 @@ jobs:
 
             **Asset:** `${{ steps.pkg.outputs.asset }}`
             **SHA-256:** `${{ steps.sum.outputs.sha256 }}`
+            **Base path:** `/` (root-deployed)
 
             ### Deploy
 
-            See [docs/deployment.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/deployment.md) for the full guide. Quick path:
+            See [docs/deployment.md](https://github.com/${{ github.repository }}/blob/${{ steps.ver.outputs.tag }}/docs/deployment.md) for the full guide. Same-origin Stalwart Web Apps deploys at `/` need no `config.json` — the bundle uses same-origin defaults. For a non-root prefix, dispatch the workflow manually with `base_path=/<prefix>/` to get a build whose asset URLs target that prefix.
 
-            1. Drop the URL of this asset into Stalwart admin → **Web Applications → Create application** with `URL Prefix: /iarsma`.
-            2. Drop a `config.json` next to the bundle root (under the URL prefix) with `oidcIssuer`, `clientId`, `redirectUri`, and the optional `agentContext` block. Schema: `shell/src/config.ts`.
+            Bundle self-identifies via `version.json` after extraction.
 
-            Bundle self-identifies via `iarsma/version.json` after extraction.
+      # workflow_dispatch builds upload as workflow artifacts so the
+      # operator can attach them to whatever Release they want.
+      - name: Upload as workflow artifact (workflow_dispatch only)
+        if: ${{ steps.ver.outputs.tag == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.asset }}
+          path: |
+            ${{ steps.pkg.outputs.asset }}
+            ${{ steps.pkg.outputs.asset }}.sha256
+          retention-days: 30

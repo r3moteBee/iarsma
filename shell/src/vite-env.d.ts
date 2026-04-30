@@ -11,6 +11,9 @@ interface ImportMetaEnv {
   readonly VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL?: string;
   readonly VITE_AGENT_CONTEXT_ACTION_LOG_URL?: string;
   readonly VITE_AGENT_CONTEXT_MEMORY_BACKEND_URL?: string;
+  // Build-time override for the default OAuth client id used by the
+  // same-origin-defaults fallback. Defaults to `webmail` when unset.
+  readonly VITE_DEFAULT_CLIENT_ID?: string;
 }
 
 interface ImportMeta {
