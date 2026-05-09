@@ -61,7 +61,14 @@ export default defineConfig({
   // Vitest sees `vite.config.ts` and adopts its config. Exclude `e2e/`
   // so Playwright specs aren't picked up by `pnpm test` (vitest); the
   // E2E suite has its own runner via `pnpm e2e`.
+  //
+  // `setupFiles` registers `@testing-library/jest-dom` matchers — only
+  // active for tests that opt into the jsdom environment via the
+  // `@vitest-environment jsdom` pragma. Node-environment tests (the
+  // default for crypto-envelope, oauth, etc.) skip the setup file
+  // because jest-dom is a no-op without a DOM.
   test: {
     exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
+    setupFiles: ['./src/test-setup.ts'],
   },
 });

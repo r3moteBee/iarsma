@@ -72,12 +72,20 @@ tauri-build:
 # Build all real WASM components and transpile to JS bindings via jco.
 # cargo-component emits to target/wasm32-wasip1/ — the outer artifacts are
 # Component Model components despite the wasip1 inner core modules (D-038).
-# Add a new component by appending its name to COMPONENTS below; the rest
-# follows the same recipe.
+#
+# Auto-discovers every workspace component under `components/<name>/`
+# (C2 from the pre-Phase-1 audit). New components are picked up
+# automatically — this recipe stays in lockstep with the Cargo workspace
+# without a separate list to maintain. Placeholder WIT (`world
+# placeholder { }`) transpiles to near-empty bindings without error; the
+# bindings light up when the WIT is filled in.
 wasm:
     #!/usr/bin/env bash
     set -euo pipefail
-    COMPONENTS=(jmap-client action-log memory-backend)
+    COMPONENTS=()
+    for dir in components/*/; do
+        COMPONENTS+=("$(basename "$dir")")
+    done
     for c in "${COMPONENTS[@]}"; do
         cargo component build -p "$c" --release
         out="wasm-bindings/$c"

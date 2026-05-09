@@ -30,7 +30,10 @@ src-tauri/target/
 /mcp-server/src/generated/
 
 # WASM transpiled bindings (regenerated from components/* via `just wasm`).
+/wasm-bindings/git-backend/
+/wasm-bindings/html-sanitizer/
 /wasm-bindings/jmap-client/
+/wasm-bindings/markdown/
 /wasm-bindings/action-log/
 /wasm-bindings/memory-backend/
 

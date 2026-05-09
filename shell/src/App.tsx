@@ -13,7 +13,8 @@ import {
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { IarsmaProvider, jmapInvoker, type Invoker } from './runtime/index.js';
-import { handleCallback, signOut, startSignIn } from './runtime/oauth.js';
+import { handleCallback, signOut } from './runtime/oauth.js';
+import { SignedOutView } from './views/signed-out-view.js';
 
 type Phase =
   | { kind: 'loading' }
@@ -135,40 +136,6 @@ function Shell({ config }: { readonly config: ShellConfig }) {
   );
 }
 
-function SignedOutView({ config }: { readonly config: ShellConfig }) {
-  const [signingIn, setSigningIn] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onSignIn = async () => {
-    setError(null);
-    setSigningIn(true);
-    try {
-      await startSignIn({ config });
-      // startSignIn navigates away; if we reach this line, navigation failed.
-    } catch (e) {
-      setSigningIn(false);
-      setError(e instanceof Error ? e.message : describe(e));
-    }
-  };
-
-  return (
-    <section aria-labelledby="signin-heading">
-      <h2 id="signin-heading">Sign in</h2>
-      <p>
-        You will be redirected to <code>{config.oidcIssuer}</code> to sign in. Iarsma never
-        sees your password.
-      </p>
-      <button type="button" onClick={onSignIn} disabled={signingIn}>
-        {signingIn ? 'Redirecting…' : 'Sign in with Stalwart'}
-      </button>
-      {error !== null ? (
-        <p role="alert" data-testid="signin-error">
-          Sign-in failed: {error}
-        </p>
-      ) : null}
-    </section>
-  );
-}
 
 function SignedInView({ config }: { readonly config: ShellConfig }) {
   const session = useSessionGet({});

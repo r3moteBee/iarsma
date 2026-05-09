@@ -370,7 +370,7 @@ Lighthouse score ≥ 95 on the desktop target. axe-core + pa11y report zero viol
 These items don't fit cleanly into one phase but require attention throughout. Track them as standing concerns.
 
 ### CT-1. Accessibility
-- Per-component axe-core in Vitest (Phase 1 onwards).
+- Per-component axe-core in Vitest. Wired in Phase 0 (PR-7) ahead of Phase 1: `shell/src/__tests__/a11y.test.tsx` is the pattern reference; new components add their own a11y test against `runAxe()` from `__tests__/util/axe.ts`.
 - Per-PR pa11y check in CI (Phase 1 onwards).
 - VoiceOver smoke test before each phase ships.
 - Full WCAG 2.1 AA audit in Phase 7.
