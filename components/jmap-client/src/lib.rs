@@ -1,16 +1,21 @@
 //! `iarsma:jmap-client` — thin JMAP client wrapper, parse-only (D-038).
 //!
-//! Pure parsing logic lives in `parse`; the WIT-component shell wires it
-//! into the cargo-component-generated bindings. Bindings are gated on
-//! `target_arch = "wasm32"` so `cargo test` on the host can exercise the
-//! protocol logic without a WASM runtime.
+//! Pure parsing logic lives in `parse` (session) and `parse_mailbox`;
+//! the WIT-component shell wires them into the cargo-component-generated
+//! bindings. Bindings are gated on `target_arch = "wasm32"` so
+//! `cargo test` on the host can exercise the protocol logic without a
+//! WASM runtime.
 
 mod parse;
+mod parse_mailbox;
 
 // Re-export the host-target API. Useful for any rlib consumer (the
 // component itself uses these via the `component` module below) and
 // suppresses dead-code warnings on non-wasm builds.
 pub use parse::{parse_session, ParseError, ParseErrorCode, SessionData};
+pub use parse_mailbox::{
+    parse_mailbox_get_response, Mailbox, MailboxParseError, MailboxParseErrorCode, MailboxRights,
+};
 
 // `include!` instead of `mod bindings;` so rustfmt doesn't recurse into
 // the cargo-component-generated file. rustfmt follows `mod x;` even
@@ -25,17 +30,22 @@ mod bindings {
 
 #[cfg(target_arch = "wasm32")]
 mod component {
-    use crate::bindings::exports::iarsma::jmap_client::session::{
-        Guest, ParseError, ParseErrorCode, Session,
+    use crate::bindings::exports::iarsma::jmap_client::mailbox::{
+        Guest as MailboxGuest, Mailbox as WitMailbox, MailboxRights as WitMailboxRights,
+        ParseError as WitMailboxParseError, ParseErrorCode as WitMailboxParseErrorCode,
     };
-    use crate::parse;
+    use crate::bindings::exports::iarsma::jmap_client::session::{
+        Guest as SessionGuest, ParseError as WitSessionParseError,
+        ParseErrorCode as WitSessionParseErrorCode, Session as WitSession,
+    };
+    use crate::{parse, parse_mailbox};
 
     pub struct Component;
 
-    impl Guest for Component {
-        fn parse_session(json: String) -> Result<Session, ParseError> {
+    impl SessionGuest for Component {
+        fn parse_session(json: String) -> Result<WitSession, WitSessionParseError> {
             parse::parse_session(&json)
-                .map(|s| Session {
+                .map(|s| WitSession {
                     username: s.username,
                     api_url: s.api_url,
                     download_url: s.download_url,
@@ -44,15 +54,76 @@ mod component {
                     state: s.state,
                     primary_account_id_mail: s.primary_account_id_mail,
                 })
-                .map_err(|e| ParseError {
+                .map_err(|e| WitSessionParseError {
                     code: match e.code {
-                        parse::ParseErrorCode::MalformedJson => ParseErrorCode::MalformedJson,
-                        parse::ParseErrorCode::MissingField => ParseErrorCode::MissingField,
-                        parse::ParseErrorCode::WrongType => ParseErrorCode::WrongType,
-                        parse::ParseErrorCode::NoMailAccount => ParseErrorCode::NoMailAccount,
+                        parse::ParseErrorCode::MalformedJson => {
+                            WitSessionParseErrorCode::MalformedJson
+                        }
+                        parse::ParseErrorCode::MissingField => {
+                            WitSessionParseErrorCode::MissingField
+                        }
+                        parse::ParseErrorCode::WrongType => WitSessionParseErrorCode::WrongType,
+                        parse::ParseErrorCode::NoMailAccount => {
+                            WitSessionParseErrorCode::NoMailAccount
+                        }
                     },
                     message: e.message,
                 })
+        }
+    }
+
+    impl MailboxGuest for Component {
+        fn parse_mailbox_get_response(
+            json: String,
+        ) -> Result<Vec<WitMailbox>, WitMailboxParseError> {
+            parse_mailbox::parse_mailbox_get_response(&json)
+                .map(|list| list.into_iter().map(into_wit_mailbox).collect())
+                .map_err(|e| WitMailboxParseError {
+                    code: match e.code {
+                        parse_mailbox::MailboxParseErrorCode::MalformedJson => {
+                            WitMailboxParseErrorCode::MalformedJson
+                        }
+                        parse_mailbox::MailboxParseErrorCode::MissingField => {
+                            WitMailboxParseErrorCode::MissingField
+                        }
+                        parse_mailbox::MailboxParseErrorCode::WrongType => {
+                            WitMailboxParseErrorCode::WrongType
+                        }
+                        parse_mailbox::MailboxParseErrorCode::EmptyResponse => {
+                            WitMailboxParseErrorCode::EmptyResponse
+                        }
+                        parse_mailbox::MailboxParseErrorCode::MethodError => {
+                            WitMailboxParseErrorCode::MethodError
+                        }
+                    },
+                    message: e.message,
+                })
+        }
+    }
+
+    fn into_wit_mailbox(m: parse_mailbox::Mailbox) -> WitMailbox {
+        WitMailbox {
+            id: m.id,
+            name: m.name,
+            parent_id: m.parent_id,
+            role: m.role,
+            sort_order: m.sort_order,
+            total_emails: m.total_emails,
+            unread_emails: m.unread_emails,
+            total_threads: m.total_threads,
+            unread_threads: m.unread_threads,
+            is_subscribed: m.is_subscribed,
+            my_rights: WitMailboxRights {
+                may_read_items: m.my_rights.may_read_items,
+                may_add_items: m.my_rights.may_add_items,
+                may_remove_items: m.my_rights.may_remove_items,
+                may_set_seen: m.my_rights.may_set_seen,
+                may_set_keywords: m.my_rights.may_set_keywords,
+                may_create_child: m.my_rights.may_create_child,
+                may_rename: m.my_rights.may_rename,
+                may_delete: m.my_rights.may_delete,
+                may_submit: m.my_rights.may_submit,
+            },
         }
     }
 }

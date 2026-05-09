@@ -20,7 +20,13 @@
  */
 
 import { createContext, useContext } from 'react';
-import { fetchSession, type JmapClientOptions, type Session } from './jmap-client.js';
+import {
+  fetchMailboxList,
+  fetchSession,
+  type JmapClientOptions,
+  type Mailbox,
+  type Session,
+} from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
 
 export type InvocationOptions = {
@@ -117,6 +123,19 @@ export function mcpInvoker(opts: McpInvokerOptions): Invoker {
 export type JmapInvokerOptions = JmapClientOptions;
 
 export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
+  // Per-invoker session cache. The first call to any capability fetches
+  // /.well-known/jmap once; subsequent calls reuse the resolved session
+  // for `apiUrl` + `primaryAccountIdMail`. The cache is per-invoker
+  // instance, so signing out (which discards the invoker) clears it
+  // naturally.
+  let cachedSession: Session | null = null;
+  async function getSession(): Promise<Session> {
+    if (cachedSession === null) {
+      cachedSession = await fetchSession(opts);
+    }
+    return cachedSession;
+  }
+
   return {
     async invoke<I, O>(
       name: string,
@@ -125,8 +144,13 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
     ): Promise<O | DryRunPreview<O>> {
       switch (name) {
         case 'session.get': {
-          const session: Session = await fetchSession(opts);
+          const session = await getSession();
           return session as unknown as O;
+        }
+        case 'mailbox.list': {
+          const session = await getSession();
+          const mailboxes: Mailbox[] = await fetchMailboxList({ ...opts, session });
+          return mailboxes as unknown as O;
         }
         default:
           throw makeToolError(

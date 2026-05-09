@@ -1,0 +1,129 @@
+{
+  "methodResponses": [
+    [
+      "Mailbox/get",
+      {
+        "accountId": "c",
+        "state": "1234",
+        "list": [
+          {
+            "id": "Mb01",
+            "name": "Inbox",
+            "parentId": null,
+            "role": "inbox",
+            "sortOrder": 0,
+            "totalEmails": 42,
+            "unreadEmails": 3,
+            "totalThreads": 28,
+            "unreadThreads": 2,
+            "isSubscribed": true,
+            "myRights": {
+              "mayReadItems": true,
+              "mayAddItems": true,
+              "mayRemoveItems": true,
+              "maySetSeen": true,
+              "maySetKeywords": true,
+              "mayCreateChild": true,
+              "mayRename": false,
+              "mayDelete": false,
+              "maySubmit": true
+            }
+          },
+          {
+            "id": "Mb02",
+            "name": "Sent",
+            "parentId": null,
+            "role": "sent",
+            "sortOrder": 1,
+            "totalEmails": 17,
+            "unreadEmails": 0,
+            "totalThreads": 17,
+            "unreadThreads": 0,
+            "isSubscribed": true,
+            "myRights": {
+              "mayReadItems": true,
+              "mayAddItems": true,
+              "mayRemoveItems": true,
+              "maySetSeen": true,
+              "maySetKeywords": true,
+              "mayCreateChild": true,
+              "mayRename": false,
+              "mayDelete": false,
+              "maySubmit": false
+            }
+          },
+          {
+            "id": "Mb03",
+            "name": "Drafts",
+            "parentId": null,
+            "role": "drafts",
+            "sortOrder": 2,
+            "totalEmails": 1,
+            "unreadEmails": 0,
+            "totalThreads": 1,
+            "unreadThreads": 0,
+            "isSubscribed": true,
+            "myRights": {
+              "mayReadItems": true,
+              "mayAddItems": true,
+              "mayRemoveItems": true,
+              "maySetSeen": true,
+              "maySetKeywords": true,
+              "mayCreateChild": false,
+              "mayRename": false,
+              "mayDelete": false,
+              "maySubmit": false
+            }
+          },
+          {
+            "id": "Mb04",
+            "name": "Trash",
+            "parentId": null,
+            "role": "trash",
+            "sortOrder": 3,
+            "totalEmails": 7,
+            "unreadEmails": 0,
+            "totalThreads": 7,
+            "unreadThreads": 0,
+            "isSubscribed": true,
+            "myRights": {
+              "mayReadItems": true,
+              "mayAddItems": true,
+              "mayRemoveItems": true,
+              "maySetSeen": true,
+              "maySetKeywords": true,
+              "mayCreateChild": false,
+              "mayRename": false,
+              "mayDelete": true,
+              "maySubmit": false
+            }
+          },
+          {
+            "id": "Mb05",
+            "name": "Project",
+            "parentId": "Mb01",
+            "role": null,
+            "sortOrder": 0,
+            "totalEmails": 5,
+            "unreadEmails": 1,
+            "totalThreads": 4,
+            "unreadThreads": 1,
+            "isSubscribed": true,
+            "myRights": {
+              "mayReadItems": true,
+              "mayAddItems": true,
+              "mayRemoveItems": true,
+              "maySetSeen": true,
+              "maySetKeywords": true,
+              "mayCreateChild": true,
+              "mayRename": true,
+              "mayDelete": true,
+              "maySubmit": false
+            }
+          }
+        ]
+      },
+      "0"
+    ]
+  ]
+}
