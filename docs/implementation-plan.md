@@ -195,6 +195,9 @@ You sign in, see your mailbox tree, click Inbox, see your threads, open a thread
 8. **Drafts panel.** ThreadList variant filtered to the Drafts mailbox. Click a draft → opens composer with content. *AI session: drafts-panel.*
 9. **`thread.search` capability.** JMAP `Email/query` with `text` filter. Server-side search; no local index in Phase 2. *AI session: thread-search.*
 10. **MCP read tools live.** `mailbox.list`, `thread.list`, `thread.get`, `thread.search`, `mail.draft` (read drafts; not write yet). Agents can list and read mail. *AI session: mcp-read-tools.*
+
+10a. **MCP transport: Streamable HTTP for production.** Phase 0 ships stdio (correct for local dev and the in-process test harness). Production deployments and external agent platforms (Claude Desktop, generic MCP clients) connect over HTTP. Per the 2025-2026 MCP spec, **Streamable HTTP** supersedes the deprecated HTTP+SSE transport. Implement Streamable HTTP with Bearer-token auth derived from each agent's per-task identity (Phase 3 issues the tokens; Phase 2 wires the transport). Stdio remains supported for local dev and CI. *AI session: mcp-streamable-http.*
+
 11. **First end-to-end agent flow.** Document at `docs/agent-quickstart.md`: how an external MCP client connects, authenticates, lists threads, reads a message. Example using Anthropic's MCP SDK or a curl call. *AI session: agent-quickstart-doc.*
 12. **Action log: writes on every send.** Send action records: recipients (hashed for log compactness, full in JMAP store), subject, blob references, identity used, dry-run preview content. *AI session: action-log-send.*
 
@@ -395,7 +398,13 @@ These items don't fit cleanly into one phase but require attention throughout. T
 
 ### CT-6. Schema versioning
 - `config.json`, capability contracts, action-log entries, MCP tool inputs/outputs — all carry a `schemaVersion` field.
-- Breaking schema changes go through a documented migration path.
+- Breaking schema changes go through the migration policy in `docs/schema-migration.md` (D-042).
+
+### CT-7. Native-app codegen targets
+- The brief's Library API path lists fully native applications (SwiftUI, Jetpack Compose, GTK, AppKit) as embedding consumers alongside tuatha. Codegen generators for non-TypeScript SDKs — Swift package, Kotlin Multiplatform module, Rust crate — are a post-v1.0 deliverable; the AST is shaped to accommodate them per D-035.
+- The error envelope, dry-run shape, pagination convention, and contract versioning (D-041, D-042, D-043 and successors) pass through unchanged across all SDK targets — generator-level differences are syntactic only.
+- Reference apps under `examples/native/` (one per platform, post-v1.0) demonstrate embedding the WASM components alongside the codegen'd SDK against a live Iarsma deployment.
+- Native clients are not forks of the React shell. The Tauri 2 path (Phase 6) wraps the React shell across desktop/mobile and remains the canonical packaged distribution; native-app embedding is a separate consumer pattern that ships components and contracts, not UI.
 
 ---
 
