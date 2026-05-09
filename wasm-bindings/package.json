@@ -17,12 +17,27 @@
     "./memory-backend": {
       "types": "./memory-backend/memory_backend.d.ts",
       "default": "./memory-backend/memory_backend.js"
+    },
+    "./html-sanitizer": {
+      "types": "./html-sanitizer/html_sanitizer.d.ts",
+      "default": "./html-sanitizer/html_sanitizer.js"
+    },
+    "./markdown": {
+      "types": "./markdown/markdown.d.ts",
+      "default": "./markdown/markdown.js"
+    },
+    "./git-backend": {
+      "types": "./git-backend/git_backend.d.ts",
+      "default": "./git-backend/git_backend.js"
     }
   },
   "files": [
     "jmap-client",
     "action-log",
-    "memory-backend"
+    "memory-backend",
+    "html-sanitizer",
+    "markdown",
+    "git-backend"
   ],
   "dependencies": {
     "@bytecodealliance/preview2-shim": "^0.17.9"
