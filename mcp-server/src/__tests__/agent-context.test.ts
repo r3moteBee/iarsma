@@ -27,6 +27,7 @@ describe('loadAgentContext', () => {
       IARSMA_WEBMAIL_MCP_URL: 'https://sw-mail.example.net/mcp',
     });
     expect(ctx).not.toBeNull();
+    expect(ctx?.version).toBe(1);
     expect(ctx?.webmailMcpUrl).toBe('https://sw-mail.example.net/mcp');
     expect(ctx?.actionLogUrl).toBeUndefined();
     expect(ctx?.memoryBackendUrl).toBeUndefined();
@@ -75,16 +76,19 @@ describe('loadAgentContext', () => {
 describe('agentContextCapability', () => {
   it('keys the value under urn:iarsma:agent-context', () => {
     const cap = agentContextCapability({
+      version: 1,
       webmailMcpUrl: 'https://sw-mail.example.net/mcp',
     });
     expect(Object.keys(cap)).toEqual([AGENT_CONTEXT_URN]);
     expect(cap[AGENT_CONTEXT_URN]?.webmailMcpUrl).toBe(
       'https://sw-mail.example.net/mcp',
     );
+    expect(cap[AGENT_CONTEXT_URN]?.version).toBe(1);
   });
 
   it('preserves optional fields without renaming or stripping', () => {
     const ctx = {
+      version: 1 as const,
       webmailMcpUrl: 'https://sw-mail.example.net/mcp',
       actionLogUrl: 'https://sw-mail.example.net/log',
       memoryBackendUrl: 'https://ob1.example.net/mcp',
@@ -105,6 +109,7 @@ describe('createIarsmaMcpServer URN advertisement', () => {
 
   it('advertises the URN under capabilities when agentContext is supplied', () => {
     const ctx = {
+      version: 1 as const,
       webmailMcpUrl: 'https://sw-mail.example.net/mcp',
       actionLogUrl: 'https://sw-mail.example.net/log',
     };

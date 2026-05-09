@@ -167,6 +167,7 @@ When an existing decision is reversed or refined, edit the entry and add an "Upd
 **Date:** 2026-04-26
 **Decision:** The webmail extends the JMAP session resource with a custom capability URN whose value carries `{webmailMcpUrl, actionLogUrl, memoryBackendUrl?}`. Agents understanding the URN pick up all relevant endpoints in one discovery call.
 **Why:** One auth envelope, one discovery call, multiple MCP endpoints. URN extension is a JMAP convention; agents that don't understand the URN ignore it gracefully.
+**Updated 2026-05-09 (see D-048):** The "JMAP session-resource extension" framing is retired. Iarsma can't append URNs to Stalwart's session response (the session is Stalwart's, not Iarsma's). The URN identifier itself is preserved (`urn:iarsma:agent-context`); delivery is now (a) the parallel discovery endpoint at `/.well-known/iarsma` and (b) the MCP capabilities map at initialize time. Both surfaces emit the same JSON payload, schema-locked in D-049 and documented in `docs/discovery.md`.
 
 ## D-033 — Stalwart Labs outreach deferred indefinitely
 **Date:** 2026-04-26
@@ -286,6 +287,42 @@ The `caller-class` field gives the policy seam (D-017) a fourth dimension to eva
 - Action-log UI surface ("Activity" page) for inspecting provenance + matching previews to commits — Phase 3 work item 11.
 - Cross-entry provenance verification (recomputing the preview-hash from a referenced earlier entry to confirm match) — Phase 3 hardening; the field is recorded now so the verification can land later without a schema bump.
 - Affected-json kind vocabulary lock — kept open-ended on purpose; new artifact types (mail/event/contact/file/...) extend it without bumping `schema-version`.
+
+## D-048 — Parallel discovery endpoint at `/.well-known/iarsma`
+**Date:** 2026-05-09
+**Decision:** Iarsma publishes its endpoint set through two equivalent surfaces:
+
+1. `GET /.well-known/iarsma` — single round-trip JSON, served by the `token-exchange` sidecar. Used by native-app embedders, ad-hoc tools, and any consumer that wants discovery without an MCP/JMAP handshake first.
+2. The MCP capabilities map at initialize time (`urn:iarsma:agent-context`) — same payload, free piggyback on the connection an agent is already opening.
+
+Both surfaces emit the same JSON, schema-locked in D-049. Operators route `<host>/.well-known/iarsma` to the sidecar (Stalwart reverse-proxy, external Caddy, or sidecar-on-public-port — see `docs/discovery.md`).
+
+**Why:** **Reverses the "JMAP session-resource extension" framing of D-032.** Iarsma can't append URNs to Stalwart's session response — the session belongs to Stalwart, not Iarsma. Two clean alternatives surfaced in audit item A3: (a) parallel discovery endpoint, (b) MCP-init-only emission. Native-app embedding (per the brief's Library API path and CT-7) makes (a) more attractive — a SwiftUI iOS client should reach `https://mail.example.net/.well-known/iarsma` and find everything in one fetch, with no MCP client library yet loaded.
+
+The two-surface design is not redundant: each serves a different bootstrap. Native-app embedders and ad-hoc curl-driven discovery start with the well-known endpoint; agents already mid-MCP-handshake get it free in capabilities. Both surfaces draw from the same env-var-shaped configuration.
+
+**How to apply:** `token-exchange/src/discovery.ts` is the sidecar-side implementation; `mcp-server/src/agent-context.ts` is the MCP-side mirror. Both consume `IARSMA_WEBMAIL_MCP_URL` (required), `IARSMA_ACTION_LOG_URL` (optional), `IARSMA_MEMORY_BACKEND_URL` (optional). Operators set the vars once in the shared environment. New env vars for new fields land in lockstep across both files; the schema-sync invariant is enforced via comments in each file referencing `docs/discovery.md`.
+
+## D-049 — URN payload schema lock + mutation policy
+**Date:** 2026-05-09
+**Decision:** The `urn:iarsma:agent-context` payload schema is locked at:
+
+```json
+{ "version": 1, "webmailMcpUrl": string, "actionLogUrl"?: string, "memoryBackendUrl"?: string }
+```
+
+`version` is a monotonic integer per `docs/versioning.md` boundary 5. Mutation policy:
+
+- **Adding a new optional field** → no version bump; consumers ignore unknowns.
+- **Adding a new required field** → bump `version` (existing consumers don't know to read it).
+- **Renaming, removing, or changing the semantic of an existing field** → bump `version`. Prior version's reader stays in code for at least two bundle minor releases per D-042.
+- **Changing the schema URL or content type** → does not happen; the well-known endpoint is the contract.
+
+**Why:** Lock-in protects native-app embedders. A SwiftUI client pinned at `version: 1` continues to work against `version: 1` payloads even after the operator deploys new fields; lower-version payloads work because the schema is append-only between major-version steps. The mutation policy mirrors the existing action-log entry policy (D-047) and the workspace versioning policy (D-044) — one rule, applied consistently across all monotonic-integer wire formats.
+
+**How to apply:** The Zod source-of-truth schema is `DiscoveryPayloadSchema` in `token-exchange/src/discovery.ts`; `AgentContextUrnSchema` in `mcp-server/src/agent-context.ts` mirrors it. `loadDiscoveryPayload(env)` and `loadAgentContext(env)` validate env-var-resolved payloads at startup; published payloads always conform. Tests in both packages assert the schema match. Doc lives at `docs/discovery.md`.
+
+**Out of scope:** A `discovery.json` static file in the bundle (operators who don't want to run the sidecar). Anticipated as a future option; the schema is locked here so the static-file path can come online later without redesign.
 
 ## D-034 — Project name: Iarsma
 **Date:** 2026-04-26
