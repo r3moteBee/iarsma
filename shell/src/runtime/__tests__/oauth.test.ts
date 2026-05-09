@@ -101,7 +101,7 @@ describe('startSignIn', () => {
       }),
     ).rejects.toBeDefined();
     const state = new URL(redirectedTo!).searchParams.get('state')!;
-    const stored = storage.takePkce(state);
+    const stored = await storage.takePkce(state);
     expect(stored).not.toBeNull();
     expect(stored!.codeVerifier).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
     expect(stored!.redirectUri).toBe(CONFIG.redirectUri);
@@ -175,18 +175,18 @@ describe('handleCallback', () => {
 });
 
 describe('signOut', () => {
-  it('clears tokens and any in-flight PKCE entries', () => {
+  it('clears tokens and any in-flight PKCE entries', async () => {
     const storage = inMemoryAuthStorage();
-    storage.saveTokens({ accessToken: 't', expiresAtMs: 0 });
-    storage.savePkce('s1', {
+    await storage.saveTokens({ accessToken: 't', expiresAtMs: 0 });
+    await storage.savePkce('s1', {
       state: 's1',
       codeVerifier: 'v',
       nonce: 'n',
       redirectUri: 'http://x',
       startedAtMs: 0,
     });
-    signOut({ config: CONFIG, storage });
+    await signOut({ config: CONFIG, storage });
     expect(storage.loadTokens()).toBeNull();
-    expect(storage.takePkce('s1')).toBeNull();
+    expect(await storage.takePkce('s1')).toBeNull();
   });
 });

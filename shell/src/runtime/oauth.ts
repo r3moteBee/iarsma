@@ -146,7 +146,7 @@ export async function startSignIn(deps: OAuthDeps): Promise<never> {
     redirectUri: deps.config.redirectUri,
     startedAtMs: now(),
   };
-  storage.savePkce(state, pkce);
+  await storage.savePkce(state, pkce);
 
   const url = new URL(as.authorization_endpoint!);
   url.searchParams.set('client_id', deps.config.clientId);
@@ -198,7 +198,7 @@ export async function handleCallback(
     throw makeError('invalid_callback', 'callback URL missing state parameter');
   }
 
-  const pkce = storage.takePkce(stateInUrl);
+  const pkce = await storage.takePkce(stateInUrl);
   if (pkce === null) {
     throw makeError(
       'pkce_mismatch',
@@ -257,7 +257,7 @@ export async function handleCallback(
       ? { email: claims['email'] }
       : {}),
   };
-  storage.saveTokens(tokens);
+  await storage.saveTokens(tokens);
   return tokens;
 }
 
@@ -276,14 +276,14 @@ export async function getAccessToken(deps: OAuthDeps): Promise<string | null> {
   const skewMs = 30_000;
   if (now() < tokens.expiresAtMs - skewMs) return tokens.accessToken;
   if (tokens.refreshToken === undefined) {
-    storage.clearTokens();
+    await storage.clearTokens();
     return null;
   }
   try {
     const refreshed = await refreshTokens(deps, tokens.refreshToken);
     return refreshed.accessToken;
   } catch {
-    storage.clearTokens();
+    await storage.clearTokens();
     return null;
   }
 }
@@ -341,16 +341,16 @@ export async function refreshTokens(
     ...(prior?.subject !== undefined ? { subject: prior.subject } : {}),
     ...(prior?.email !== undefined ? { email: prior.email } : {}),
   };
-  storage.saveTokens(tokens);
+  await storage.saveTokens(tokens);
   return tokens;
 }
 
 /** Clear local auth state. Best-effort RP-initiated logout would happen
  *  here when Stalwart implements an end-session endpoint. */
-export function signOut(deps: OAuthDeps): void {
+export async function signOut(deps: OAuthDeps): Promise<void> {
   const storage = deps.storage ?? sessionAuthStorage();
-  storage.clearTokens();
-  storage.clearAllPkce();
+  await storage.clearTokens();
+  await storage.clearAllPkce();
 }
 
 /** Convenience accessor for the cached signed-in user info. */

@@ -25,10 +25,20 @@ export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [config, setConfig] = useState<ShellConfig | null>(null);
 
+  const bumpAuth = useSetAtom(authVersionAtom);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        // Hydrate the auth-storage in-memory cache from the persistent
+        // IndexedDB backing (D-050) before any code that calls
+        // `authStorage.loadTokens()` runs. Bump the auth version so atoms
+        // that read tokens recompute once the cache is populated.
+        await authStorage.ready();
+        if (cancelled) return;
+        bumpAuth((v) => v + 1);
+
         const cfg = await loadConfig();
         if (cancelled) return;
         setConfig(cfg);
@@ -50,7 +60,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [bumpAuth]);
 
   if (phase.kind === 'loading' || (config === null && phase.kind !== 'config_error')) {
     return (
@@ -166,10 +176,11 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   const tokens = useAtomValue(tokensAtom);
 
   const onSignOut = () => {
-    signOut({ config });
-    // tokensAtom is read-derived (storage-backed); the version bump
-    // triggers re-derivation so it picks up the cleared tokens.
-    bumpAuth((v) => v + 1);
+    void signOut({ config }).then(() => {
+      // tokensAtom is read-derived (storage-backed); the version bump
+      // triggers re-derivation so it picks up the cleared tokens.
+      bumpAuth((v) => v + 1);
+    });
   };
 
   return (

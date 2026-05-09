@@ -324,6 +324,28 @@ The two-surface design is not redundant: each serves a different bootstrap. Nati
 
 **Out of scope:** A `discovery.json` static file in the bundle (operators who don't want to run the sidecar). Anticipated as a future option; the schema is locked here so the static-file path can come online later without redesign.
 
+## D-050 — Token storage: AES-GCM-256 in IndexedDB with versioned envelope
+**Date:** 2026-05-09
+**Decision:** The shell's auth storage moves from plaintext sessionStorage to encrypted IndexedDB:
+
+- **Wrap algorithm:** AES-GCM-256 via Web Crypto. AES-256 has ~128-bit post-quantum security under Grover (matches D-027's SHA-384 reasoning — symmetric AEAD doesn't need PQ replacement; asymmetric does, and we don't do app-level asymmetric here).
+- **Wrapping key:** generated via `crypto.subtle.generateKey({name:'AES-GCM', length:256}, false, ...)`. Non-extractable, origin-bound, persisted to IndexedDB via Web Crypto's structured-clone support. The key never leaves the secure context.
+- **Per-encryption:** random 96-bit IV, AAD = `${kid}|${purpose}` for domain separation across slots (`tokens.v1`, `pkce.v1`).
+- **Versioned envelope:** `{ v: 1, alg: 'A256GCM', kid: <id>, iv: <b64u>, ct: <b64u> }`. Self-describing on the wire.
+- **Crypto-agility:** the envelope's `v` is a monotonic integer per `docs/versioning.md`; future algorithms (e.g., a PQ AEAD candidate) bump `v` and add a new code path while old envelopes still decrypt as long as the previous reader stays in code. `kid` enables key rotation with old keys retained during a grace period.
+- **Backing store interface:** `AuthStorage` becomes async (writes return Promises; sync reads go through an in-memory cache hydrated by `ready()`). Three implementations: `inMemoryAuthStorage` (tests / SSR), `sessionAuthStorage` (per-tab plaintext, kiosk-friendly), `indexedDbAuthStorage` (production default).
+
+**Why:** Audit item C1. Pre-Phase-1 was acknowledged-risky in the implementation plan ("encryption key needs an honest design"). Phase 1 lengthens the attack window by adding `mailbox.list` and a longer-lived session; the right moment to lock storage is now. The user's preference for crypto-agility + PQ-readiness drives the versioned envelope and the choice of AES-GCM-256 (PQ-conservative under Grover's algorithm).
+
+For *transit* security, Iarsma rides on the platform's TLS — TLS 1.3 with X25519+ML-KEM-768 hybrid key exchange is rolling out in browsers and Node through 2025-2026, so app-level asymmetric crypto is unnecessary today. The token-exchange sidecar, when it eventually handles confidential clients (Phase 5+ GitHub OAuth), is the only place app-level asymmetric might enter — that's a then-decision.
+
+**How to apply:** New code reads `authStorage.loadTokens()` synchronously (cache-backed). Code that mutates tokens or PKCE state awaits the async `saveTokens` / `savePkce` / `takePkce` / `clearTokens`. App.tsx awaits `authStorage.ready()` once on mount before bumping `authVersionAtom`. The `kid` is generated at first run and persisted alongside the wrapping key; rotation lands as a separate concern when there's a use case (e.g., post-incident or scheduled).
+
+**Out of scope (follow-ups):**
+- IndexedDB integration tests (require fake-indexeddb or a jsdom environment; unit logic is covered by crypto-envelope tests against Node's built-in Web Crypto). Lands with Phase 1's broader testing infrastructure work.
+- Per-purpose key derivation via HKDF-SHA-384 from a master CryptoKey. The current design uses a single AES-GCM-256 key with AAD-based domain separation — simpler and sufficient. HKDF lands when a second consumer of the wrapping key emerges (e.g., wrapping a separate database of cached email metadata).
+- Tauri secure-storage upgrade (Phase 6+). The Web Crypto path inside the Tauri WebView works today; OS keychain integration is a hardening pass for native distributions.
+
 ## D-034 — Project name: Iarsma
 **Date:** 2026-04-26
 **Decision:** The project is named **Iarsma** (Irish, "EER-sma" — *relic, artifact, durable remnant*). Domains owned: `iarsma.com` (primary user-facing) and `iarsma.io` (developer-facing). The `.ai` TLD was deliberately *not* purchased — Iarsma is communication infrastructure, not an AI product, and the `.ai` framing would mis-position it. Use `Iarsma` as the proper noun in prose and titles; `iarsma` as the lowercase identifier in package names, URNs (`urn:iarsma:agent-context`), and component namespaces (`iarsma:jmap-client@0.0.0`).
