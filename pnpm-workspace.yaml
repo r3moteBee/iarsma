@@ -3,3 +3,4 @@ packages:
   - 'mcp-server'
   - 'token-exchange'
   - 'tools/*'
+  - 'wasm-bindings'

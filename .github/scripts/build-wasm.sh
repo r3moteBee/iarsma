@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Build every Rust WASM-component crate in `components/*` and, for the
-# subset that the shell imports, transpile the WASM artifact into JS
-# bindings under `shell/src/wasm/<comp>/`. Idempotent — safe to re-run.
+# subset that hosts import, transpile the WASM artifact into JS bindings
+# under `wasm-bindings/<comp>/` (the workspace-wide `@iarsma/wasm-bindings`
+# package). Idempotent — safe to re-run.
 #
 # Invoked from the CI workflow's TS and shell-build jobs. Mirrors the
 # `just wasm` recipe so a fresh checkout reproducibly arrives at the
@@ -23,7 +24,7 @@ for cargo_toml in components/*/Cargo.toml; do
     cargo component build -p "$comp_name" --release
 done
 
-# 2. Transpile each into shell/src/wasm/<name>/.
+# 2. Transpile each into wasm-bindings/<name>/.
 #    cargo-component emits to target/wasm32-wasip1/release/<name>.wasm
 #    despite the wasip2 inner target — the outer artifact is a Component.
 for comp_dir in components/*/; do

@@ -6,7 +6,7 @@
  * component to produce a typed Session record.
  */
 
-import { session as jmapClientSession } from '../wasm/jmap-client/jmap_client.js';
+import { session as jmapClientSession } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolError } from './types.js';
 
 export type Session = {

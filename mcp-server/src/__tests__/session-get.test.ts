@@ -153,7 +153,7 @@ describe('createSessionGetHandler', () => {
       bearerToken: 't',
       fetch: makeFetch({ ...STALWART_SESSION_BODY, username: undefined }),
     });
-    await expect(handler({}, ctx)).rejects.toThrow(/expected shape/);
+    await expect(handler({}, ctx)).rejects.toThrow(/missing-field|missing required field/);
   });
 
   it('rejects when primaryAccounts has no mail entry', async () => {
@@ -165,7 +165,7 @@ describe('createSessionGetHandler', () => {
         primaryAccounts: { 'urn:ietf:params:jmap:submission': 'c' },
       }),
     });
-    await expect(handler({}, ctx)).rejects.toThrow(/missing primary account/);
+    await expect(handler({}, ctx)).rejects.toThrow(/no-mail-account|primaryAccounts is missing/);
   });
 
   it('strips a single trailing slash from the base URL', async () => {

@@ -11,22 +11,14 @@
  * this with the per-request `Authorization: Bearer <token>` header,
  * threaded through the dispatcher via the agent identity.
  *
- * Why a hand-roll JSON parse here rather than the WASM jmap-client
- * component the shell uses: the shell imports the jco-transpiled
- * bindings out of `shell/src/wasm/`, which is shell-package-local. Phase 1
- * promotes the transpiled artifacts to a workspace-wide `wasm-bindings/`
- * directory so both consumers share one component instance — at which
- * point the parse logic here collapses into a call into the same
- * component the shell uses. For Phase 0 the duplication is intentional:
- * keeps this PR focused, the JSON shape is small and stable, and the
- * shape-equivalence is exercised end-to-end by the codegen-emitted
- * JSON-Schema parity tests.
+ * Parse path: shared with the shell via `@iarsma/wasm-bindings/jmap-client`.
+ * Both hosts route the JMAP response body through the same WASM component
+ * so wire-shape divergence shows up in one place (the component) rather
+ * than two hand-rolled parsers.
  */
 
-import { z } from 'zod';
+import { session as jmapClientSession } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolHandler } from '../invocation.js';
-
-const URN_MAIL = 'urn:ietf:params:jmap:mail';
 
 /**
  * Field-aligned with the codegen-emitted Session output schema. Stays in
@@ -42,16 +34,6 @@ export type Session = {
   readonly state: string;
   readonly primaryAccountIdMail: string;
 };
-
-const RawSessionSchema = z.object({
-  username: z.string(),
-  apiUrl: z.string(),
-  downloadUrl: z.string(),
-  uploadUrl: z.string(),
-  eventSourceUrl: z.string(),
-  state: z.string(),
-  primaryAccounts: z.record(z.string()),
-});
 
 export class SessionGetConfigError extends Error {
   constructor(message: string) {
@@ -130,28 +112,33 @@ export function createSessionGetHandler(deps: SessionGetDeps): ToolHandler {
       (err as Error & { code?: string }).code = code;
       throw err;
     }
-    const body = (await response.json()) as unknown;
-    const parsed = RawSessionSchema.safeParse(body);
-    if (!parsed.success) {
+    const body = await response.text();
+    try {
+      return jmapClientSession.parseSession(body) as Session;
+    } catch (e) {
       throw new Error(
-        `JMAP session response did not match expected shape: ${parsed.error.message}`,
+        `JMAP session response could not be parsed: ${describe(e)}`,
       );
     }
-    const primaryMail = parsed.data.primaryAccounts[URN_MAIL];
-    if (primaryMail === undefined) {
-      throw new Error(
-        `JMAP session response missing primary account for ${URN_MAIL}`,
-      );
-    }
-    const session: Session = {
-      username: parsed.data.username,
-      apiUrl: parsed.data.apiUrl,
-      downloadUrl: parsed.data.downloadUrl,
-      uploadUrl: parsed.data.uploadUrl,
-      eventSourceUrl: parsed.data.eventSourceUrl,
-      state: parsed.data.state,
-      primaryAccountIdMail: primaryMail,
-    };
-    return session;
   };
+}
+
+function describe(e: unknown): string {
+  // jco wraps `result<_, E>` errors in an object whose `.payload`
+  // carries the WIT `parse-error` record. Surface code + message when
+  // present so the dispatcher can attribute the failure precisely.
+  if (e !== null && typeof e === 'object' && 'payload' in e) {
+    const payload = (e as { payload: unknown }).payload;
+    if (
+      payload !== null &&
+      typeof payload === 'object' &&
+      'code' in payload &&
+      'message' in payload
+    ) {
+      const p = payload as { code: unknown; message: unknown };
+      return `${String(p.code)}: ${String(p.message)}`;
+    }
+  }
+  if (e instanceof Error) return e.message;
+  return String(e);
 }

@@ -1,0 +1,30 @@
+{
+  "name": "@iarsma/wasm-bindings",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Workspace-wide JS bindings for the iarsma WASM components — jco-transpiled output of components/* shared by every host (shell, mcp-server, future Tauri glue).",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./jmap-client": {
+      "types": "./jmap-client/jmap_client.d.ts",
+      "default": "./jmap-client/jmap_client.js"
+    },
+    "./action-log": {
+      "types": "./action-log/action_log.d.ts",
+      "default": "./action-log/action_log.js"
+    },
+    "./memory-backend": {
+      "types": "./memory-backend/memory_backend.d.ts",
+      "default": "./memory-backend/memory_backend.js"
+    }
+  },
+  "files": [
+    "jmap-client",
+    "action-log",
+    "memory-backend"
+  ],
+  "dependencies": {
+    "@bytecodealliance/preview2-shim": "^0.17.9"
+  }
+}
