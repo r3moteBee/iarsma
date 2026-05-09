@@ -9,11 +9,18 @@
 import cors from '@fastify/cors';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { type DiscoveryPayload } from './discovery.js';
 import { ExchangeError, type Exchanger } from './exchange.js';
 
 export type ServerOptions = {
   readonly exchanger: Exchanger;
   readonly corsOrigins?: readonly string[];
+  /**
+   * Discovery payload returned by `GET /.well-known/iarsma` (D-048).
+   * Pass `null` (or omit) to disable the route — useful in dev when
+   * the webmail MCP URL hasn't been configured yet.
+   */
+  readonly discovery?: DiscoveryPayload | null;
   /** Pass to override Fastify's default logger (e.g., for silent tests). */
   readonly logger?: boolean | object;
 };
@@ -41,6 +48,21 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   // Health probe — useful for orchestrators that want to know the sidecar
   // is alive without actually attempting an exchange.
   app.get('/healthz', async () => ({ status: 'ok' }));
+
+  // Iarsma discovery (D-048). Mirrors the MCP server's `urn:iarsma:agent-context`
+  // payload (D-049 schema lock). Operators route `<host>/.well-known/iarsma` to
+  // this sidecar — see docs/discovery.md and docs/deployment.md.
+  if (opts.discovery !== undefined && opts.discovery !== null) {
+    const discoveryBody = opts.discovery;
+    app.get('/.well-known/iarsma', async (_req, reply) => {
+      reply.header('content-type', 'application/json');
+      // Cache hint for agents and SDK auto-discovery: short enough that
+      // operators don't have to bust caches when adding endpoints, long
+      // enough that a busy agent fleet doesn't refetch on every call.
+      reply.header('cache-control', 'public, max-age=300');
+      return discoveryBody;
+    });
+  }
 
   app.post('/auth/token', async (req, reply) => {
     const parseResult = RequestSchema.safeParse(req.body);

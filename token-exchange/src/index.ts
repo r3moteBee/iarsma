@@ -13,6 +13,7 @@
  */
 
 import { ConfigError, loadConfig } from './config.js';
+import { DiscoveryConfigError, loadDiscoveryPayload } from './discovery.js';
 import { createExchanger } from './exchange.js';
 import { buildServer } from './server.js';
 
@@ -29,6 +30,18 @@ async function main(): Promise<void> {
     throw e;
   }
 
+  let discovery;
+  try {
+    discovery = loadDiscoveryPayload(process.env);
+  } catch (e) {
+    if (e instanceof DiscoveryConfigError) {
+      // eslint-disable-next-line no-console
+      console.error(`[token-exchange] discovery config: ${e.message}`);
+      process.exit(2);
+    }
+    throw e;
+  }
+
   const exchanger = await createExchanger({
     oidcIssuer: config.oidcIssuer,
     clientId: config.clientId,
@@ -40,12 +53,17 @@ async function main(): Promise<void> {
   const app = await buildServer({
     exchanger,
     corsOrigins: config.corsOrigins,
+    discovery,
   });
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
+  const discoveryNote = discovery === null
+    ? 'discovery=disabled (set IARSMA_WEBMAIL_MCP_URL to enable)'
+    : 'discovery=enabled at /.well-known/iarsma';
   app.log.info(
     `[token-exchange] listening on port ${config.port}, ` +
-      `client_id=${config.clientId}, allowed_redirects=${config.allowedRedirectUris.length}`,
+      `client_id=${config.clientId}, allowed_redirects=${config.allowedRedirectUris.length}, ` +
+      discoveryNote,
   );
 }
 
@@ -63,6 +81,13 @@ if (isMain) {
 
 export { loadConfig, ConfigError } from './config.js';
 export type { Config } from './config.js';
+export {
+  DISCOVERY_VERSION,
+  DiscoveryConfigError,
+  DiscoveryPayloadSchema,
+  loadDiscoveryPayload,
+} from './discovery.js';
+export type { DiscoveryPayload } from './discovery.js';
 export { createExchanger, ExchangeError, parseTokenResponse, discoverTokenEndpoint } from './exchange.js';
 export type {
   Exchanger,
