@@ -14,10 +14,14 @@ export type {
   Field,
   VariantCase,
   ErrorVariant,
+  ErrorEnvelope,
   Example,
+  Stability,
 } from './types.js';
 
-export { capability } from './contract.js';
+export { errorEnvelopeJsonSchema } from './types.js';
+
+export { capability, isValidSemver } from './contract.js';
 export type { Capability, CapabilityDef } from './contract.js';
 
 export { walkZod, UnhandledZodKind } from './walk.js';

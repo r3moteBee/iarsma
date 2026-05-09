@@ -28,6 +28,7 @@ describe('pascalCase', () => {
 describe('reactHookForCapability — read-style (non-destructive)', () => {
   const sessionGet = capability({
     name: 'session.get',
+    version: '0.0.1',
     scopes: ['session:read'],
     description: 'Get the current session.',
     input: z.object({}),
@@ -73,6 +74,7 @@ describe('reactHookForCapability — read-style (non-destructive)', () => {
   it('does not default input when input has required fields', () => {
     const required = capability({
       name: 'mail.list',
+      version: '0.0.1',
       scopes: ['mail:read'],
       description: 'List mail.',
       input: z.object({ mailboxId: z.string() }),
@@ -98,6 +100,7 @@ describe('reactHookForCapability — read-style (non-destructive)', () => {
 describe('reactHookForCapability — write-style (destructive)', () => {
   const mailSend = capability({
     name: 'mail.send',
+    version: '0.0.1',
     scopes: ['mail:send'],
     description: 'Send an email.',
     isDestructive: true,
@@ -142,6 +145,7 @@ describe('reactHookForCapability — write-style (destructive)', () => {
 describe('reactHookForCapability — determinism', () => {
   const cap = capability({
     name: 't.echo',
+    version: '0.0.1',
     scopes: ['t:echo'],
     description: 'Echo.',
     input: z.object({ message: z.string() }),

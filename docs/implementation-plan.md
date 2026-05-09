@@ -397,8 +397,9 @@ These items don't fit cleanly into one phase but require attention throughout. T
 - Reach out to Stalwart Labs around Phase 1–2 ship to discuss component sharing.
 
 ### CT-6. Schema versioning
-- `config.json`, capability contracts, action-log entries, MCP tool inputs/outputs — all carry a `schemaVersion` field.
+- `config.json`, capability contracts, action-log entries, MCP tool inputs/outputs — all carry a `schemaVersion` field. The eight versioned boundaries are catalogued in `docs/versioning.md` (D-044).
 - Breaking schema changes go through the migration policy in `docs/schema-migration.md` (D-042).
+- Capability contracts additionally carry a `stability` annotation (D-045): `'experimental'` (default), `'stable'`, or `'deprecated'`.
 
 ### CT-7. Native-app codegen targets
 - The brief's Library API path lists fully native applications (SwiftUI, Jetpack Compose, GTK, AppKit) as embedding consumers alongside tuatha. Codegen generators for non-TypeScript SDKs — Swift package, Kotlin Multiplatform module, Rust crate — are a post-v1.0 deliverable; the AST is shaped to accommodate them per D-035.

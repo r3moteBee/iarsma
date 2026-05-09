@@ -17,6 +17,7 @@ import {
 
 const send = capability({
   name: 'mail.send',
+  version: '0.0.1',
   scopes: ['mail:send'],
   description: 'Send an email through the configured outbound relay.',
   isDestructive: true,
@@ -39,6 +40,7 @@ const send = capability({
 
 const sessionGet = capability({
   name: 'session.get',
+  version: '0.0.1',
   scopes: ['session:read'],
   description: 'Get the current session.',
   input: z.object({}),

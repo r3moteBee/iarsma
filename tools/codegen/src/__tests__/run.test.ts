@@ -42,6 +42,7 @@ describe('safeName', () => {
 describe('isCapability', () => {
   const real = capability({
     name: 'a.b',
+    version: '0.0.1',
     scopes: [],
     description: 'x',
     input: z.object({}),
@@ -76,6 +77,7 @@ describe('generateArtifacts', () => {
 
   const a = capability({
     name: 'a.first',
+    version: '0.0.1',
     scopes: ['x:read'],
     description: 'A.',
     input: z.object({}),
@@ -85,6 +87,7 @@ describe('generateArtifacts', () => {
 
   const b = capability({
     name: 'b.second',
+    version: '0.0.1',
     scopes: ['y:write'],
     description: 'B.',
     isDestructive: true,
@@ -171,8 +174,27 @@ describe('run (integration with the project contracts)', () => {
       await fs.readFile(path.join(tmp, 'tools', 'session-get.json'), 'utf-8'),
     );
     expect(reg.name).toBe('session.get');
+    expect(reg.version).toBe('0.0.1');
+    expect(reg.stability).toBe('experimental');
     expect(reg.requiredScopes).toEqual(['session:read']);
     expect(reg.isDestructive).toBe(false);
+    expect(reg.errorEnvelopeSchema).toMatchObject({ title: 'IarsmaError' });
+  });
+
+  it('exposes the workspace error envelope in OpenAPI components (D-043)', async () => {
+    const raw = await fs.readFile(path.join(tmp, 'openapi.json'), 'utf-8');
+    const doc = JSON.parse(raw);
+    expect(doc.components.schemas.IarsmaError).toMatchObject({
+      title: 'IarsmaError',
+      type: 'object',
+      required: ['code', 'message'],
+    });
+    const op = doc.paths['/mcp/tools/session.get'].post;
+    expect(op['x-iarsma-version']).toBe('0.0.1');
+    expect(op['x-iarsma-stability']).toBe('experimental');
+    expect(op.responses['500'].content['application/json'].schema).toEqual({
+      $ref: '#/components/schemas/IarsmaError',
+    });
   });
 
   it('produces a markdown docs page per capability', async () => {
