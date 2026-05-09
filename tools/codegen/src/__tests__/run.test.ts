@@ -91,6 +91,7 @@ describe('generateArtifacts', () => {
     scopes: ['y:write'],
     description: 'B.',
     isDestructive: true,
+    dryRun: { preview: z.object({}) },
     input: z.object({ y: z.string() }),
     output: z.object({}),
     examples: [],

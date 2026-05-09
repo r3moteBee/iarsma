@@ -69,17 +69,63 @@ export function markdownForCapability(cap: CapabilityAST): string {
   lines.push(`- **Destructive:** ${cap.isDestructive ? 'yes (requires dry-run)' : 'no'}`);
   lines.push('');
 
-  // Input
-  lines.push('## Input');
-  lines.push('');
-  lines.push(...renderTypeAsSection(cap.input));
-  lines.push('');
+  if (cap.isDestructive && cap.dryRun !== undefined) {
+    // Destructive tools: explain the dry-run envelope, then show params,
+    // preview, and result separately (D-046). Natural shapes per section
+    // are easier for humans than the wrapped `oneOf` would be.
+    lines.push('## Calling convention (dry-run protocol)');
+    lines.push('');
+    lines.push(
+      'This is a destructive capability. Every invocation carries a top-level ' +
+        '`mode: \'preview\' | \'commit\'` flag alongside the params:',
+    );
+    lines.push('');
+    lines.push('```json');
+    lines.push('{ "mode": "preview", "params": { ... } }');
+    lines.push('```');
+    lines.push('');
+    lines.push(
+      "`'preview'` returns what the action would do (see **Preview output** below) " +
+        "without mutating state — agents and policy engines evaluate the preview before " +
+        "deciding whether to commit. `'commit'` performs the action and returns the " +
+        "result plus an action-log reference (`logEntryRef`).",
+    );
+    lines.push('');
 
-  // Output
-  lines.push('## Output');
-  lines.push('');
-  lines.push(...renderTypeAsSection(cap.output));
-  lines.push('');
+    lines.push('## Params');
+    lines.push('');
+    lines.push(...renderTypeAsSection(cap.input));
+    lines.push('');
+
+    lines.push('## Preview output (`mode: "preview"`)');
+    lines.push('');
+    lines.push(...renderTypeAsSection(cap.dryRun.preview));
+    lines.push('');
+
+    lines.push('## Commit output (`mode: "commit"`)');
+    lines.push('');
+    lines.push(
+      'On commit the response carries `result` (the natural output below) plus ' +
+        '`logEntryRef: string` (hex SHA-384 of the action-log entry recorded for this ' +
+        'commit, queryable via the action-log read APIs).',
+    );
+    lines.push('');
+    lines.push('**`result`:**');
+    lines.push('');
+    lines.push(...renderTypeAsSection(cap.output));
+    lines.push('');
+  } else {
+    // Non-destructive: simple input/output (no envelope wrapping).
+    lines.push('## Input');
+    lines.push('');
+    lines.push(...renderTypeAsSection(cap.input));
+    lines.push('');
+
+    lines.push('## Output');
+    lines.push('');
+    lines.push(...renderTypeAsSection(cap.output));
+    lines.push('');
+  }
 
   // Errors (if any)
   if (cap.errors.length > 0) {

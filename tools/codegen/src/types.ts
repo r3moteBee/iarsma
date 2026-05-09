@@ -38,6 +38,25 @@ export type CapabilityAST = {
   readonly input: TypeNode;
   /** Output shape on success. */
   readonly output: TypeNode;
+  /**
+   * Dry-run preview shape (D-046). Required iff `isDestructive` is true.
+   * The preview is what the policy seam evaluates and what humans see in
+   * the confirmation dialog. Per-tool: a draft `mail.send` preview shows
+   * recipients/subject/body diff; a `calendar.event.create` preview shows
+   * attendee delta + RRULE expansion; a `contacts.contact.update` preview
+   * shows field-level diff.
+   *
+   * Wire shape (uniform across all destructive tools):
+   *
+   *   Input:  `{ params, mode: 'preview' | 'commit' }`
+   *   Output: `{ mode: 'preview', preview }`
+   *           | `{ mode: 'commit', result, logEntryRef }`
+   *
+   * Generators emit the wrapped shapes when `dryRun` is present.
+   */
+  readonly dryRun?: {
+    readonly preview: TypeNode;
+  };
   /** Typed error variants. Codes flow through the workspace `ErrorEnvelope`. */
   readonly errors: readonly ErrorVariant[];
   /** Examples for docs and round-trip tests (D-037). */

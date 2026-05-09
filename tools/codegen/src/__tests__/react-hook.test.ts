@@ -104,6 +104,7 @@ describe('reactHookForCapability — write-style (destructive)', () => {
     scopes: ['mail:send'],
     description: 'Send an email.',
     isDestructive: true,
+    dryRun: { preview: z.object({}) },
     input: z.object({
       to: z.array(z.string()),
       body: z.string(),

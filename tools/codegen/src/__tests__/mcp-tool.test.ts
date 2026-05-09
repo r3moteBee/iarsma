@@ -17,6 +17,7 @@ describe('mcpToolForCapability', () => {
     scopes: ['mail:send'],
     description: 'Send an email through the configured outbound relay.',
     isDestructive: true,
+    dryRun: { preview: z.object({}) },
     input: z.object({
       to: z.array(z.string()),
       subject: z.string(),
@@ -58,22 +59,52 @@ describe('mcpToolForCapability', () => {
     });
   });
 
-  it('embeds input + output schemas', () => {
+  it('wraps destructive input + output in the dry-run envelope (D-046)', () => {
     const reg = mcpToolForCapability(sample.ast);
+    // Destructive tools have their input wrapped: `{ mode, params }`.
     expect(reg.inputSchema).toMatchObject({
       type: 'object',
       properties: {
-        to: { type: 'array', items: { type: 'string' } },
+        mode: { type: 'string', enum: ['preview', 'commit'] },
+        params: {
+          type: 'object',
+          properties: {
+            to: { type: 'array', items: { type: 'string' } },
+          },
+          required: expect.arrayContaining(['to', 'subject', 'body']),
+        },
       },
-      required: expect.arrayContaining(['to', 'subject', 'body']),
+      required: ['mode', 'params'],
     });
+    // Output is a discriminated union of preview vs commit.
     expect(reg.outputSchema).toMatchObject({
-      type: 'object',
-      properties: {
-        messageId: { type: 'string' },
-        sentAt: { type: 'string', description: 'ISO 8601 timestamp.' },
-      },
+      oneOf: expect.any(Array),
     });
+    const cases = (reg.outputSchema as { oneOf: Array<{ properties: Record<string, unknown> }> }).oneOf;
+    expect(cases).toHaveLength(2);
+    expect(cases[0]?.properties).toMatchObject({ mode: { const: 'preview' } });
+    expect(cases[1]?.properties).toMatchObject({
+      mode: { const: 'commit' },
+      result: {
+        type: 'object',
+        properties: {
+          messageId: { type: 'string' },
+          sentAt: { type: 'string', description: 'ISO 8601 timestamp.' },
+        },
+      },
+      logEntryRef: { type: 'string' },
+    });
+  });
+
+  it('exposes natural params + preview schemas alongside the wrapped shapes', () => {
+    const reg = mcpToolForCapability(sample.ast);
+    expect(reg.paramsSchema).toMatchObject({
+      title: 'mail.send.params',
+      type: 'object',
+      properties: { to: { type: 'array' } },
+    });
+    expect(reg.previewSchema).toBeDefined();
+    expect(reg.previewSchema).toMatchObject({ title: 'mail.send.preview' });
   });
 
   it('preserves examples for docs (D-037)', () => {

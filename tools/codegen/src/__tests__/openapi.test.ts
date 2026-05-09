@@ -19,6 +19,7 @@ const send = capability({
   scopes: ['mail:send'],
   description: 'Send an email.',
   isDestructive: true,
+  dryRun: { preview: z.object({}) },
   input: z.object({ to: z.array(z.string()), body: z.string() }),
   output: z.object({ messageId: z.string() }),
   examples: [],

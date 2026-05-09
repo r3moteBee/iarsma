@@ -16,7 +16,11 @@
  */
 
 import { errorEnvelopeJsonSchema, type CapabilityAST, type Stability } from '../types.js';
-import { jsonSchemaForCapability, type JSONSchema } from './json-schema.js';
+import {
+  jsonSchemaForCapability,
+  typeNodeToJsonSchema,
+  type JSONSchema,
+} from './json-schema.js';
 
 export type McpToolRegistration = {
   /** Dotted-path tool name, e.g. "session.get". */
@@ -32,10 +36,35 @@ export type McpToolRegistration = {
   readonly description: string;
   /** Required scope set; agent's token must include all of these. */
   readonly requiredScopes: readonly string[];
-  /** JSON Schema for tool input. */
+  /**
+   * JSON Schema for tool input.
+   *
+   * For destructive tools (D-046) this is the wrapped envelope:
+   * `{ mode: 'preview' | 'commit', params }`.
+   *
+   * For non-destructive tools this is the contract author's natural input.
+   */
   readonly inputSchema: JSONSchema;
-  /** JSON Schema for tool output (for response validation / docs). */
+  /**
+   * JSON Schema for tool output (for response validation / docs).
+   *
+   * For destructive tools (D-046) this is the discriminated union:
+   * `{ mode: 'preview', preview } | { mode: 'commit', result, logEntryRef }`.
+   *
+   * For non-destructive tools this is the contract author's natural output.
+   */
   readonly outputSchema: JSONSchema;
+  /**
+   * Direct JSON Schema for the contract author's natural `params` (the
+   * inner input before the destructive envelope wrapping). Always present;
+   * for non-destructive tools, identical to `inputSchema`.
+   */
+  readonly paramsSchema: JSONSchema;
+  /**
+   * Direct JSON Schema for the dry-run preview shape, on destructive tools.
+   * Absent on non-destructive tools.
+   */
+  readonly previewSchema?: JSONSchema;
   /**
    * JSON Schema for the workspace error envelope (D-043). Carried on every
    * tool registration so MCP consumers don't have to compose it themselves.
@@ -56,6 +85,7 @@ export type McpToolRegistration = {
 
 export function mcpToolForCapability(cap: CapabilityAST): McpToolRegistration {
   const schemas = jsonSchemaForCapability(cap);
+  const paramsSchema = typeNodeToJsonSchema(cap.input, `${cap.name}.params`);
   return {
     name: cap.name,
     version: cap.version,
@@ -64,6 +94,10 @@ export function mcpToolForCapability(cap: CapabilityAST): McpToolRegistration {
     requiredScopes: cap.scopes,
     inputSchema: schemas.input,
     outputSchema: schemas.output,
+    paramsSchema,
+    ...(cap.dryRun !== undefined
+      ? { previewSchema: typeNodeToJsonSchema(cap.dryRun.preview, `${cap.name}.preview`) }
+      : {}),
     errorEnvelopeSchema: errorEnvelopeJsonSchema(),
     isDestructive: cap.isDestructive,
     errorCodes: cap.errors.map((e) => ({ code: e.code, description: e.description })),

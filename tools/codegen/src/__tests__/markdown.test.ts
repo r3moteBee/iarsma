@@ -21,6 +21,7 @@ const send = capability({
   scopes: ['mail:send'],
   description: 'Send an email through the configured outbound relay.',
   isDestructive: true,
+  dryRun: { preview: z.object({}) },
   input: z.object({
     to: z.array(z.string()).describe('Recipient addresses.'),
     subject: z.string(),
@@ -102,6 +103,26 @@ describe('markdownForCapability', () => {
   it('marks non-destructive capabilities clearly', () => {
     const md = markdownForCapability(sessionGet.ast);
     expect(md).toContain('**Destructive:** no');
+  });
+
+  it('renders the dry-run protocol layout for destructive tools (D-046)', () => {
+    const md = markdownForCapability(send.ast);
+    expect(md).toContain('## Calling convention (dry-run protocol)');
+    expect(md).toContain('## Params');
+    expect(md).toContain('## Preview output (`mode: "preview"`)');
+    expect(md).toContain('## Commit output (`mode: "commit"`)');
+    expect(md).toContain('logEntryRef');
+    // Non-destructive shape ('## Input' / '## Output' as separate sections)
+    // should not appear on a destructive page.
+    expect(md).not.toMatch(/^## Input$/m);
+    expect(md).not.toMatch(/^## Output$/m);
+  });
+
+  it('keeps the non-destructive layout on read-only tools', () => {
+    const md = markdownForCapability(sessionGet.ast);
+    expect(md).toMatch(/^## Input$/m);
+    expect(md).toMatch(/^## Output$/m);
+    expect(md).not.toContain('Calling convention (dry-run protocol)');
   });
 
   it('renders input table with required + descriptions', () => {

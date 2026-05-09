@@ -29,11 +29,14 @@ export function reactHookForCapability(cap: CapabilityAST): string {
   const outputTs = typeNodeToTypeScript(cap.output);
   const inputType = pascalCase(cap.name) + 'Input';
   const outputType = pascalCase(cap.name) + 'Output';
+  const previewType = pascalCase(cap.name) + 'Preview';
   const hookName = `use${pascalCase(cap.name)}`;
   const scopesLiteral = cap.scopes.length === 0
     ? '[] as const'
     : `[${cap.scopes.map((s) => `'${s}'`).join(', ')}] as const`;
   const isDestructive = cap.isDestructive;
+  const previewTs =
+    cap.dryRun !== undefined ? typeNodeToTypeScript(cap.dryRun.preview) : null;
 
   const header = [
     '// Generated from contract: ' + cap.name,
@@ -49,12 +52,18 @@ export function reactHookForCapability(cap: CapabilityAST): string {
     '',
   ].join('\n');
 
-  const types = [
+  const typeLines: string[] = [
     `export type ${inputType} = ${inputTs};`,
     '',
     `export type ${outputType} = ${outputTs};`,
     '',
-  ].join('\n');
+  ];
+  if (previewTs !== null) {
+    typeLines.push(`/** Dry-run preview shape for \`${cap.name}\` (D-046). */`);
+    typeLines.push(`export type ${previewType} = ${previewTs};`);
+    typeLines.push('');
+  }
+  const types = typeLines.join('\n');
 
   const metadata = [
     `/** Semver version of the contract this hook was generated from (D-044). */`,
