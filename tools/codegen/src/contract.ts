@@ -53,6 +53,23 @@ export type CapabilityDef<I extends z.ZodTypeAny, O extends z.ZodTypeAny> = {
   /** Output schema on success. */
   readonly output: O;
   /**
+   * Dry-run preview schema (D-046). Required when `isDestructive: true`;
+   * forbidden when `isDestructive` is false or omitted. Codegen rejects
+   * the mismatched cases at definition time.
+   *
+   * Generators emit a uniform wire envelope around destructive tools:
+   *
+   *   Input:  `{ params, mode: 'preview' | 'commit' }`
+   *   Output: `{ mode: 'preview', preview }`
+   *           | `{ mode: 'commit', result, logEntryRef }`
+   *
+   * Authors define the contract's natural input/output as if dry-run
+   * didn't exist; the wrapping is the codegen's job.
+   */
+  readonly dryRun?: {
+    readonly preview: z.ZodTypeAny;
+  };
+  /**
    * Typed error variants. The `code` strings flow through the workspace
    * `ErrorEnvelope`; the optional `payload` defines the shape of
    * `envelope.details` for that variant.
@@ -114,15 +131,29 @@ export function capability<I extends z.ZodTypeAny, O extends z.ZodTypeAny>(
       `capability(${def.name}): invalid version ${JSON.stringify(def.version)} — must be semver per docs/schema-migration.md`,
     );
   }
+  const isDestructive = def.isDestructive ?? false;
+  if (isDestructive && def.dryRun === undefined) {
+    throw new Error(
+      `capability(${def.name}): destructive contracts must declare \`dryRun.preview\` (D-046)`,
+    );
+  }
+  if (!isDestructive && def.dryRun !== undefined) {
+    throw new Error(
+      `capability(${def.name}): non-destructive contracts must not declare \`dryRun\` — set \`isDestructive: true\` if dry-run applies (D-046)`,
+    );
+  }
   const ast: CapabilityAST = {
     name: def.name,
     version: def.version,
     stability: def.stability ?? 'experimental',
     scopes: def.scopes,
     description: def.description,
-    isDestructive: def.isDestructive ?? false,
+    isDestructive,
     input: walkZod(def.input),
     output: walkZod(def.output),
+    ...(def.dryRun !== undefined
+      ? { dryRun: { preview: walkZod(def.dryRun.preview) } }
+      : {}),
     errors: def.errors ?? [],
     examples: def.examples,
   };

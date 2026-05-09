@@ -16,7 +16,7 @@
  */
 
 import { errorEnvelopeJsonSchema, type CapabilityAST } from '../types.js';
-import { jsonSchemaForCapability } from './json-schema.js';
+import { jsonSchemaForCapability, typeNodeToJsonSchema } from './json-schema.js';
 
 export type OpenAPIDoc = Record<string, unknown>;
 
@@ -74,6 +74,15 @@ export function openApiForCapabilities(
         'x-iarsma-stability': cap.stability,
         'x-iarsma-scopes': [...cap.scopes],
         'x-iarsma-destructive': cap.isDestructive,
+        'x-iarsma-params-schema': typeNodeToJsonSchema(cap.input, `${cap.name}.params`),
+        ...(cap.dryRun !== undefined
+          ? {
+              'x-iarsma-preview-schema': typeNodeToJsonSchema(
+                cap.dryRun.preview,
+                `${cap.name}.preview`,
+              ),
+            }
+          : {}),
         'x-iarsma-error-codes': cap.errors.map((e) => ({
           code: e.code,
           description: e.description,

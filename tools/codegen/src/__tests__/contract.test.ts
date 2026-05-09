@@ -90,6 +90,50 @@ describe('capability() — stability annotation (D-045)', () => {
   });
 });
 
+describe('capability() — dry-run shape validation (D-046)', () => {
+  const minimal = {
+    name: 'mail.send',
+    version: '0.0.1',
+    scopes: ['mail:send'],
+    description: 'Send mail.',
+    input: z.object({ to: z.string() }),
+    output: z.object({ messageId: z.string() }),
+    examples: [],
+  } as const;
+
+  it('rejects destructive contracts without a dryRun preview', () => {
+    expect(() =>
+      capability({ ...minimal, isDestructive: true } as never),
+    ).toThrow(/destructive contracts must declare/);
+  });
+
+  it('rejects non-destructive contracts that declare dryRun', () => {
+    expect(() =>
+      capability({
+        ...minimal,
+        dryRun: { preview: z.object({}) },
+      } as never),
+    ).toThrow(/non-destructive contracts must not declare/);
+  });
+
+  it('accepts a destructive contract with a preview schema', () => {
+    const cap = capability({
+      ...minimal,
+      isDestructive: true,
+      dryRun: {
+        preview: z.object({ recipients: z.array(z.string()) }),
+      },
+    });
+    expect(cap.ast.dryRun).toBeDefined();
+    expect(cap.ast.dryRun?.preview.kind).toBe('record');
+  });
+
+  it('omits dryRun on the AST for non-destructive contracts', () => {
+    const cap = capability(minimal);
+    expect(cap.ast.dryRun).toBeUndefined();
+  });
+});
+
 describe('errorEnvelopeJsonSchema (D-043)', () => {
   it('exposes the workspace-wide envelope shape', () => {
     const schema = errorEnvelopeJsonSchema();

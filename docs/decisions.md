@@ -239,6 +239,30 @@ When an existing decision is reversed or refined, edit the entry and add an "Upd
 **Why:** Without a stability signal, embedders can't tell which contracts they should depend on long-term. Defaulting to `'experimental'` pre-v1.0 protects against premature dependence — the project has not yet earned the right to call anything stable. The single-milestone promotion model means "stable" reflects an intentional commitment rather than drift. Foundational contracts like mail-baseline could plausibly default to `'stable'` at definition time, but that overweights individual confidence over the milestone discipline that protects embedders system-wide.
 **How to apply:** Contract authors omit `stability` (default applies). Annotation appears in MCP tool registration, OpenAPI `x-iarsma-stability`, markdown docs front matter (with a one-line explanation per stability level), and React hook output as `<NAME>_STABILITY`. The v1.0 GA bundle release flips every v1-set contract to `'stable'` in one PR.
 
+## D-046 — Dry-run protocol shape: uniform `mode` envelope
+**Date:** 2026-05-09
+**Decision:** Every destructive capability uses a single tool with a uniform wire envelope:
+
+- **Input:** `{ mode: 'preview' | 'commit', params: <ContractInput> }`
+- **Output for preview:** `{ mode: 'preview', preview: <ContractPreview> }`
+- **Output for commit:** `{ mode: 'commit', result: <ContractOutput>, logEntryRef: string }`
+
+Authors define the natural input, output, and **preview** shape on `CapabilityDef`. Codegen rejects destructive contracts without a `dryRun.preview` schema, and rejects non-destructive contracts that declare one. The envelope is the codegen's job; the contract author writes only the artifact-specific shapes.
+
+Default `mode` per consumer: MCP-server-side default is `'preview'` for agent calls (forces explicit commit); React-hook callers go through `useWriteHook.preview()` and `useWriteHook.commit()` which set the mode for them; library API callers must pass mode explicitly.
+
+**Why:** The audit's recommendation, accepted in conversation. The dry-run / propose-preview-approve-commit pattern is foundational (brief, "Agent/Human Collaboration Model"). A uniform envelope is artifact-agnostic — the same shape carries `mail.send`, `calendar.event.create`, `contacts.contact.update`, and Phase 5's `files.file.write`. Discriminated outputs let consumers narrow on `mode` and access the matching payload without conditional shape inspection. One MCP tool per verb (not two — `mail.send` and `mail.send.preview`) keeps the tool surface small and discoverable. The `params` indirection on input is what makes adding workspace-level metadata later (e.g. `correlationId`, `policyHints`) cheap — a forward-compatible minor bump per D-042.
+
+**How to apply:** Contract authors declare `dryRun: { preview: <ZodSchema> }` alongside `isDestructive: true`. Generators handle the rest:
+- mcp-tool: `inputSchema` is the wrapped envelope; `outputSchema` is the discriminated `oneOf`. `paramsSchema` and `previewSchema` carry the natural shapes for direct introspection.
+- openapi: same wrapped shapes on requestBody / 200 response, plus `x-iarsma-params-schema` and `x-iarsma-preview-schema` extensions.
+- markdown: separate `## Calling convention`, `## Params`, `## Preview output`, `## Commit output` sections — natural shapes per section, the envelope explained in prose.
+- react-hook: emits `<Name>Preview` type alias alongside `<Name>Input` and `<Name>Output`.
+
+**Out of scope (follow-ups):**
+- The shell runtime's `DryRunPreview<O>` placeholder (`{ output, effects, policy }`) and the MCP server's `_iarsmaDryRun` arg path are not yet aligned with the new wire shape. No destructive contract has been authored, so nothing exercises the divergence today; runtime/server alignment lands when Phase 2 ships the first destructive contract (`mail.send`). The contract surface is locked here so embedders can plan against the stable shape.
+- Policy seam metadata on the preview output (workspace-level `effects`, `policy`, `estimatedCost`) is deliberately not part of the v0 envelope. A minor bump adds them as optional fields when the policy seam lands real implementations (Phase 3).
+
 ## D-034 — Project name: Iarsma
 **Date:** 2026-04-26
 **Decision:** The project is named **Iarsma** (Irish, "EER-sma" — *relic, artifact, durable remnant*). Domains owned: `iarsma.com` (primary user-facing) and `iarsma.io` (developer-facing). The `.ai` TLD was deliberately *not* purchased — Iarsma is communication infrastructure, not an AI product, and the `.ai` framing would mis-position it. Use `Iarsma` as the proper noun in prose and titles; `iarsma` as the lowercase identifier in package names, URNs (`urn:iarsma:agent-context`), and component namespaces (`iarsma:jmap-client@0.0.0`).
