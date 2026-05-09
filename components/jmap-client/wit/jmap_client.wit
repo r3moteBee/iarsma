@@ -5,11 +5,19 @@
 // typed records" and "typed records → JMAP wire bytes". Host code does the
 // fetch and supplies the auth header.
 //
-// First capability: `session.get`. Mirrors tools/codegen/contracts/session.ts.
-// Field order and naming are aligned: WIT kebab-case ↔ TS camelCase via the
-// codegen / jco mapping (api-url ↔ apiUrl, etc.).
+// Capabilities:
+//   - `session`: parse JMAP session resource (RFC 8620 §2).
+//   - `mailbox`: parse `Mailbox/get` method response (RFC 8621 §2).
+//
+// Each interface owns its own `parse-error` / `parse-error-code` types
+// because the relevant error cases differ per parser (e.g., session
+// surfaces `no-mail-account` which is meaningless for mailbox parsing,
+// and mailbox surfaces `method-error` which is meaningless for session
+// parsing). The codegen-generated hosts unify them at the host
+// invocation boundary into the workspace `IarsmaError` envelope (D-043);
+// the component layer keeps shapes narrow and explicit.
 
-package iarsma:jmap-client@0.0.0;
+package iarsma:jmap-client@0.1.0;
 
 interface session {
     /// Narrow projection of a JMAP session resource (RFC 8620 §2). Matches
@@ -54,6 +62,78 @@ interface session {
     parse-session: func(json: string) -> result<session, parse-error>;
 }
 
+interface mailbox {
+    /// Per-mailbox rights (RFC 8621 §2.1.1). Bool fields mirror the JMAP
+    /// `myRights` object. Surfaced so the UI can disable destructive
+    /// actions (delete / rename / move) when the server says they're
+    /// disallowed.
+    record mailbox-rights {
+        may-read-items: bool,
+        may-add-items: bool,
+        may-remove-items: bool,
+        may-set-seen: bool,
+        may-set-keywords: bool,
+        may-create-child: bool,
+        may-rename: bool,
+        may-delete: bool,
+        may-submit: bool,
+    }
+
+    /// Narrow projection of a JMAP `Mailbox` (RFC 8621 §2). Matches the
+    /// Mailbox schema in the `mailbox.list` capability contract.
+    record mailbox {
+        id: string,
+        name: string,
+        /// `null` for top-level mailboxes; the id of the parent for nested.
+        parent-id: option<string>,
+        /// Special-use role: `inbox`, `sent`, `drafts`, `trash`, `junk`,
+        /// `archive`, etc. Absent for ordinary user-created folders.
+        role: option<string>,
+        /// Display sort order — small integers; lower comes first.
+        sort-order: u32,
+        total-emails: u64,
+        unread-emails: u64,
+        total-threads: u64,
+        unread-threads: u64,
+        is-subscribed: bool,
+        my-rights: mailbox-rights,
+    }
+
+    /// Why a `parse-mailbox-get-response` call rejected the input.
+    record parse-error {
+        code: parse-error-code,
+        message: string,
+    }
+
+    enum parse-error-code {
+        /// JSON was syntactically invalid.
+        malformed-json,
+        /// JSON parsed but a required field was absent (e.g.
+        /// `methodResponses`, or a per-mailbox required field).
+        missing-field,
+        /// JSON parsed but a field had the wrong shape.
+        wrong-type,
+        /// The response carried no `Mailbox/get` method response, or the
+        /// response array was empty. Likely a server-side misconfiguration
+        /// or a wire-shape skew.
+        empty-response,
+        /// The server returned a `Mailbox/get` *error* method response
+        /// (e.g. `accountNotFound`). Operator should check JMAP-side state.
+        method-error,
+    }
+
+    /// Parse a JMAP request response body that includes a single
+    /// `Mailbox/get` method response. Returns the `list` field — the
+    /// flat array of `Mailbox` records the host renders into a tree by
+    /// folding on `parent-id`. Pure; no I/O.
+    ///
+    /// The host is responsible for sending a `Mailbox/get` request that
+    /// returns *all* mailboxes (no `ids` filter); pagination is not
+    /// applicable to `Mailbox/get` per RFC 8621 §2.4.
+    parse-mailbox-get-response: func(json: string) -> result<list<mailbox>, parse-error>;
+}
+
 world jmap-client {
     export session;
+    export mailbox;
 }

@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
+import { createMailboxListHandler } from './handlers/mailbox-list.js';
 import {
   createSessionGetHandler,
   loadSessionGetDeps,
@@ -65,9 +66,14 @@ async function main(): Promise<void> {
     );
   } else {
     handlers.set('session.get', createSessionGetHandler(sessionGetDeps));
+    // mailbox.list shares the same JMAP-base-URL + bearer-token deps —
+    // resolve once and wire both. Each handler does its own session
+    // fetch internally; in-process session caching arrives with the
+    // Phase 1 storage layer (item 8).
+    handlers.set('mailbox.list', createMailboxListHandler(sessionGetDeps));
     // eslint-disable-next-line no-console
     console.error(
-      `[iarsma-mcp] session.get wired against ${sessionGetDeps.jmapBaseUrl}`,
+      `[iarsma-mcp] session.get + mailbox.list wired against ${sessionGetDeps.jmapBaseUrl}`,
     );
   }
 
@@ -107,6 +113,12 @@ export {
   SessionGetConfigError,
 } from './handlers/session-get.js';
 export type { Session, SessionGetDeps } from './handlers/session-get.js';
+export {
+  createMailboxListHandler,
+  loadMailboxListDeps,
+  MailboxListConfigError,
+} from './handlers/mailbox-list.js';
+export type { Mailbox, MailboxRights, MailboxListDeps } from './handlers/mailbox-list.js';
 export { loadTools, ToolLoadError } from './tool-loader.js';
 export type { ToolRegistration } from './tool-loader.js';
 export { extractIdentity, AuthError, headersFromObject } from './auth.js';
