@@ -8,8 +8,7 @@
 mod canonical;
 
 pub use canonical::{
-    canonicalize, verify_links, CallMode, CallerClass, ChainError, Entry, EntryData,
-    ProvenanceData,
+    canonicalize, verify_links, CallMode, CallerClass, ChainError, Entry, EntryData, ProvenanceData,
 };
 
 // `include!` instead of `mod bindings;` so rustfmt doesn't recurse into
