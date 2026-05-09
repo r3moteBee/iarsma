@@ -180,8 +180,8 @@ pub fn parse_mailbox_get_response(json: &str) -> Result<Vec<Mailbox>, MailboxPar
     })?;
 
     if method_name == "error" {
-        let payload: RawMethodErrorPayload = serde_json::from_value(arr[1].clone())
-            .map_err(|e| MailboxParseError {
+        let payload: RawMethodErrorPayload =
+            serde_json::from_value(arr[1].clone()).map_err(|e| MailboxParseError {
                 code: MailboxParseErrorCode::WrongType,
                 message: format!("error payload not parseable: {e}"),
             })?;
@@ -286,7 +286,10 @@ mod tests {
         let mailboxes = parse_mailbox_get_response(FIXTURE).expect("fixture should parse");
         // Inbox + Sent + Drafts + Trash + a custom subfolder = 5 entries.
         assert_eq!(mailboxes.len(), 5);
-        let inbox = mailboxes.iter().find(|m| m.role.as_deref() == Some("inbox")).unwrap();
+        let inbox = mailboxes
+            .iter()
+            .find(|m| m.role.as_deref() == Some("inbox"))
+            .unwrap();
         assert_eq!(inbox.name, "Inbox");
         assert!(inbox.parent_id.is_none());
         assert_eq!(inbox.unread_emails, 3);
