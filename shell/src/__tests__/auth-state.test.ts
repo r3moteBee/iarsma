@@ -18,6 +18,7 @@ describe('auth-state.actionLog singleton', () => {
 
     const entry = await actionLog.append({
       identity: { id: 'test-singleton@example.net' },
+      callerClass: 'ui',
       action: 'auth.signin',
       params: { email: 'test-singleton@example.net' },
     });
