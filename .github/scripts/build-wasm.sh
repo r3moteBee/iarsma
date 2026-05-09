@@ -37,7 +37,7 @@ for comp_dir in components/*/; do
         continue
     fi
 
-    out="shell/src/wasm/$comp_name"
+    out="wasm-bindings/$comp_name"
     rm -rf "$out"
     mkdir -p "$out"
 
