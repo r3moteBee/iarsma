@@ -6,24 +6,80 @@
 // persistence live in the host (Web Crypto / Node Web Crypto, IndexedDB
 // or equivalent). Hashes are exchanged as lower-case hex strings —
 // transport-friendly and self-describing.
+//
+// D-047 — entries gained `schema-version`, `caller-class`, `mode`, and
+// `provenance` fields. Hash-chain canonicalization folds them all in
+// alphabetical key order; the previous shape (no schema-version) is no
+// longer produced. There is no production chain to migrate at this
+// point — Phase 0's only writer is the login-event recorder.
 
-package iarsma:action-log@0.0.0;
+package iarsma:action-log@0.1.0;
 
 interface chain {
+    /// Origin of a call. UI = human web/native session; MCP = agent
+    /// connecting via the MCP server; LIBRARY = a native-app or other
+    /// embedder using the Library API path. Drives audit-chain
+    /// provenance and informs the policy seam.
+    enum caller-class {
+        ui,
+        mcp,
+        library,
+    }
+
+    /// Mode of a call against a destructive capability (D-046).
+    /// Non-destructive reads have no mode (the field is optional).
+    enum call-mode {
+        preview,
+        commit,
+    }
+
+    /// Commit-only metadata: which artifacts were created/modified plus
+    /// a hash linking back to the dry-run preview that was approved.
+    /// Lets reviewers verify that what was committed matches what they
+    /// approved at preview time.
+    record provenance-data {
+        /// JSON-serialized list of affected artifacts. Each entry shape:
+        ///   `{ "kind": "mail|event|contact|file|...", "id": string,
+        ///      "op": "create|modify|delete" }`
+        /// The kind vocabulary is open-ended; new artifact types add
+        /// new kinds without bumping the entry's schema version.
+        affected-json: string,
+        /// Hex SHA-384 of the preview output that was approved before
+        /// this commit. Empty string if the commit was not preceded by
+        /// a dry-run (legal but unusual; flagged by reviewers).
+        preview-hash-hex: string,
+    }
+
     /// Caller-provided fields for a single action-log entry. The
-    /// component never invents these; the host knows the identity and
-    /// timestamp.
+    /// component never invents these; the host knows the identity,
+    /// timestamp, caller-class, and the mode/provenance shape from
+    /// the invocation context.
     record entry-data {
+        /// Schema version of this entry's `entry-data` shape. Currently
+        /// `1`; bumped monotonically per `docs/versioning.md` boundary 4.
+        /// Readers tolerant: future versions read the fields they know
+        /// and treat unknown fields as opaque (verified via hash chain,
+        /// not parsed).
+        schema-version: u32,
         /// Milliseconds since the Unix epoch.
         timestamp-ms: u64,
-        /// Stable identifier of the agent or user who took the action.
+        /// Origin of the call.
+        caller-class: caller-class,
+        /// Stable identifier of the principal: user-id for UI, agent-id
+        /// for MCP, host-id for library embedders.
         identity: string,
-        /// Tool / capability name (e.g. `session.get`).
+        /// Tool / capability name (e.g. `session.get`, `mail.send`).
         action: string,
+        /// Mode of the call. Set on destructive tools per D-046; absent
+        /// on non-destructive reads.
+        mode: option<call-mode>,
         /// Tool params, already serialized to JSON by the caller. The
         /// component doesn't need to inspect them — only fold them into
         /// the canonical bytes.
         params-json: string,
+        /// Provenance metadata for the commit. Present iff `mode ==
+        /// commit` AND artifacts were created/modified/deleted.
+        provenance: option<provenance-data>,
     }
 
     /// A finalized entry: the input + its sequence number + the link to

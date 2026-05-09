@@ -238,6 +238,11 @@ function CallbackView({
           try {
             await actionLog.append({
               identity: { id },
+              // Sign-in is always initiated by a human in the browser
+              // (callerClass is required by the action-log envelope per
+              // D-047). MCP/library callers reach the system through
+              // already-authenticated paths; auth.signin is UI-only.
+              callerClass: 'ui',
               action: 'auth.signin',
               params: {
                 ...(tokens.email !== undefined ? { email: tokens.email } : {}),

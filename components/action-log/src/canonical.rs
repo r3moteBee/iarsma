@@ -6,16 +6,64 @@
 //! `cargo test` runs the protocol logic on the host target, and the
 //! algorithm choice from D-027 is honored without a WASM-side crypto
 //! dependency.
+//!
+//! D-047 — entries carry `schema_version`, `caller_class`, `mode`, and
+//! `provenance`. Field-order in the canonical JSON is alphabetical;
+//! optional fields render as `null` when absent so the canonical bytes
+//! remain stable across writers.
 
 use serde::Serialize;
 use std::fmt::Write as _;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum CallerClass {
+    Ui,
+    Mcp,
+    Library,
+}
+
+impl CallerClass {
+    fn as_str(self) -> &'static str {
+        match self {
+            CallerClass::Ui => "ui",
+            CallerClass::Mcp => "mcp",
+            CallerClass::Library => "library",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum CallMode {
+    Preview,
+    Commit,
+}
+
+impl CallMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            CallMode::Preview => "preview",
+            CallMode::Commit => "commit",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProvenanceData {
+    pub affected_json: String,
+    pub preview_hash_hex: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EntryData {
+    /// Monotonic-integer schema version per D-047. Currently `1`.
+    pub schema_version: u32,
     pub timestamp_ms: u64,
+    pub caller_class: CallerClass,
     pub identity: String,
     pub action: String,
+    pub mode: Option<CallMode>,
     pub params_json: String,
+    pub provenance: Option<ProvenanceData>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,25 +83,55 @@ pub struct ChainError {
 /// Produce the canonical bytes the host should SHA-384.
 ///
 /// Format: a JSON object with sorted, fixed-order keys and no whitespace.
-/// Field order is locked here — changing it changes the hash, which would
-/// invalidate every existing log entry. Adding a new field requires a
-/// schema-version migration (CT-6).
+/// Optional fields render as `null` when absent so the canonical bytes
+/// remain stable. Field order is locked here — changing it changes the
+/// hash, which would invalidate every existing log entry. Adding a new
+/// field requires bumping `schema_version` per `docs/versioning.md`
+/// boundary 4.
+///
+/// Sorted key order:
+///   action, caller_class, identity, mode, params_json, prev_hash_hex,
+///   provenance, schema_version, seq, timestamp_ms
 pub fn canonicalize(seq: u64, data: &EntryData, prev_hash_hex: &str) -> Vec<u8> {
-    // Hand-rolled to guarantee key order without pulling in serde_jcs or
-    // BTreeMap — six fields is small and the format is load-bearing.
-    let mut out = String::with_capacity(256);
-    out.push_str("{\"action\":");
+    let mut out = String::with_capacity(384);
+    out.push('{');
+
+    out.push_str("\"action\":");
     write_json_string(&mut out, &data.action);
+
+    out.push_str(",\"caller_class\":");
+    write_json_string(&mut out, data.caller_class.as_str());
+
     out.push_str(",\"identity\":");
     write_json_string(&mut out, &data.identity);
+
+    out.push_str(",\"mode\":");
+    match data.mode {
+        Some(m) => write_json_string(&mut out, m.as_str()),
+        None => out.push_str("null"),
+    }
+
     out.push_str(",\"params_json\":");
     write_json_string(&mut out, &data.params_json);
+
     out.push_str(",\"prev_hash_hex\":");
     write_json_string(&mut out, prev_hash_hex);
+
+    out.push_str(",\"provenance\":");
+    match &data.provenance {
+        Some(p) => write_provenance(&mut out, p),
+        None => out.push_str("null"),
+    }
+
+    out.push_str(",\"schema_version\":");
+    let _ = write!(out, "{}", data.schema_version);
+
     out.push_str(",\"seq\":");
     let _ = write!(out, "{seq}");
+
     out.push_str(",\"timestamp_ms\":");
     let _ = write!(out, "{}", data.timestamp_ms);
+
     out.push('}');
     out.into_bytes()
 }
@@ -104,6 +182,16 @@ pub fn verify_links(entries: &[Entry]) -> Result<(), ChainError> {
     Ok(())
 }
 
+/// Render a `provenance-data` record in the canonical form: alphabetical
+/// fields, JSON-string-escaped values, no whitespace.
+fn write_provenance(out: &mut String, p: &ProvenanceData) {
+    out.push_str("{\"affected_json\":");
+    write_json_string(out, &p.affected_json);
+    out.push_str(",\"preview_hash_hex\":");
+    write_json_string(out, &p.preview_hash_hex);
+    out.push('}');
+}
+
 /// JSON-encode a string per RFC 8259: surrounding quotes, escape `"` and
 /// `\\`, and the seven required control-character escapes. Other code
 /// points pass through as UTF-8. Sufficient for the canonical form because
@@ -134,10 +222,14 @@ mod tests {
 
     fn data(ts: u64, action: &str) -> EntryData {
         EntryData {
+            schema_version: 1,
             timestamp_ms: ts,
+            caller_class: CallerClass::Ui,
             identity: "user@example.net".into(),
             action: action.into(),
+            mode: None,
             params_json: "{}".into(),
+            provenance: None,
         }
     }
 
@@ -156,18 +248,54 @@ mod tests {
         let s = std::str::from_utf8(&bytes).unwrap();
         assert_eq!(
             s,
-            r#"{"action":"session.get","identity":"user@example.net","params_json":"{}","prev_hash_hex":"abc","seq":7,"timestamp_ms":42}"#
+            r#"{"action":"session.get","caller_class":"ui","identity":"user@example.net","mode":null,"params_json":"{}","prev_hash_hex":"abc","provenance":null,"schema_version":1,"seq":7,"timestamp_ms":42}"#
         );
     }
 
     #[test]
+    fn canonicalize_renders_caller_class_variants() {
+        let mut d = data(0, "session.get");
+        d.caller_class = CallerClass::Mcp;
+        let s = String::from_utf8(canonicalize(0, &d, "")).unwrap();
+        assert!(s.contains(r#""caller_class":"mcp""#));
+
+        d.caller_class = CallerClass::Library;
+        let s = String::from_utf8(canonicalize(0, &d, "")).unwrap();
+        assert!(s.contains(r#""caller_class":"library""#));
+    }
+
+    #[test]
+    fn canonicalize_renders_mode_present_and_absent() {
+        let mut d = data(0, "mail.send");
+        d.mode = Some(CallMode::Preview);
+        let s = String::from_utf8(canonicalize(0, &d, "")).unwrap();
+        assert!(s.contains(r#""mode":"preview""#));
+
+        d.mode = Some(CallMode::Commit);
+        let s = String::from_utf8(canonicalize(0, &d, "")).unwrap();
+        assert!(s.contains(r#""mode":"commit""#));
+
+        d.mode = None;
+        let s = String::from_utf8(canonicalize(0, &d, "")).unwrap();
+        assert!(s.contains(r#""mode":null"#));
+    }
+
+    #[test]
+    fn canonicalize_renders_provenance() {
+        let mut d = data(0, "mail.send");
+        d.mode = Some(CallMode::Commit);
+        d.provenance = Some(ProvenanceData {
+            affected_json: r#"[{"kind":"mail","id":"M-1","op":"create"}]"#.into(),
+            preview_hash_hex: "deadbeef".into(),
+        });
+        let s = String::from_utf8(canonicalize(0, &d, "")).unwrap();
+        assert!(s.contains(r#""provenance":{"affected_json":"[{\"kind\":\"mail\",\"id\":\"M-1\",\"op\":\"create\"}]","preview_hash_hex":"deadbeef"}"#));
+    }
+
+    #[test]
     fn canonicalize_escapes_specials() {
-        let d = EntryData {
-            timestamp_ms: 0,
-            identity: "u".into(),
-            action: "a\"b\\c\nd\te".into(),
-            params_json: "{}".into(),
-        };
+        let mut d = data(0, "session.get");
+        d.action = "a\"b\\c\nd\te".into();
         let s = String::from_utf8(canonicalize(0, &d, "")).unwrap();
         assert!(s.contains(r#""action":"a\"b\\c\nd\te""#), "got {s}");
     }
@@ -181,12 +309,27 @@ mod tests {
         d4.params_json = "{\"x\":1}".into();
         let mut d5 = data(1, "session.get");
         d5.identity = "other@example.net".into();
+        let mut d6 = data(1, "session.get");
+        d6.caller_class = CallerClass::Mcp;
+        let mut d7 = data(1, "session.get");
+        d7.mode = Some(CallMode::Commit);
+        let mut d8 = data(1, "session.get");
+        d8.provenance = Some(ProvenanceData {
+            affected_json: "[]".into(),
+            preview_hash_hex: "x".into(),
+        });
+        let mut d9 = data(1, "session.get");
+        d9.schema_version = 2;
 
         let base = canonicalize(0, &d1, "");
         assert_ne!(base, canonicalize(0, &d2, ""));
         assert_ne!(base, canonicalize(0, &d3, ""));
         assert_ne!(base, canonicalize(0, &d4, ""));
         assert_ne!(base, canonicalize(0, &d5, ""));
+        assert_ne!(base, canonicalize(0, &d6, ""));
+        assert_ne!(base, canonicalize(0, &d7, ""));
+        assert_ne!(base, canonicalize(0, &d8, ""));
+        assert_ne!(base, canonicalize(0, &d9, ""));
         assert_ne!(base, canonicalize(1, &d1, ""));
         assert_ne!(base, canonicalize(0, &d1, "abc"));
     }

@@ -263,6 +263,30 @@ Default `mode` per consumer: MCP-server-side default is `'preview'` for agent ca
 - The shell runtime's `DryRunPreview<O>` placeholder (`{ output, effects, policy }`) and the MCP server's `_iarsmaDryRun` arg path are not yet aligned with the new wire shape. No destructive contract has been authored, so nothing exercises the divergence today; runtime/server alignment lands when Phase 2 ships the first destructive contract (`mail.send`). The contract surface is locked here so embedders can plan against the stable shape.
 - Policy seam metadata on the preview output (workspace-level `effects`, `policy`, `estimatedCost`) is deliberately not part of the v0 envelope. A minor bump adds them as optional fields when the policy seam lands real implementations (Phase 3).
 
+## D-047 — Action-log entry shape: caller-class, mode, provenance, schema version
+**Date:** 2026-05-09
+**Decision:** The `iarsma:action-log` `entry-data` record gains four fields and bumps to `schema-version: 1` (boundary 4 of `docs/versioning.md`):
+
+- **`schema-version: u32`** — monotonic integer per `docs/versioning.md`; readers tolerate higher versions as opaque (verified via hash chain, not parsed).
+- **`caller-class: enum {ui, mcp, library}`** — origin of the call. Distinguishes a human web/native session from an agent-via-MCP from a native-app or other Library API embedder. Required on every entry.
+- **`mode: option<call-mode>`** — `'preview' | 'commit'` for destructive tools (D-046); absent on non-destructive reads.
+- **`provenance: option<provenance-data>`** — set iff `mode == commit` AND artifacts were created/modified/deleted. Carries `affected-json` (a JSON list of `{kind, id, op}` artifacts) and `preview-hash-hex` (hex SHA-384 of the preview output that was approved before this commit, empty if not preview-approved).
+
+Canonical form folds the new fields in alphabetical key order with `null` for absent options. WIT package version bumps `iarsma:action-log@0.0.0` → `@0.1.0` (breaking shape change, semver-pre-1.0 minor).
+
+**Why:** A1 from the audit: with humans and agents touching the same mailbox, the audit chain has to prove origination and provenance for created/modified artifacts. Identity alone isn't enough — a single user-id can drive both a UI session and an MCP-flowing agent call, and reviewers need to disambiguate. The brief's "tamper-evident action log as inbox-adjacent surface" (project-brief.md, "Core Identity") demands provenance binding for any commit that produced a new message, event, contact, or file.
+
+The `mode` field unifies destructive-call recording with the dry-run protocol shape (D-046) — every preview AND every commit appears in the chain, so reviewers can match `provenance.preview-hash-hex` against an earlier `mode=preview` entry's recomputed canonical hash and prove that what was committed is what was approved. This closes the trust gap that "the agent did X" / "but here's what the user actually saw at preview time" otherwise leaves open.
+
+The `caller-class` field gives the policy seam (D-017) a fourth dimension to evaluate beyond identity, scope, and tool: a `mail.send` from a `library`-class caller can be policy-treated differently from an `mcp` agent, even if both bind to the same agent identity. Native-app embedders (per the brief's Library API path and CT-7) get a clean way to be "us" without being indistinguishable from agents.
+
+**How to apply:** Hosts pass `callerClass`, `mode` (when destructive), and `provenance` (when committing real artifacts) to the action-log host wrapper. The shell's existing login event records `callerClass: 'ui'`. Phase 2's first destructive contract (`mail.send`) wires `mode: 'commit'` + `provenance` on commit; previews record `mode: 'preview'` with no provenance. The MCP server records `callerClass: 'mcp'` on every invocation it brokers. Native-app embedders record `callerClass: 'library'`.
+
+**Out of scope (follow-ups):**
+- Action-log UI surface ("Activity" page) for inspecting provenance + matching previews to commits — Phase 3 work item 11.
+- Cross-entry provenance verification (recomputing the preview-hash from a referenced earlier entry to confirm match) — Phase 3 hardening; the field is recorded now so the verification can land later without a schema bump.
+- Affected-json kind vocabulary lock — kept open-ended on purpose; new artifact types (mail/event/contact/file/...) extend it without bumping `schema-version`.
+
 ## D-034 — Project name: Iarsma
 **Date:** 2026-04-26
 **Decision:** The project is named **Iarsma** (Irish, "EER-sma" — *relic, artifact, durable remnant*). Domains owned: `iarsma.com` (primary user-facing) and `iarsma.io` (developer-facing). The `.ai` TLD was deliberately *not* purchased — Iarsma is communication infrastructure, not an AI product, and the `.ai` framing would mis-position it. Use `Iarsma` as the proper noun in prose and titles; `iarsma` as the lowercase identifier in package names, URNs (`urn:iarsma:agent-context`), and component namespaces (`iarsma:jmap-client@0.0.0`).

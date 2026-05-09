@@ -1,6 +1,6 @@
 [package]
 name = "action-log"
-version = "0.0.0"
+version = "0.1.0"
 description = "Tamper-evident hash-chained action log. SHA-384 (D-027). OpenInference-compatible entries."
 edition.workspace = true
 license.workspace = true

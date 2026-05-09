@@ -10,16 +10,49 @@
 
 import { chain as actionLogChain } from '@iarsma/wasm-bindings/action-log';
 
+/** Origin of the call (D-047). UI = human web/native session; MCP = an
+ *  agent connecting via the MCP server; LIBRARY = a native-app or other
+ *  embedder using the Library API path. */
+export type CallerClass = 'ui' | 'mcp' | 'library';
+
+/** Mode of a call against a destructive capability (D-046). Absent on
+ *  non-destructive reads. */
+export type CallMode = 'preview' | 'commit';
+
+/** Commit-only metadata: which artifacts were created/modified plus the
+ *  hash linking back to the dry-run preview that was approved (D-047). */
+export type Provenance = {
+  /** JSON-serialized list of affected artifacts. Each entry shape:
+   *  `{ kind: 'mail' | 'event' | 'contact' | 'file' | ...,
+   *     id: string, op: 'create' | 'modify' | 'delete' }`. */
+  readonly affectedJson: string;
+  /** Hex SHA-384 of the preview output that was approved before this
+   *  commit. Empty string if the commit was not preceded by a dry-run. */
+  readonly previewHashHex: string;
+};
+
 /** Field-aligned with the WIT `entry-data` record, but with `bigint`s
  *  unwrapped to numbers — millisecond timestamps fit comfortably. */
 export type EntryInput = {
+  /** Schema version of this entry (D-047). Currently `1`. */
+  readonly schemaVersion: number;
   readonly timestampMs: number;
+  readonly callerClass: CallerClass;
   readonly identity: string;
   readonly action: string;
+  /** Mode of the call. Set on destructive tools (D-046); omit on reads. */
+  readonly mode?: CallMode;
   /** Pre-serialized JSON. The component folds the literal string into
    *  the canonical bytes; what's inside is the host's responsibility. */
   readonly paramsJson: string;
+  /** Commit-only metadata. Set iff `mode === 'commit'` AND artifacts
+   *  were created / modified / deleted. */
+  readonly provenance?: Provenance;
 };
+
+/** Current entry-data schema version. Bumped per `docs/versioning.md`
+ *  boundary 4 when the entry shape changes incompatibly. */
+export const ENTRY_SCHEMA_VERSION = 1;
 
 /** A finalized chain entry as it sits in storage. */
 export type StoredEntry = {
@@ -123,9 +156,15 @@ export interface ActionLog {
 
 export type AppendInput = {
   readonly identity: Identity;
+  readonly callerClass: CallerClass;
   readonly action: string;
   /** Pre-serialized JSON, or a value to JSON-stringify here. */
   readonly params: string | unknown;
+  /** Mode of the call (D-046). Set on destructive tools; omit for reads. */
+  readonly mode?: CallMode;
+  /** Commit-only metadata (D-047). Required on commit if artifacts were
+   *  created / modified / deleted. */
+  readonly provenance?: Provenance;
 };
 
 export function createActionLog(opts: ActionLogOptions): ActionLog {
@@ -138,11 +177,15 @@ export function createActionLog(opts: ActionLogOptions): ActionLog {
       const last = await opts.store.last();
       const prevHashHex = last === null ? '' : last.hashHex;
       const data: EntryInput = {
+        schemaVersion: ENTRY_SCHEMA_VERSION,
         timestampMs: now(),
+        callerClass: input.callerClass,
         identity: input.identity.id,
         action: input.action,
+        ...(input.mode !== undefined ? { mode: input.mode } : {}),
         paramsJson:
           typeof input.params === 'string' ? input.params : JSON.stringify(input.params),
+        ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
       };
       const canonical = actionLogChain.canonicalize(BigInt(seq), toWit(data), prevHashHex);
       const hashHex = await sha384(canonical);
@@ -183,23 +226,33 @@ export function createActionLog(opts: ActionLogOptions): ActionLog {
 // Helpers
 // ───────────────────────────────────────────────────────────────────────
 
-function toWit(data: EntryInput): {
+type WitEntryData = {
+  schemaVersion: number;
   timestampMs: bigint;
+  callerClass: CallerClass;
   identity: string;
   action: string;
+  mode?: CallMode;
   paramsJson: string;
-} {
+  provenance?: Provenance;
+};
+
+function toWit(data: EntryInput): WitEntryData {
   return {
+    schemaVersion: data.schemaVersion,
     timestampMs: BigInt(data.timestampMs),
+    callerClass: data.callerClass,
     identity: data.identity,
     action: data.action,
+    ...(data.mode !== undefined ? { mode: data.mode } : {}),
     paramsJson: data.paramsJson,
+    ...(data.provenance !== undefined ? { provenance: data.provenance } : {}),
   };
 }
 
 function toWitEntry(entry: StoredEntry): {
   seq: bigint;
-  data: ReturnType<typeof toWit>;
+  data: WitEntryData;
   prevHashHex: string;
   hashHex: string;
 } {
