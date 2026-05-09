@@ -4,6 +4,14 @@ The agent capability scope vocabulary. Every capability contract declares which 
 
 > Scopes are additive. An agent with `mail:read` does not implicitly get `mail:read.metadata` (or vice versa) — both must be declared explicitly. This avoids confusing implication trees.
 
+## Session
+
+| Scope | Description |
+|---|---|
+| `session:read` | Read the authenticated session resource (account email, JMAP endpoint URLs, primary account ID, server state token). Required to bootstrap any Iarsma client; foundational for every other capability. Non-destructive. |
+
+The `session.get` capability declares this scope. Any agent token without `session:read` cannot resolve where the JMAP endpoints are, and so cannot exercise any other capability — clients are expected to grant it by default.
+
 ## Mail
 
 | Scope | Description |

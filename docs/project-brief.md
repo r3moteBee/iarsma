@@ -156,12 +156,15 @@ Every capability is defined once in a typed contract and exposed three ways:
             ▼                    ▼                    ▼
    ┌────────────────┐  ┌─────────────────┐  ┌───────────────────┐
    │  React UI      │  │  MCP Tool       │  │  Library API      │
-   │  (humans)      │  │  (agents)       │  │  (embedding,      │
-   │                │  │                 │  │   tuatha, future) │
+   │  (humans)      │  │  (agents)       │  │  (embedding —     │
+   │                │  │                 │  │   tuatha, native  │
+   │                │  │                 │  │   apps, CLIs)     │
    └────────────────┘  └─────────────────┘  └───────────────────┘
 ```
 
 A `mail.send` capability has a single source-of-truth definition. The React composer wires its "Send" button to it, the MCP server exposes it as a tool, and the library API exports it for tuatha or any other host to consume. All three paths go through the same dry-run pipeline, the same policy seam, and the same action log. There is no "agent path" that bypasses what the human path does, and there is no "human path" that does things agents can't.
+
+The Library API path is also the embedding surface for **fully native applications** — a SwiftUI iOS client, a Jetpack Compose Android client, a GTK or AppKit desktop client — that want Iarsma's dry-run, policy, and action-log semantics without adopting the React shell. Such hosts consume the same capability contracts (codegen targeting non-TypeScript languages is a future deliverable; the AST is shaped to accommodate it per D-035) and load the same Rust→WASM components via any WASI-Preview-2 runtime (Wasmtime, WasmEdge, or a JS engine). This is distinct from the Tauri 2 path described below, which wraps the React shell across desktop and mobile; native-app embedding ships *components and contracts*, not UI. Each native client is its own project — Iarsma facilitates the shared substrate; it does not ship the native UIs itself.
 
 ### Cross-Platform Strategy
 
