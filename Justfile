@@ -80,7 +80,7 @@ wasm:
     COMPONENTS=(jmap-client action-log memory-backend)
     for c in "${COMPONENTS[@]}"; do
         cargo component build -p "$c" --release
-        out="shell/src/wasm/$c"
+        out="wasm-bindings/$c"
         rm -rf "$out"
         mkdir -p "$out"
         wasm_underscored="${c//-/_}"

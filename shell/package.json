@@ -19,7 +19,7 @@
     "fmt:check": "prettier --check src"
   },
   "dependencies": {
-    "@bytecodealliance/preview2-shim": "^0.17.9",
+    "@iarsma/wasm-bindings": "workspace:*",
     "jotai": "^2.10.1",
     "oauth4webapi": "^3.8.6",
     "react": "^18.3.1",

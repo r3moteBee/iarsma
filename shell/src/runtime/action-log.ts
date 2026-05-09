@@ -8,7 +8,7 @@
  * flow — Phase 0 work item 7 — actually exercises this surface).
  */
 
-import { chain as actionLogChain } from '../wasm/action-log/action_log.js';
+import { chain as actionLogChain } from '@iarsma/wasm-bindings/action-log';
 
 /** Field-aligned with the WIT `entry-data` record, but with `bigint`s
  *  unwrapped to numbers — millisecond timestamps fit comfortably. */
