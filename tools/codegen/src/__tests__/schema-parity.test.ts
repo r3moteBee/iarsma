@@ -72,6 +72,7 @@ function validateBoth<I extends z.ZodTypeAny, O extends z.ZodTypeAny>(
 describe('schema-parity — empty object input', () => {
   const cap = capability({
     name: 'session.get',
+    version: '0.0.1',
     scopes: ['session:read'],
     description: 'Get the session.',
     input: z.object({}).strict(),
@@ -98,6 +99,7 @@ describe('schema-parity — empty object input', () => {
 describe('schema-parity — primitives and required fields', () => {
   const cap = capability({
     name: 't.echo',
+    version: '0.0.1',
     scopes: [],
     description: 'echo',
     input: z
@@ -129,6 +131,7 @@ describe('schema-parity — primitives and required fields', () => {
 describe('schema-parity — optional fields', () => {
   const cap = capability({
     name: 't.opt',
+    version: '0.0.1',
     scopes: [],
     description: 'opt',
     input: z
@@ -160,6 +163,7 @@ describe('schema-parity — optional fields', () => {
 describe('schema-parity — enum', () => {
   const cap = capability({
     name: 't.enum',
+    version: '0.0.1',
     scopes: [],
     description: 'enum',
     input: z.object({ status: z.enum(['active', 'paused']) }).strict(),
@@ -180,6 +184,7 @@ describe('schema-parity — enum', () => {
 describe('schema-parity — list', () => {
   const cap = capability({
     name: 't.list',
+    version: '0.0.1',
     scopes: [],
     description: 'list',
     input: z.object({ items: z.array(z.string()) }).strict(),
@@ -208,6 +213,7 @@ describe('schema-parity — list', () => {
 describe('schema-parity — fast-check property tests', () => {
   const flatCap = capability({
     name: 't.flat',
+    version: '0.0.1',
     scopes: [],
     description: 'flat',
     input: z

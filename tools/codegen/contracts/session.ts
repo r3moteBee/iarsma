@@ -30,6 +30,7 @@ const Session = z.object({
 
 export const sessionGet = capability({
   name: 'session.get',
+  version: '0.0.1',
   scopes: ['session:read'],
   description:
     'Get the current authenticated session resource. Returns account info, ' +

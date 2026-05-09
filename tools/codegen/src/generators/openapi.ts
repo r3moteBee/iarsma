@@ -15,10 +15,16 @@
  * ignore.
  */
 
-import type { CapabilityAST } from '../types.js';
+import { errorEnvelopeJsonSchema, type CapabilityAST } from '../types.js';
 import { jsonSchemaForCapability } from './json-schema.js';
 
 export type OpenAPIDoc = Record<string, unknown>;
+
+const ERROR_REF = { $ref: '#/components/schemas/IarsmaError' };
+const ERROR_RESPONSE = {
+  description: '',
+  content: { 'application/json': { schema: ERROR_REF } },
+};
 
 export function openApiForCapabilities(
   caps: readonly CapabilityAST[],
@@ -52,14 +58,26 @@ export function openApiForCapabilities(
             content: { 'application/json': { schema: schemas.output } },
           },
           '403': {
+            ...ERROR_RESPONSE,
             description: 'Insufficient scopes for this tool.',
           },
           '422': {
+            ...ERROR_RESPONSE,
             description: 'Input did not validate against the schema.',
           },
+          '500': {
+            ...ERROR_RESPONSE,
+            description: 'Server-side failure (downstream JMAP error, internal error, etc.).',
+          },
         },
+        'x-iarsma-version': cap.version,
+        'x-iarsma-stability': cap.stability,
         'x-iarsma-scopes': [...cap.scopes],
         'x-iarsma-destructive': cap.isDestructive,
+        'x-iarsma-error-codes': cap.errors.map((e) => ({
+          code: e.code,
+          description: e.description,
+        })),
         'x-iarsma-examples': cap.examples.map((e) => ({
           title: e.title,
           input: e.input,
@@ -78,5 +96,10 @@ export function openApiForCapabilities(
     },
     tags: [...tagSet].sort().map((name) => ({ name })),
     paths,
+    components: {
+      schemas: {
+        IarsmaError: errorEnvelopeJsonSchema(),
+      },
+    },
   };
 }

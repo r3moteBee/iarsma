@@ -13,6 +13,7 @@ import { mcpToolForCapability } from '../generators/mcp-tool.js';
 describe('mcpToolForCapability', () => {
   const sample = capability({
     name: 'mail.send',
+    version: '0.0.1',
     scopes: ['mail:send'],
     description: 'Send an email through the configured outbound relay.',
     isDestructive: true,
@@ -42,6 +43,21 @@ describe('mcpToolForCapability', () => {
     expect(reg.isDestructive).toBe(true);
   });
 
+  it('stamps version and stability on the registration (D-044, D-045)', () => {
+    const reg = mcpToolForCapability(sample.ast);
+    expect(reg.version).toBe('0.0.1');
+    expect(reg.stability).toBe('experimental');
+  });
+
+  it('includes the workspace error envelope schema (D-043)', () => {
+    const reg = mcpToolForCapability(sample.ast);
+    expect(reg.errorEnvelopeSchema).toMatchObject({
+      title: 'IarsmaError',
+      type: 'object',
+      required: ['code', 'message'],
+    });
+  });
+
   it('embeds input + output schemas', () => {
     const reg = mcpToolForCapability(sample.ast);
     expect(reg.inputSchema).toMatchObject({
@@ -69,6 +85,7 @@ describe('mcpToolForCapability', () => {
   it('defaults isDestructive to false', () => {
     const readOnly = capability({
       name: 'mail.list',
+      version: '0.0.1',
       scopes: ['mail:read'],
       description: 'List messages.',
       input: z.object({}),

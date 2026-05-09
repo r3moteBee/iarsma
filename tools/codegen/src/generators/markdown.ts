@@ -12,9 +12,21 @@ import type {
   CapabilityAST,
   Example,
   Field,
+  Stability,
   TypeNode,
   VariantCase,
 } from '../types.js';
+
+function stabilityBadge(s: Stability): string {
+  switch (s) {
+    case 'experimental':
+      return '`experimental` _(may change without notice; not subject to side-by-side rule)_';
+    case 'stable':
+      return '`stable` _(major bumps ship side-by-side per `docs/schema-migration.md`)_';
+    case 'deprecated':
+      return '`deprecated` _(successor major has shipped; remove after the side-by-side window closes)_';
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Per-capability page
@@ -48,7 +60,9 @@ export function markdownForCapability(cap: CapabilityAST): string {
   lines.push(cap.description);
   lines.push('');
 
-  // Front matter (scopes, destructiveness)
+  // Front matter (version, stability, scopes, destructiveness)
+  lines.push(`- **Version:** \`${cap.version}\``);
+  lines.push(`- **Stability:** ${stabilityBadge(cap.stability)}`);
   lines.push(
     `- **Scopes:** ${cap.scopes.length === 0 ? '(none)' : cap.scopes.map((s) => `\`${s}\``).join(', ')}`,
   );

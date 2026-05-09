@@ -40,6 +40,8 @@ export function reactHookForCapability(cap: CapabilityAST): string {
     '// Do not edit by hand — re-run `pnpm codegen` (or `just codegen`).',
     '//',
     '// Description: ' + cap.description.split('\n')[0]!,
+    '// Version:     ' + cap.version,
+    '// Stability:   ' + cap.stability,
     '',
     "import {",
     isDestructive ? '  useWriteHook,' : '  useReadHook,',
@@ -54,11 +56,20 @@ export function reactHookForCapability(cap: CapabilityAST): string {
     '',
   ].join('\n');
 
+  const metadata = [
+    `/** Semver version of the contract this hook was generated from (D-044). */`,
+    `export const ${pascalCase(cap.name)}_VERSION = '${cap.version}' as const;`,
+    '',
+    `/** Stability annotation (D-045). */`,
+    `export const ${pascalCase(cap.name)}_STABILITY = '${cap.stability}' as const;`,
+    '',
+  ].join('\n');
+
   const body = isDestructive
     ? renderWriteHook(hookName, cap.name, inputType, outputType, scopesLiteral)
     : renderReadHook(hookName, cap.name, inputType, outputType, scopesLiteral, isEmptyRecordInput(cap));
 
-  return header + '\n' + types + '\n' + body + '\n';
+  return header + '\n' + types + '\n' + metadata + '\n' + body + '\n';
 }
 
 function renderReadHook(
