@@ -23,49 +23,55 @@ const samplePkce: StoredPkce = {
 };
 
 describe('inMemoryAuthStorage', () => {
-  it('round-trips tokens', () => {
+  it('round-trips tokens', async () => {
     const storage = inMemoryAuthStorage();
     expect(storage.loadTokens()).toBeNull();
-    storage.saveTokens(sampleTokens);
+    await storage.saveTokens(sampleTokens);
     expect(storage.loadTokens()).toEqual(sampleTokens);
-    storage.clearTokens();
+    await storage.clearTokens();
     expect(storage.loadTokens()).toBeNull();
   });
 
-  it('stores and consumes PKCE entries by state', () => {
+  it('stores and consumes PKCE entries by state', async () => {
     const storage = inMemoryAuthStorage();
-    storage.savePkce(samplePkce.state, samplePkce);
-    storage.savePkce('state-2', { ...samplePkce, state: 'state-2', codeVerifier: 'v2' });
+    await storage.savePkce(samplePkce.state, samplePkce);
+    await storage.savePkce('state-2', { ...samplePkce, state: 'state-2', codeVerifier: 'v2' });
 
-    const taken = storage.takePkce(samplePkce.state);
+    const taken = await storage.takePkce(samplePkce.state);
     expect(taken).toEqual(samplePkce);
     // takePkce is destructive — second take returns null.
-    expect(storage.takePkce(samplePkce.state)).toBeNull();
+    expect(await storage.takePkce(samplePkce.state)).toBeNull();
     // The other entry remains untouched.
-    expect(storage.takePkce('state-2')?.codeVerifier).toBe('v2');
+    expect((await storage.takePkce('state-2'))?.codeVerifier).toBe('v2');
   });
 
-  it('returns null when taking an unknown state', () => {
+  it('returns null when taking an unknown state', async () => {
     const storage = inMemoryAuthStorage();
-    expect(storage.takePkce('nope')).toBeNull();
+    expect(await storage.takePkce('nope')).toBeNull();
   });
 
-  it('clearAllPkce drops every PKCE entry', () => {
+  it('clearAllPkce drops every PKCE entry', async () => {
     const storage = inMemoryAuthStorage();
-    storage.savePkce('s1', samplePkce);
-    storage.savePkce('s2', { ...samplePkce, state: 's2' });
-    storage.clearAllPkce();
-    expect(storage.takePkce('s1')).toBeNull();
-    expect(storage.takePkce('s2')).toBeNull();
+    await storage.savePkce('s1', samplePkce);
+    await storage.savePkce('s2', { ...samplePkce, state: 's2' });
+    await storage.clearAllPkce();
+    expect(await storage.takePkce('s1')).toBeNull();
+    expect(await storage.takePkce('s2')).toBeNull();
   });
 
-  it('keeps tokens and PKCE in independent buckets', () => {
+  it('keeps tokens and PKCE in independent buckets', async () => {
     const storage = inMemoryAuthStorage();
-    storage.saveTokens(sampleTokens);
-    storage.savePkce('s1', samplePkce);
-    storage.clearAllPkce();
+    await storage.saveTokens(sampleTokens);
+    await storage.savePkce('s1', samplePkce);
+    await storage.clearAllPkce();
     expect(storage.loadTokens()).toEqual(sampleTokens);
-    storage.clearTokens();
+    await storage.clearTokens();
+    expect(storage.loadTokens()).toBeNull();
+  });
+
+  it('ready() resolves immediately for in-memory storage', async () => {
+    const storage = inMemoryAuthStorage();
+    await storage.ready();
     expect(storage.loadTokens()).toBeNull();
   });
 });

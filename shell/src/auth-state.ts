@@ -14,17 +14,30 @@ import {
   type ActionLog,
 } from './runtime/action-log.js';
 import {
+  indexedDbAuthStorage,
   inMemoryAuthStorage,
-  sessionAuthStorage,
   type AuthStorage,
   type StoredTokens,
 } from './runtime/auth-storage.js';
 
-const isBrowser = typeof window !== 'undefined' && Boolean(window.sessionStorage);
+const isBrowser = typeof window !== 'undefined' && typeof indexedDB !== 'undefined';
 
-/** The active storage instance. Browser → sessionStorage; server → in-memory. */
+/**
+ * The active storage instance.
+ *
+ * Browser → IndexedDB-backed AES-GCM-256 wrapped storage (D-050). Tokens
+ * survive tab close; the wrapping key is origin-bound, non-extractable,
+ * and never leaves the secure context.
+ *
+ * Server / SSR → in-memory (no persistence; the rendered HTML doesn't need
+ * tokens, and the in-memory impl satisfies the same contract).
+ *
+ * App.tsx calls `await authStorage.ready()` once at startup to hydrate the
+ * sync `loadTokens()` cache from IndexedDB before the first capability
+ * call goes through.
+ */
 export const authStorage: AuthStorage = isBrowser
-  ? sessionAuthStorage()
+  ? indexedDbAuthStorage()
   : inMemoryAuthStorage();
 
 /** Increment to force `tokensAtom` to re-read storage. */
