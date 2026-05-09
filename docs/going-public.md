@@ -53,12 +53,12 @@ These need the user's hands or are GitHub-UI / git-config concerns the audit can
    ```
    Or, on the GitHub UI, Settings → Branches → delete each. Not a security concern (their commits aren't on `main`), just hygiene.
 
-3. **Phase 3.5 optional polish — outstanding by choice.** The audit doesn't push to enable any of these; they're individual judgment calls.
-   - Pin `iarsma` to the GitHub profile.
-   - `CODE_OF_CONDUCT.md` (Contributor Covenant template).
-   - `CONTRIBUTING.md` (one paragraph: how to run tests + the decisions-log discipline).
-   - Social preview image (skip until there's a logo).
-   - Dependabot security updates — currently not enabled (the `vulnerability-alerts` API returned 404 against the audit token). Worth flipping on at Settings → Code security and analysis once the project has a few dependencies that matter.
+3. **Phase 3.5 polish — partially landed (2026-05-09).** Status:
+   - ⚠️ Pin `iarsma` to the GitHub profile — accepted, requires UI click on github.com/r3moteBee.
+   - ⏭ `CODE_OF_CONDUCT.md` — explicitly skipped; revisit when the project crosses the "first external contributor" threshold.
+   - ✅ `CONTRIBUTING.md` — landed at repo root.
+   - ⏭ Social preview image — explicitly skipped until there's a visual identity.
+   - ✅ Dependabot security updates — enabled via `gh api -X PUT repos/r3moteBee/iarsma/vulnerability-alerts` + `automated-security-fixes`. Future security PRs will arrive as `dependabot[bot]`.
 
 The "Phase 1 / 2 / 3" sections below are preserved as-is so the procedure remains the canonical reference for any future re-flip (e.g., after a `make private` round-trip).
 
