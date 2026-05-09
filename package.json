@@ -31,5 +31,13 @@
   "devDependencies": {
     "prettier": "^3.3.3",
     "typescript": "^5.6.3"
+  },
+  "pnpm": {
+    "//": "Security patches forced into transitive deps via overrides. We don't own the manifest entry — these arrived as Dependabot alerts on packages our parent deps pulled in. Each `overrides` entry below corresponds to one or more GHSAs; remove an entry once the parent dep ships a version that pulls in the patched range natively. As of 2026-05-09: hono → fixes GHSA-69xw, GHSA-9vqf, GHSA-p77w, GHSA-qp7p, GHSA-hm8q (pulled in by @modelcontextprotocol/sdk). fast-uri → fixes GHSA-q3j6, GHSA-v39h (via ajv from MCP SDK + Fastify). ip-address → fixes GHSA-v2v4 (via express-rate-limit from MCP SDK).",
+    "overrides": {
+      "hono": ">=4.12.18",
+      "fast-uri": ">=3.1.2",
+      "ip-address": ">=10.1.1"
+    }
   }
 }
