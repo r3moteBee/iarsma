@@ -4,6 +4,66 @@ Step-by-step for flipping `r3moteBee/iarsma` from private to public, configuring
 
 ---
 
+## Status (as of 2026-05-09 audit, PR-8)
+
+The repo is already **PUBLIC**. Phases 1–3 of this checklist were re-run after the fact to confirm clean state. Findings below.
+
+### Executed and clean
+
+| Step | Status | Notes |
+|---|---|---|
+| 1.1 Secrets scan | ✅ Clean | All six grep patterns return empty across `git log --all`. |
+| 1.2 `.env` in history | ✅ Clean | No `.env*` files committed (excluding the safe `.env.example` template). |
+| 1.2 `.env.example` review | ✅ Clean | Placeholder values only (`sw-mail.example.net`, empty secrets). |
+| 1.3 `.gitignore` discipline | ✅ Clean | `.env`, `.env.*.local`, `*.key`, `*.tsbuildinfo` all listed. |
+| 1.4 License files | ✅ Present | `LICENSE-MIT` + `LICENSE-APACHE` both at the repo root. |
+| 1.5 README scan | ✅ Pass | Concise pitch + quickstart + license; nothing surprising for a stranger. |
+| 1.7 Public DNS reference | ✅ OK | `sw-mail.r3motely.net` is already public. |
+| 2 Visibility flip | ✅ Done | `gh repo view` reports `visibility: PUBLIC`. |
+| 3.1 About + topics | ✅ Done | Description + `iarsma.io` homepage + 14 topics set. |
+| 3.2 Branch ruleset | ✅ Active | "main protection" enforces required CI checks (TypeScript / Rust / Shell bundle), blocks deletion + force-push. Bypass actor: admin role with `always` mode. |
+| 3.3 Unlimited Actions | ✅ Confirmed | CI runs freely; no minute meter visible. |
+| 3.4 `SECURITY.md` | ✅ Committed | At repo root; private vulnerability reporting enabled. |
+
+### Findings — operator follow-ups (not in PR-8)
+
+These need the user's hands or are GitHub-UI / git-config concerns the audit can't fix from a workspace PR.
+
+1. **Local git committer identity on the dev VM.** The OCI VM that hosts development auto-detects committer identity as `Ubuntu <ubuntu@sw-mail.r3motely.net>`. Squash-merged commits on `main` are clean (`r3moteBee <brent@r3motely.com>` as author, `GitHub <noreply@github.com>` as committer), but stray PR-branch commits carry the auto-detected identity. Set explicitly on the VM:
+   ```bash
+   git config --global user.name "Brent Ellis"
+   git config --global user.email brent@r3motely.com
+   ```
+   Per `CLAUDE.md`, automated tooling never touches the git config; only the operator does.
+
+2. **Stale remote branches.** Five squash-merged feature branches still exist on `origin` (their commits are not reachable from `main`):
+   - `add-security-policy`
+   - `feat/action-log-scaffold`
+   - `feat/discovery-urn-scaffold`
+   - `feat/jmap-client-session-get`
+   - `feat/oauth-and-login`
+
+   These predate the 2026-05-09 audit-driven PRs (#17–#23, all of which used `gh pr merge --squash --delete-branch`). Cleanup is destructive on the remote, so it's left to the operator:
+   ```bash
+   for b in add-security-policy feat/action-log-scaffold feat/discovery-urn-scaffold \
+            feat/jmap-client-session-get feat/oauth-and-login; do
+     git push origin --delete "$b"
+   done
+   git fetch --prune origin
+   ```
+   Or, on the GitHub UI, Settings → Branches → delete each. Not a security concern (their commits aren't on `main`), just hygiene.
+
+3. **Phase 3.5 optional polish — outstanding by choice.** The audit doesn't push to enable any of these; they're individual judgment calls.
+   - Pin `iarsma` to the GitHub profile.
+   - `CODE_OF_CONDUCT.md` (Contributor Covenant template).
+   - `CONTRIBUTING.md` (one paragraph: how to run tests + the decisions-log discipline).
+   - Social preview image (skip until there's a logo).
+   - Dependabot security updates — currently not enabled (the `vulnerability-alerts` API returned 404 against the audit token). Worth flipping on at Settings → Code security and analysis once the project has a few dependencies that matter.
+
+The "Phase 1 / 2 / 3" sections below are preserved as-is so the procedure remains the canonical reference for any future re-flip (e.g., after a `make private` round-trip).
+
+---
+
 ## Phase 1 — Pre-flight checks (10 minutes)
 
 The git history of a private repo becomes the git history of the public repo. **Anything you've ever committed becomes visible**, even if you later "delete" it — git history is permanent.
@@ -13,7 +73,7 @@ Run these one by one and confirm clean output for each.
 ### 1.1 Search for accidentally-committed secrets
 
 ```bash
-cd "/Users/brent/Documents/Claude/Projects/JMAP based Webmail"
+# Run from the repo root (wherever you cloned it).
 
 # Common secret patterns. Empty output = clean. Hits = needs investigation.
 git log -p --all | grep -iE 'github_pat_[A-Za-z0-9_]{20,}' | head
