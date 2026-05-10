@@ -254,7 +254,10 @@ describe('schema-parity — fast-check property tests', () => {
           return jsOk === zodOk;
         },
       ),
-      { numRuns: 200 },
+      // Pin the seed so a regression surfaces as a deterministic
+      // failing input rather than as a one-in-N flake. Bump the seed
+      // when intentionally widening the input distribution.
+      { numRuns: 200, seed: 1 },
     );
   });
 
@@ -274,7 +277,7 @@ describe('schema-parity — fast-check property tests', () => {
           return jsOk === zodOk;
         },
       ),
-      { numRuns: 100 },
+      { numRuns: 100, seed: 2 },
     );
   });
 
@@ -294,7 +297,7 @@ describe('schema-parity — fast-check property tests', () => {
           return jsOk === false && zodOk === false;
         },
       ),
-      { numRuns: 50 },
+      { numRuns: 50, seed: 3 },
     );
   });
 });
