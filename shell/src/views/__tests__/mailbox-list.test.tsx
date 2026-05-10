@@ -209,19 +209,24 @@ describe('MailboxList — keyboard nav', () => {
   it('ArrowDown moves focus to the next visible row', async () => {
     renderTree();
     await waitForTree();
+    // findByText retries until the expand-all effect populates the
+    // child rows; getByText runs synchronously and is racy on slower
+    // CI runners.
+    const project = await screen.findByText('Project');
     const tree = screen.getByRole('tree', { name: 'Mailboxes' });
     focusRow(screen.getByText('Inbox').closest('li')!);
     fireEvent.keyDown(tree, { key: 'ArrowDown' });
     await waitFor(() => {
-      expect(document.activeElement).toBe(screen.getByText('Project').closest('li'));
+      expect(document.activeElement).toBe(project.closest('li'));
     });
   });
 
   it('ArrowUp moves focus to the previous visible row', async () => {
     renderTree();
     await waitForTree();
+    const project = await screen.findByText('Project');
     const tree = screen.getByRole('tree', { name: 'Mailboxes' });
-    focusRow(screen.getByText('Project').closest('li')!);
+    focusRow(project.closest('li')!);
     fireEvent.keyDown(tree, { key: 'ArrowUp' });
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByText('Inbox').closest('li'));
@@ -231,9 +236,9 @@ describe('MailboxList — keyboard nav', () => {
   it('ArrowLeft on an expanded parent collapses it and hides children', async () => {
     renderTree();
     await waitForTree();
+    await screen.findByText('Project');
     const tree = screen.getByRole('tree', { name: 'Mailboxes' });
-    const inbox = screen.getByText('Inbox').closest('li')!;
-    focusRow(inbox);
+    focusRow(screen.getByText('Inbox').closest('li')!);
     fireEvent.keyDown(tree, { key: 'ArrowLeft' });
     await waitFor(() => {
       expect(screen.getByText('Inbox').closest('li')).toHaveAttribute(

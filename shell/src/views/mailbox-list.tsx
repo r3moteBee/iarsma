@@ -51,24 +51,17 @@ const ROLE_LABEL: Record<string, string> = {
 export function MailboxList() {
   const { data, error, isLoading } = useMailboxList({});
   const [selectedId, setSelectedId] = useAtom(selectedMailboxIdAtom);
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  // Track user-collapsed parent ids rather than user-expanded ones.
+  // Sidebar trees are usually shallow (1-2 levels deep on most accounts);
+  // expand-all is the right default. Collapsed-set lets us derive
+  // `isExpanded` synchronously from the rendered tree without a
+  // post-render useEffect (and without races between render and the
+  // visible-row computation).
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const treeRef = useRef<HTMLUListElement | null>(null);
 
   const tree = useMemo(() => (data === undefined ? [] : foldMailboxTree(data)), [data]);
-
-  // Expand all parents by default — sidebar trees are usually shallow
-  // (1-2 levels deep on most accounts). User can collapse explicitly.
-  useEffect(() => {
-    if (tree.length === 0) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      forEachNode(tree, (n) => {
-        if (n.children.length > 0) next.add(n.mailbox.id);
-      });
-      return next;
-    });
-  }, [tree]);
 
   // Auto-select the inbox the first time data lands. Fallback when no
   // inbox-role mailbox is present: the first row in *display order*
@@ -91,7 +84,7 @@ export function MailboxList() {
     }
   }, [selectedId, focusedId]);
 
-  const isExpanded = useCallback((id: string) => expanded.has(id), [expanded]);
+  const isExpanded = useCallback((id: string) => !collapsed.has(id), [collapsed]);
   const visibleRows = useMemo(
     () => flattenVisible(tree, isExpanded),
     [tree, isExpanded],
@@ -138,9 +131,10 @@ export function MailboxList() {
           event.preventDefault();
           if (row.children.length === 0) break;
           if (!isExpanded(row.mailbox.id)) {
-            setExpanded((s) => {
+            // Expand by removing from the user-collapsed set.
+            setCollapsed((s) => {
               const n = new Set(s);
-              n.add(row.mailbox.id);
+              n.delete(row.mailbox.id);
               return n;
             });
           } else {
@@ -152,9 +146,10 @@ export function MailboxList() {
         case 'ArrowLeft': {
           event.preventDefault();
           if (row.children.length > 0 && isExpanded(row.mailbox.id)) {
-            setExpanded((s) => {
+            // Collapse by adding to the user-collapsed set.
+            setCollapsed((s) => {
               const n = new Set(s);
-              n.delete(row.mailbox.id);
+              n.add(row.mailbox.id);
               return n;
             });
           } else if (row.mailbox.parentId !== undefined) {
@@ -226,7 +221,10 @@ export function MailboxList() {
             setSize={tree.length}
             isExpanded={isExpanded}
             onToggleExpand={(id) =>
-              setExpanded((s) => {
+              // Toggle the user-collapsed flag for `id`. Tree starts
+              // expanded; presence in `collapsed` means user explicitly
+              // collapsed it.
+              setCollapsed((s) => {
                 const n = new Set(s);
                 if (n.has(id)) n.delete(id);
                 else n.add(id);
@@ -381,12 +379,3 @@ const visuallyHidden = {
   border: 0,
 } as const;
 
-function forEachNode(
-  nodes: ReadonlyArray<MailboxTreeNode>,
-  fn: (n: MailboxTreeNode) => void,
-): void {
-  for (const n of nodes) {
-    fn(n);
-    forEachNode(n.children, fn);
-  }
-}
