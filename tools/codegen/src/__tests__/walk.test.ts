@@ -57,6 +57,35 @@ describe('walkZod — composites', () => {
     });
     expect(ast.fields[1]?.name).toBe('b');
     expect(ast.fields[1]?.optional).toBe(true);
+    // Optional fields don't wrap their type in `option` — the field-level
+    // `optional: true` flag captures the optionality, so the inner type
+    // stays clean (otherwise generators would emit `b?: T | null`,
+    // doubly-optional, since `?` already means "or undefined").
+    expect(ast.fields[1]?.type).toMatchObject({ kind: 'number' });
+  });
+
+  it('distinguishes ZodOptional (field-level absence) from ZodNullable (value-level null)', () => {
+    const ast = walkZod(
+      z.object({
+        opt: z.string().optional(),
+        nul: z.string().nullable(),
+      }),
+    );
+    if (ast.kind !== 'record') throw new Error('expected record');
+    // `.optional()` → field marked optional, type stays `string`.
+    expect(ast.fields[0]).toMatchObject({
+      name: 'opt',
+      optional: true,
+      type: { kind: 'string' },
+    });
+    // `.nullable()` → field NOT marked optional (Zod's nullable accepts
+    // null but requires the property to be present), type wrapped in
+    // `option<string>` to convey the value-level null.
+    expect(ast.fields[1]).toMatchObject({
+      name: 'nul',
+      optional: false,
+      type: { kind: 'option', inner: { kind: 'string' } },
+    });
   });
 
   it('captures field descriptions', () => {
