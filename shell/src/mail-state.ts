@@ -17,3 +17,11 @@ import { atom } from 'jotai';
  * inbox-role mailbox the first time `useMailboxList` returns data.
  */
 export const selectedMailboxIdAtom = atom<string | null>(null);
+
+/**
+ * Currently-selected thread id within the selected mailbox, or `null`.
+ * ThreadList writes (on Enter / click); the upcoming ThreadView (item 7)
+ * reads. Switching mailboxes clears the selection — the previous-mailbox
+ * thread isn't valid in the new mailbox's list.
+ */
+export const selectedThreadIdAtom = atom<string | null>(null);
