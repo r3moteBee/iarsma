@@ -23,9 +23,11 @@ import { createContext, useContext } from 'react';
 import {
   fetchMailboxList,
   fetchSession,
+  fetchThreadList,
   type JmapClientOptions,
   type Mailbox,
   type Session,
+  type ThreadList,
 } from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
 
@@ -151,6 +153,26 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           const session = await getSession();
           const mailboxes: Mailbox[] = await fetchMailboxList({ ...opts, session });
           return mailboxes as unknown as O;
+        }
+        case 'thread.list': {
+          const session = await getSession();
+          // The contract input is `{mailboxId, position?, limit?}`. Cast
+          // through `unknown` because the invoker's surface is typed
+          // generically; the per-tool shape is enforced by the
+          // capability contract + codegen at the call site.
+          const params = _input as unknown as {
+            mailboxId: string;
+            position?: number;
+            limit?: number;
+          };
+          const result: ThreadList = await fetchThreadList({
+            ...opts,
+            session,
+            mailboxId: params.mailboxId,
+            ...(params.position !== undefined ? { position: params.position } : {}),
+            ...(params.limit !== undefined ? { limit: params.limit } : {}),
+          });
+          return result as unknown as O;
         }
         default:
           throw makeToolError(

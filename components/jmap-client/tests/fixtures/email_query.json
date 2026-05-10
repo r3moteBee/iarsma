@@ -1,0 +1,60 @@
+{
+  "methodResponses": [
+    [
+      "Email/query",
+      {
+        "accountId": "c",
+        "queryState": "qs-1234",
+        "canCalculateChanges": true,
+        "position": 0,
+        "total": 42,
+        "ids": ["E1", "E2", "E3"]
+      },
+      "0"
+    ],
+    [
+      "Email/get",
+      {
+        "accountId": "c",
+        "state": "s-5678",
+        "list": [
+          {
+            "id": "E1",
+            "threadId": "T1",
+            "from": [{"name": "Welcome Bot", "email": "noreply@iarsma.example"}],
+            "to": [{"name": "User", "email": "user@example.net"}],
+            "subject": "Welcome",
+            "preview": "Welcome to your new mailbox. Read this when you have a moment.",
+            "receivedAt": "2026-05-09T18:30:00Z",
+            "keywords": {"$seen": true},
+            "size": 4321
+          },
+          {
+            "id": "E2",
+            "threadId": "T2",
+            "from": [{"name": "Alice", "email": "alice@example.net"}],
+            "to": [{"name": "User", "email": "user@example.net"}],
+            "subject": "Re: project plan",
+            "preview": "Looks good — let's go with the schedule we agreed on Tuesday.",
+            "receivedAt": "2026-05-09T15:42:11Z",
+            "keywords": {"$seen": true, "$flagged": true},
+            "size": 8190
+          },
+          {
+            "id": "E3",
+            "threadId": "T3",
+            "from": [{"email": "bob@example.net"}],
+            "to": [{"email": "user@example.net"}, {"name": "Carol", "email": "carol@example.net"}],
+            "subject": null,
+            "preview": null,
+            "receivedAt": "2026-05-09T09:01:55Z",
+            "keywords": {},
+            "size": 2048
+          }
+        ],
+        "notFound": []
+      },
+      "1"
+    ]
+  ]
+}

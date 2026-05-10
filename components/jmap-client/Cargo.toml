@@ -1,6 +1,6 @@
 [package]
 name = "jmap-client"
-version = "0.1.0"
+version = "0.2.0"
 description = "Thin JMAP client wrapper. Wraps stalwartlabs/jmap-client (D-025). Reused by shell + MCP server."
 edition.workspace = true
 license.workspace = true
