@@ -7,12 +7,18 @@ import {
   agentContextAtom,
   authStorage,
   authVersionAtom,
+  cacheStorage,
   isSignedInAtom,
   tokensAtom,
 } from './auth-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
-import { IarsmaProvider, jmapInvoker, type Invoker } from './runtime/index.js';
+import {
+  IarsmaProvider,
+  cachedInvoker,
+  jmapInvoker,
+  type Invoker,
+} from './runtime/index.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
@@ -108,9 +114,16 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
   const setAgentContext = useSetAtom(agentContextAtom);
   const invoker = useMemo<Invoker>(
     () =>
-      jmapInvoker({
-        baseUrl: config.jmapBaseUrl ?? config.oidcIssuer,
-        getAuthToken: () => authStorage.loadTokens()?.accessToken ?? null,
+      // The persistent cache wraps the jmap invoker so cacheable reads
+      // (mailbox.list / thread.list / thread.get) return instantly on
+      // subsequent loads while a background revalidation refreshes the
+      // entry. Non-cacheable tools and dry-runs pass through unchanged.
+      cachedInvoker({
+        inner: jmapInvoker({
+          baseUrl: config.jmapBaseUrl ?? config.oidcIssuer,
+          getAuthToken: () => authStorage.loadTokens()?.accessToken ?? null,
+        }),
+        store: cacheStorage,
       }),
     [config],
   );
@@ -146,11 +159,22 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   const tokens = useAtomValue(tokensAtom);
 
   const onSignOut = () => {
-    void signOut({ config }).then(() => {
+    void (async () => {
+      await signOut({ config });
+      // Drop every cached email row so the next sign-in (possibly a
+      // different user) doesn't read another user's mail. Failure is
+      // non-fatal — the auth tokens are already gone, so the next
+      // capability call will fail closed before serving stale cache.
+      try {
+        await cacheStorage.clearAll();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] failed to clear capability cache on sign-out:', e);
+      }
       // tokensAtom is read-derived (storage-backed); the version bump
       // triggers re-derivation so it picks up the cleared tokens.
       bumpAuth((v) => v + 1);
-    });
+    })();
   };
 
   return (
