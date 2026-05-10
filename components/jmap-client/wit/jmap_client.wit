@@ -17,7 +17,7 @@
 // invocation boundary into the workspace `IarsmaError` envelope (D-043);
 // the component layer keeps shapes narrow and explicit.
 
-package iarsma:jmap-client@0.1.0;
+package iarsma:jmap-client@0.2.0;
 
 interface session {
     /// Narrow projection of a JMAP session resource (RFC 8620 §2). Matches
@@ -133,7 +133,102 @@ interface mailbox {
     parse-mailbox-get-response: func(json: string) -> result<list<mailbox>, parse-error>;
 }
 
+interface email {
+    /// JMAP email address (RFC 8621 §4.1.2.3 EmailAddress). `name` is
+    /// the display name when present (e.g. "Alice <alice@x.example>"),
+    /// `email` is the addr-spec.
+    record email-address {
+        name: option<string>,
+        email: string,
+    }
+
+    /// JMAP `keyword` flag — RFC 8621 §4.1.1 reserves a few canonical
+    /// keywords (`$seen`, `$flagged`, `$answered`, `$draft`, `$forwarded`,
+    /// `$junk`, `$notjunk`, `$phishing`) but servers may surface custom
+    /// keywords too. Modeled as a flat name → bool list rather than a
+    /// map because WIT records have fixed shapes; callers that want
+    /// dictionary-style access can build one from the list.
+    record keyword {
+        name: string,
+        value: bool,
+    }
+
+    /// Narrow projection of a JMAP `Email` (RFC 8621 §4) — only the
+    /// metadata fields the thread-list view renders. Body parts (`bodyValues`,
+    /// `htmlBody`, `textBody`, `attachments`) come from the future
+    /// `thread.get` capability, which uses `Email/get` with a richer
+    /// `properties` array.
+    record email-summary {
+        id: string,
+        thread-id: string,
+        // `%from` and `%to` use WIT's escape-keyword syntax so the
+        // generated bindings call these `from` / `to` in TS — matching
+        // both the JMAP wire shape and the typical React rendering
+        // ergonomics. WIT reserves `from` as a keyword (per the
+        // component-model spec); `to` isn't reserved but we escape it
+        // for symmetry.
+        %from: option<list<email-address>>,
+        %to: option<list<email-address>>,
+        subject: option<string>,
+        /// Server-computed snippet for display in the inbox row.
+        preview: option<string>,
+        /// ISO 8601 / RFC 3339 timestamp the server stamped on receipt.
+        /// Format is what the host receives over the wire — no parsing.
+        received-at: string,
+        keywords: list<keyword>,
+        /// Total RFC 5322 message size in bytes.
+        size: u64,
+    }
+
+    /// Result of an `Email/query` + chained `Email/get` round-trip. The
+    /// host's request is composed of two methodCalls in one JMAP request
+    /// (RFC 8620 §3.7): the first `Email/query` returns the matching ids,
+    /// the second `Email/get` uses a back-reference (`#ids` →
+    /// `Email/query.ids`) to fetch metadata in the same roundtrip.
+    record email-query-result {
+        emails: list<email-summary>,
+        /// `position` echoed back from `Email/query`. Stable across
+        /// `state`-token unchanged windows; pairs with the next
+        /// `position + limit` to advance the page.
+        position: u32,
+        /// Total matching threads, when the host requested
+        /// `calculateTotal: true`. Servers may legally omit it; the host
+        /// surfaces the absence as `none`.
+        total: option<u64>,
+    }
+
+    /// Why a `parse-email-query-response` call rejected the input.
+    /// Mirrors the `mailbox` interface's parse-error shape but with one
+    /// extra code (`partial-response`) for the chained-method-call case
+    /// where one of the two methods returned data but the other didn't.
+    record parse-error {
+        code: parse-error-code,
+        message: string,
+    }
+
+    enum parse-error-code {
+        malformed-json,
+        missing-field,
+        wrong-type,
+        empty-response,
+        method-error,
+        /// The response had `Email/query` data but no matching
+        /// `Email/get` response (or vice versa). Indicates the host
+        /// constructed the request envelope incorrectly or the server
+        /// dropped one of the methodCalls.
+        partial-response,
+    }
+
+    /// Parse a JMAP request response body that includes both an
+    /// `Email/query` and a chained `Email/get` method response. Returns
+    /// `email-query-result` with `emails` in `Email/get` order — which
+    /// JMAP guarantees matches `Email/query.ids` order — and the
+    /// `position` / `total` fields from `Email/query`. Pure; no I/O.
+    parse-email-query-response: func(json: string) -> result<email-query-result, parse-error>;
+}
+
 world jmap-client {
     export session;
     export mailbox;
+    export email;
 }

@@ -4,8 +4,10 @@ import { resolve } from 'node:path';
 import {
   fetchMailboxList,
   fetchSession,
+  fetchThreadList,
   parseMailboxes,
   parseSession,
+  parseThreadList,
   type Session,
 } from '../jmap-client.js';
 import type { ToolError } from '../types.js';
@@ -17,6 +19,11 @@ const FIXTURE = readFileSync(
 
 const MAILBOX_FIXTURE = readFileSync(
   resolve(__dirname, '../../../../components/jmap-client/tests/fixtures/mailbox_get.json'),
+  'utf8',
+);
+
+const EMAIL_QUERY_FIXTURE = readFileSync(
+  resolve(__dirname, '../../../../components/jmap-client/tests/fixtures/email_query.json'),
   'utf8',
 );
 
@@ -245,6 +252,167 @@ describe('fetchMailboxList (host fetch + WASM parse)', () => {
         getAuthToken: () => 't',
         fetch: makeFetchSpy(errorBody),
         session: SAMPLE_SESSION,
+      }),
+    ).rejects.toMatchObject({ code: 'jmap_parse_error' });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// thread.list — Phase 1 work item 3
+// ──────────────────────────────────────────────────────────────────────
+
+describe('parseThreadList (WASM component)', () => {
+  it('parses the recorded fixture into a typed ThreadList', () => {
+    const result = parseThreadList(EMAIL_QUERY_FIXTURE);
+    expect(result.threads).toHaveLength(3);
+    expect(result.position).toBe(0);
+    expect(result.total).toBe(42);
+    expect(result.threads[0]?.id).toBe('T1');
+    expect(result.threads[0]?.latestEmail.id).toBe('E1');
+    expect(result.threads[0]?.latestEmail.subject).toBe('Welcome');
+  });
+
+  it('converts WIT bigint size + total to JS number', () => {
+    const result = parseThreadList(EMAIL_QUERY_FIXTURE);
+    expect(typeof result.total).toBe('number');
+    for (const t of result.threads) {
+      expect(typeof t.latestEmail.size).toBe('number');
+    }
+  });
+
+  it('preserves keyword flags as the array shape from JMAP', () => {
+    const result = parseThreadList(EMAIL_QUERY_FIXTURE);
+    const flagged = result.threads.find((t) => t.id === 'T2')!;
+    const keywords = Object.fromEntries(
+      flagged.latestEmail.keywords.map((k) => [k.name, k.value]),
+    );
+    expect(keywords['$seen']).toBe(true);
+    expect(keywords['$flagged']).toBe(true);
+  });
+
+  it('handles null subject + missing keywords gracefully', () => {
+    const result = parseThreadList(EMAIL_QUERY_FIXTURE);
+    const t3 = result.threads.find((t) => t.id === 'T3')!;
+    expect(t3.latestEmail.subject).toBeUndefined();
+    expect(t3.latestEmail.keywords).toEqual([]);
+  });
+
+  it('throws ToolError-shaped value on malformed JSON', () => {
+    try {
+      parseThreadList('{not json');
+      throw new Error('expected throw');
+    } catch (e) {
+      const err = e as ToolError;
+      expect(err.code).toBe('jmap_parse_error');
+    }
+  });
+});
+
+describe('fetchThreadList (host fetch + WASM parse)', () => {
+  it('POSTs Email/query + Email/get with back-reference, returns parsed threads', async () => {
+    const fetchSpy: FetchSpy = makeFetchSpy(EMAIL_QUERY_FIXTURE);
+    const result = await fetchThreadList({
+      baseUrl: 'https://sw-mail.example.net',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      mailboxId: 'Mb01',
+      position: 0,
+      limit: 50,
+    });
+    expect(result.threads).toHaveLength(3);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(SAMPLE_SESSION.apiUrl);
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body));
+    expect(body.using).toEqual([
+      'urn:ietf:params:jmap:core',
+      'urn:ietf:params:jmap:mail',
+    ]);
+    expect(body.methodCalls).toHaveLength(2);
+    expect(body.methodCalls[0][0]).toBe('Email/query');
+    expect(body.methodCalls[0][1]).toMatchObject({
+      accountId: 'c',
+      filter: { inMailbox: 'Mb01' },
+      collapseThreads: true,
+      position: 0,
+      limit: 50,
+      calculateTotal: true,
+    });
+    expect(body.methodCalls[0][1].sort).toEqual([
+      { property: 'receivedAt', isAscending: false },
+    ]);
+    expect(body.methodCalls[1][0]).toBe('Email/get');
+    expect(body.methodCalls[1][1]['#ids']).toEqual({
+      resultOf: '0',
+      name: 'Email/query',
+      path: '/ids',
+    });
+  });
+
+  it('applies the default limit of 50 when limit is omitted', async () => {
+    const fetchSpy: FetchSpy = makeFetchSpy(EMAIL_QUERY_FIXTURE);
+    await fetchThreadList({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      mailboxId: 'Mb01',
+    });
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]![1]?.body));
+    expect(body.methodCalls[0][1].limit).toBe(50);
+  });
+
+  it('caps the limit at 200 even if the caller asks for more', async () => {
+    const fetchSpy: FetchSpy = makeFetchSpy(EMAIL_QUERY_FIXTURE);
+    await fetchThreadList({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      mailboxId: 'Mb01',
+      limit: 5000,
+    });
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]![1]?.body));
+    expect(body.methodCalls[0][1].limit).toBe(200);
+  });
+
+  it('rejects with code=unauthorized when no token is available', async () => {
+    await expect(
+      fetchThreadList({
+        baseUrl: 'https://x',
+        getAuthToken: () => null,
+        fetch: makeFetchSpy(EMAIL_QUERY_FIXTURE),
+        session: SAMPLE_SESSION,
+        mailboxId: 'Mb01',
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('surfaces 401 as unauthorized', async () => {
+    await expect(
+      fetchThreadList({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy('nope', { status: 401, statusText: 'Unauthorized' }),
+        session: SAMPLE_SESSION,
+        mailboxId: 'Mb01',
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('wraps an Email/query method-error response as jmap_parse_error', async () => {
+    const errorBody = JSON.stringify({
+      methodResponses: [['error', { type: 'unknownMethod' }, '0']],
+    });
+    await expect(
+      fetchThreadList({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy(errorBody),
+        session: SAMPLE_SESSION,
+        mailboxId: 'Mb01',
       }),
     ).rejects.toMatchObject({ code: 'jmap_parse_error' });
   });

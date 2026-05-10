@@ -7,12 +7,17 @@
 //! WASM runtime.
 
 mod parse;
+mod parse_email;
 mod parse_mailbox;
 
 // Re-export the host-target API. Useful for any rlib consumer (the
 // component itself uses these via the `component` module below) and
 // suppresses dead-code warnings on non-wasm builds.
 pub use parse::{parse_session, ParseError, ParseErrorCode, SessionData};
+pub use parse_email::{
+    parse_email_query_response, EmailAddress, EmailQueryParseError, EmailQueryParseErrorCode,
+    EmailQueryResult, EmailSummary, Keyword,
+};
 pub use parse_mailbox::{
     parse_mailbox_get_response, Mailbox, MailboxParseError, MailboxParseErrorCode, MailboxRights,
 };
@@ -30,6 +35,11 @@ mod bindings {
 
 #[cfg(target_arch = "wasm32")]
 mod component {
+    use crate::bindings::exports::iarsma::jmap_client::email::{
+        EmailAddress as WitEmailAddress, EmailQueryResult as WitEmailQueryResult,
+        EmailSummary as WitEmailSummary, Guest as EmailGuest, Keyword as WitKeyword,
+        ParseError as WitEmailParseError, ParseErrorCode as WitEmailParseErrorCode,
+    };
     use crate::bindings::exports::iarsma::jmap_client::mailbox::{
         Guest as MailboxGuest, Mailbox as WitMailbox, MailboxRights as WitMailboxRights,
         ParseError as WitMailboxParseError, ParseErrorCode as WitMailboxParseErrorCode,
@@ -38,7 +48,7 @@ mod component {
         Guest as SessionGuest, ParseError as WitSessionParseError,
         ParseErrorCode as WitSessionParseErrorCode, Session as WitSession,
     };
-    use crate::{parse, parse_mailbox};
+    use crate::{parse, parse_email, parse_mailbox};
 
     pub struct Component;
 
@@ -124,6 +134,70 @@ mod component {
                 may_delete: m.my_rights.may_delete,
                 may_submit: m.my_rights.may_submit,
             },
+        }
+    }
+
+    impl EmailGuest for Component {
+        fn parse_email_query_response(
+            json: String,
+        ) -> Result<WitEmailQueryResult, WitEmailParseError> {
+            parse_email::parse_email_query_response(&json)
+                .map(|r| WitEmailQueryResult {
+                    emails: r.emails.into_iter().map(into_wit_email_summary).collect(),
+                    position: r.position,
+                    total: r.total,
+                })
+                .map_err(|e| WitEmailParseError {
+                    code: match e.code {
+                        parse_email::EmailQueryParseErrorCode::MalformedJson => {
+                            WitEmailParseErrorCode::MalformedJson
+                        }
+                        parse_email::EmailQueryParseErrorCode::MissingField => {
+                            WitEmailParseErrorCode::MissingField
+                        }
+                        parse_email::EmailQueryParseErrorCode::WrongType => {
+                            WitEmailParseErrorCode::WrongType
+                        }
+                        parse_email::EmailQueryParseErrorCode::EmptyResponse => {
+                            WitEmailParseErrorCode::EmptyResponse
+                        }
+                        parse_email::EmailQueryParseErrorCode::MethodError => {
+                            WitEmailParseErrorCode::MethodError
+                        }
+                        parse_email::EmailQueryParseErrorCode::PartialResponse => {
+                            WitEmailParseErrorCode::PartialResponse
+                        }
+                    },
+                    message: e.message,
+                })
+        }
+    }
+
+    fn into_wit_email_summary(e: parse_email::EmailSummary) -> WitEmailSummary {
+        WitEmailSummary {
+            id: e.id,
+            thread_id: e.thread_id,
+            from: e.from.map(|list| list.into_iter().map(into_wit_address).collect()),
+            to: e.to.map(|list| list.into_iter().map(into_wit_address).collect()),
+            subject: e.subject,
+            preview: e.preview,
+            received_at: e.received_at,
+            keywords: e
+                .keywords
+                .into_iter()
+                .map(|k| WitKeyword {
+                    name: k.name,
+                    value: k.value,
+                })
+                .collect(),
+            size: e.size,
+        }
+    }
+
+    fn into_wit_address(a: parse_email::EmailAddress) -> WitEmailAddress {
+        WitEmailAddress {
+            name: a.name,
+            email: a.email,
         }
     }
 }
