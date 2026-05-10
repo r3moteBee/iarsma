@@ -1,0 +1,88 @@
+{
+  "methodResponses": [
+    [
+      "Thread/get",
+      {
+        "accountId": "c",
+        "state": "th-state-1",
+        "list": [
+          {
+            "id": "T1",
+            "emailIds": ["E1", "E2"]
+          }
+        ],
+        "notFound": []
+      },
+      "0"
+    ],
+    [
+      "Email/get",
+      {
+        "accountId": "c",
+        "state": "em-state-1",
+        "list": [
+          {
+            "id": "E1",
+            "threadId": "T1",
+            "from": [{"name": "Bob", "email": "bob@example.net"}],
+            "to": [{"name": "Alice", "email": "alice@example.net"}],
+            "cc": [{"email": "cc@example.net"}],
+            "bcc": null,
+            "subject": "Project plan",
+            "preview": "Hi Alice — please find the schedule attached.",
+            "receivedAt": "2026-05-09T15:42:11Z",
+            "sentAt": "2026-05-09T15:41:50Z",
+            "keywords": {"$seen": true},
+            "size": 4321,
+            "bodyValues": {
+              "1": {"value": "Hi Alice,\n\nPlease find the schedule attached.\n\nBob"},
+              "2": {"value": "<p>Hi Alice,</p><p>Please find the schedule attached.</p><p>Bob</p>"}
+            },
+            "textBody": [{"partId": "1", "type": "text/plain"}],
+            "htmlBody": [{"partId": "2", "type": "text/html"}],
+            "attachments": []
+          },
+          {
+            "id": "E2",
+            "threadId": "T1",
+            "from": [{"name": "Alice", "email": "alice@example.net"}],
+            "to": [{"name": "Bob", "email": "bob@example.net"}],
+            "subject": "Re: Project plan",
+            "preview": "Looks good — see embedded logo.",
+            "receivedAt": "2026-05-09T16:10:00Z",
+            "sentAt": "2026-05-09T16:09:42Z",
+            "keywords": {"$seen": true, "$flagged": true, "$answered": true},
+            "size": 8190,
+            "bodyValues": {
+              "1": {"value": "Looks good — see embedded logo. — Alice"},
+              "2": {"value": "<p>Looks good — see embedded logo.</p><p>— Alice</p><img src=\"cid:logo@example\">"}
+            },
+            "textBody": [{"partId": "1", "type": "text/plain"}],
+            "htmlBody": [{"partId": "2", "type": "text/html"}],
+            "attachments": [
+              {
+                "partId": "3",
+                "blobId": "B-logo-1",
+                "type": "image/png",
+                "name": "logo.png",
+                "size": 2048,
+                "cid": "logo@example",
+                "disposition": "inline"
+              },
+              {
+                "partId": "4",
+                "blobId": "B-pdf-1",
+                "type": "application/pdf",
+                "name": "contract.pdf",
+                "size": 12345,
+                "disposition": "attachment"
+              }
+            ]
+          }
+        ],
+        "notFound": []
+      },
+      "1"
+    ]
+  ]
+}

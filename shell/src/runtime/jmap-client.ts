@@ -369,6 +369,184 @@ function normalizeAddress(a: { name?: string; email: string }): EmailAddress {
   return a.name !== undefined ? { name: a.name, email: a.email } : { email: a.email };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Thread/get + Email/get (chained — thread.get)
+// ──────────────────────────────────────────────────────────────────────
+
+export type Attachment = {
+  readonly id: string;
+  readonly name?: string;
+  readonly type: string;
+  readonly size: number;
+  readonly cid?: string;
+  readonly disposition?: string;
+};
+
+export type EmailFull = {
+  readonly id: string;
+  readonly threadId: string;
+  readonly from?: ReadonlyArray<EmailAddress>;
+  readonly to?: ReadonlyArray<EmailAddress>;
+  readonly cc?: ReadonlyArray<EmailAddress>;
+  readonly bcc?: ReadonlyArray<EmailAddress>;
+  readonly subject?: string;
+  readonly preview?: string;
+  readonly receivedAt: string;
+  readonly sentAt?: string;
+  readonly keywords: ReadonlyArray<Keyword>;
+  readonly size: number;
+  readonly bodyText?: string;
+  readonly bodyHtml?: string;
+  readonly attachments: ReadonlyArray<Attachment>;
+};
+
+export type Thread = {
+  readonly id: string;
+  readonly emailIds: ReadonlyArray<string>;
+};
+
+export type ThreadGet = {
+  readonly thread: Thread;
+  readonly emails: ReadonlyArray<EmailFull>;
+};
+
+export type FetchThreadGetOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly threadId: string;
+};
+
+/** RFC 8621 §4.7: properties Email/get returns when we ask for full bodies. */
+const EMAIL_FULL_PROPERTIES = [
+  'id',
+  'threadId',
+  'from',
+  'to',
+  'cc',
+  'bcc',
+  'subject',
+  'preview',
+  'receivedAt',
+  'sentAt',
+  'keywords',
+  'size',
+  'bodyValues',
+  'textBody',
+  'htmlBody',
+  'attachments',
+];
+
+/**
+ * POST a chained `Thread/get` + `Email/get` JMAP request. Returns the
+ * full thread with every email materialized (body parts flattened to
+ * `bodyText` / `bodyHtml`, attachments listed with metadata).
+ *
+ * Hosts MUST sanitize `bodyHtml` via `iarsma:html-sanitizer` before
+ * rendering.
+ */
+export async function fetchThreadGet(
+  opts: FetchThreadGetOptions,
+): Promise<ThreadGet> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      ['Thread/get', { accountId, ids: [opts.threadId] }, '0'],
+      [
+        'Email/get',
+        {
+          accountId,
+          // Back-reference: pulls emailIds from the prior Thread/get's
+          // first list entry, no client-side roundtrip.
+          '#ids': {
+            resultOf: '0',
+            name: 'Thread/get',
+            path: '/list/0/emailIds',
+          },
+          properties: EMAIL_FULL_PROPERTIES,
+          fetchTextBodyValues: true,
+          fetchHTMLBodyValues: true,
+        },
+        '1',
+      ],
+    ],
+  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Thread/get+Email/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseThreadGet(text);
+}
+
+/**
+ * Parse a JMAP response containing `Thread/get` + chained `Email/get`.
+ * Exposed for tests; production callers go through `fetchThreadGet`.
+ */
+export function parseThreadGet(body: string): ThreadGet {
+  let raw;
+  try {
+    raw = jmapClientEmail.parseThreadGetResponse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Thread/get response: ${describe(e)}`,
+      e,
+    );
+  }
+  return {
+    thread: {
+      id: raw.threadId,
+      emailIds: raw.emailIds.slice(),
+    },
+    emails: raw.emails.map((e) => ({
+      id: e.id,
+      threadId: e.threadId,
+      ...(e.from !== undefined ? { from: e.from.map(normalizeAddress) } : {}),
+      ...(e.to !== undefined ? { to: e.to.map(normalizeAddress) } : {}),
+      ...(e.cc !== undefined ? { cc: e.cc.map(normalizeAddress) } : {}),
+      ...(e.bcc !== undefined ? { bcc: e.bcc.map(normalizeAddress) } : {}),
+      ...(e.subject !== undefined ? { subject: e.subject } : {}),
+      ...(e.preview !== undefined ? { preview: e.preview } : {}),
+      receivedAt: e.receivedAt,
+      ...(e.sentAt !== undefined ? { sentAt: e.sentAt } : {}),
+      keywords: e.keywords.map((k) => ({ name: k.name, value: k.value })),
+      size: Number(e.size),
+      ...(e.bodyText !== undefined ? { bodyText: e.bodyText } : {}),
+      ...(e.bodyHtml !== undefined ? { bodyHtml: e.bodyHtml } : {}),
+      attachments: e.attachments.map((a) => ({
+        id: a.id,
+        ...(a.name !== undefined ? { name: a.name } : {}),
+        type: a.type,
+        size: Number(a.size),
+        ...(a.cid !== undefined ? { cid: a.cid } : {}),
+        ...(a.disposition !== undefined ? { disposition: a.disposition } : {}),
+      })),
+    })),
+  };
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }

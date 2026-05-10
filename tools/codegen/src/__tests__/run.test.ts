@@ -149,10 +149,10 @@ describe('run (integration with the project contracts)', () => {
     // Tests should be hermetic — they shouldn't pollute the shell tree.
     const r = await run({ distDir: tmp, shellGenDir: null });
     expect(r.capabilities).toBeGreaterThanOrEqual(1);
-    // session.get + mailbox.list + thread.list. Bump explicitly when
-    // adding contracts so a missing or duplicate contract surfaces in
-    // code review.
-    expect(r.capabilities).toBe(3);
+    // session.get + mailbox.list + thread.list + thread.get. Bump
+    // explicitly when adding contracts so a missing or duplicate
+    // contract surfaces in code review.
+    expect(r.capabilities).toBe(4);
   });
 
   it('produces openapi.json at the dist root', async () => {

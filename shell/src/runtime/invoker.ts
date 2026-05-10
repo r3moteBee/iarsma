@@ -23,10 +23,12 @@ import { createContext, useContext } from 'react';
 import {
   fetchMailboxList,
   fetchSession,
+  fetchThreadGet,
   fetchThreadList,
   type JmapClientOptions,
   type Mailbox,
   type Session,
+  type ThreadGet,
   type ThreadList,
 } from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
@@ -171,6 +173,16 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             mailboxId: params.mailboxId,
             ...(params.position !== undefined ? { position: params.position } : {}),
             ...(params.limit !== undefined ? { limit: params.limit } : {}),
+          });
+          return result as unknown as O;
+        }
+        case 'thread.get': {
+          const session = await getSession();
+          const params = _input as unknown as { threadId: string };
+          const result: ThreadGet = await fetchThreadGet({
+            ...opts,
+            session,
+            threadId: params.threadId,
           });
           return result as unknown as O;
         }
