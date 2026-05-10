@@ -17,6 +17,7 @@ import { handleCallback, signOut } from './runtime/oauth.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
 import { ThreadList } from './views/thread-list.js';
+import { ThreadView } from './views/thread-view.js';
 
 type Phase =
   | { kind: 'loading' }
@@ -155,7 +156,17 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   return (
     <section
       aria-labelledby="signedin-heading"
-      style={{ display: 'grid', gridTemplateColumns: '16em 1fr', gap: '1em', alignItems: 'start' }}
+      style={{
+        display: 'grid',
+        // 3-column reading layout: mailboxes | threads | thread body.
+        // The thread column is wider than the thread-list because long
+        // sender names + subjects are common; min-width:0 on the thread
+        // body column lets the inner content scroll without forcing
+        // grid overflow.
+        gridTemplateColumns: '16em 22em minmax(0, 1fr)',
+        gap: '1em',
+        alignItems: 'start',
+      }}
     >
       <header style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <h2 id="signedin-heading">Signed in</h2>
@@ -186,13 +197,16 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
       <aside aria-label="Mailbox sidebar">
         <MailboxList />
       </aside>
-      <main aria-label="Selected mailbox">
+      <section aria-label="Selected mailbox">
         {session.isLoading ? <p>Loading session…</p> : null}
         {session.error !== undefined ? (
           <p role="alert">Session error: {session.error.message}</p>
         ) : null}
         <ThreadList />
-      </main>
+      </section>
+      <section aria-label="Selected thread">
+        <ThreadView />
+      </section>
     </section>
   );
 }
