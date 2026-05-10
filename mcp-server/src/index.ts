@@ -17,6 +17,7 @@ import {
   createSessionGetHandler,
   loadSessionGetDeps,
 } from './handlers/session-get.js';
+import { createThreadGetHandler } from './handlers/thread-get.js';
 import { createThreadListHandler } from './handlers/thread-list.js';
 import type { ToolHandler } from './invocation.js';
 import { createIarsmaMcpServer } from './server.js';
@@ -67,15 +68,16 @@ async function main(): Promise<void> {
     );
   } else {
     handlers.set('session.get', createSessionGetHandler(sessionGetDeps));
-    // mailbox.list + thread.list share the same JMAP-base-URL +
-    // bearer-token deps — resolve once and wire all three. Each handler
-    // does its own session fetch internally; in-process session caching
-    // arrives with the Phase 1 storage layer (item 8).
+    // mailbox.list + thread.list + thread.get share the same JMAP-base-
+    // URL + bearer-token deps — resolve once and wire all four. Each
+    // handler does its own session fetch internally; in-process
+    // session caching arrives with the Phase 1 storage layer (item 8).
     handlers.set('mailbox.list', createMailboxListHandler(sessionGetDeps));
     handlers.set('thread.list', createThreadListHandler(sessionGetDeps));
+    handlers.set('thread.get', createThreadGetHandler(sessionGetDeps));
     // eslint-disable-next-line no-console
     console.error(
-      `[iarsma-mcp] session.get + mailbox.list + thread.list wired against ${sessionGetDeps.jmapBaseUrl}`,
+      `[iarsma-mcp] session.get + mailbox.list + thread.list + thread.get wired against ${sessionGetDeps.jmapBaseUrl}`,
     );
   }
 
@@ -134,6 +136,18 @@ export type {
   ThreadListDeps,
   ThreadSummary,
 } from './handlers/thread-list.js';
+export {
+  createThreadGetHandler,
+  loadThreadGetDeps,
+  ThreadGetConfigError,
+} from './handlers/thread-get.js';
+export type {
+  Attachment,
+  EmailFull,
+  Thread,
+  ThreadGet,
+  ThreadGetDeps,
+} from './handlers/thread-get.js';
 export { loadTools, ToolLoadError } from './tool-loader.js';
 export type { ToolRegistration } from './tool-loader.js';
 export { extractIdentity, AuthError, headersFromObject } from './auth.js';

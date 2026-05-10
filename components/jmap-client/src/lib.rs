@@ -9,6 +9,7 @@
 mod parse;
 mod parse_email;
 mod parse_mailbox;
+mod parse_thread_get;
 
 // Re-export the host-target API. Useful for any rlib consumer (the
 // component itself uses these via the `component` module below) and
@@ -20,6 +21,10 @@ pub use parse_email::{
 };
 pub use parse_mailbox::{
     parse_mailbox_get_response, Mailbox, MailboxParseError, MailboxParseErrorCode, MailboxRights,
+};
+pub use parse_thread_get::{
+    parse_thread_get_response, Attachment, EmailFull, ThreadGetParseError, ThreadGetParseErrorCode,
+    ThreadGetResult,
 };
 
 // `include!` instead of `mod bindings;` so rustfmt doesn't recurse into
@@ -36,9 +41,10 @@ mod bindings {
 #[cfg(target_arch = "wasm32")]
 mod component {
     use crate::bindings::exports::iarsma::jmap_client::email::{
-        EmailAddress as WitEmailAddress, EmailQueryResult as WitEmailQueryResult,
-        EmailSummary as WitEmailSummary, Guest as EmailGuest, Keyword as WitKeyword,
-        ParseError as WitEmailParseError, ParseErrorCode as WitEmailParseErrorCode,
+        Attachment as WitAttachment, EmailAddress as WitEmailAddress, EmailFull as WitEmailFull,
+        EmailQueryResult as WitEmailQueryResult, EmailSummary as WitEmailSummary,
+        Guest as EmailGuest, Keyword as WitKeyword, ParseError as WitEmailParseError,
+        ParseErrorCode as WitEmailParseErrorCode, ThreadGetResult as WitThreadGetResult,
     };
     use crate::bindings::exports::iarsma::jmap_client::mailbox::{
         Guest as MailboxGuest, Mailbox as WitMailbox, MailboxRights as WitMailboxRights,
@@ -48,7 +54,7 @@ mod component {
         Guest as SessionGuest, ParseError as WitSessionParseError,
         ParseErrorCode as WitSessionParseErrorCode, Session as WitSession,
     };
-    use crate::{parse, parse_email, parse_mailbox};
+    use crate::{parse, parse_email, parse_mailbox, parse_thread_get};
 
     pub struct Component;
 
@@ -170,6 +176,90 @@ mod component {
                     },
                     message: e.message,
                 })
+        }
+
+        fn parse_thread_get_response(
+            json: String,
+        ) -> Result<WitThreadGetResult, WitEmailParseError> {
+            parse_thread_get::parse_thread_get_response(&json)
+                .map(|r| WitThreadGetResult {
+                    thread_id: r.thread_id,
+                    email_ids: r.email_ids,
+                    emails: r.emails.into_iter().map(into_wit_email_full).collect(),
+                })
+                .map_err(|e| WitEmailParseError {
+                    // ThreadGetParseError aliases to the same shape +
+                    // codes as EmailQueryParseError, so the mapping is
+                    // identical. Kept explicit per-arm so a future
+                    // divergence surfaces as a compile error.
+                    code: match e.code {
+                        parse_email::EmailQueryParseErrorCode::MalformedJson => {
+                            WitEmailParseErrorCode::MalformedJson
+                        }
+                        parse_email::EmailQueryParseErrorCode::MissingField => {
+                            WitEmailParseErrorCode::MissingField
+                        }
+                        parse_email::EmailQueryParseErrorCode::WrongType => {
+                            WitEmailParseErrorCode::WrongType
+                        }
+                        parse_email::EmailQueryParseErrorCode::EmptyResponse => {
+                            WitEmailParseErrorCode::EmptyResponse
+                        }
+                        parse_email::EmailQueryParseErrorCode::MethodError => {
+                            WitEmailParseErrorCode::MethodError
+                        }
+                        parse_email::EmailQueryParseErrorCode::PartialResponse => {
+                            WitEmailParseErrorCode::PartialResponse
+                        }
+                    },
+                    message: e.message,
+                })
+        }
+    }
+
+    fn into_wit_email_full(e: parse_thread_get::EmailFull) -> WitEmailFull {
+        WitEmailFull {
+            id: e.id,
+            thread_id: e.thread_id,
+            from: e
+                .from
+                .map(|list| list.into_iter().map(into_wit_address).collect()),
+            to: e
+                .to
+                .map(|list| list.into_iter().map(into_wit_address).collect()),
+            cc: e
+                .cc
+                .map(|list| list.into_iter().map(into_wit_address).collect()),
+            bcc: e
+                .bcc
+                .map(|list| list.into_iter().map(into_wit_address).collect()),
+            subject: e.subject,
+            preview: e.preview,
+            received_at: e.received_at,
+            sent_at: e.sent_at,
+            keywords: e
+                .keywords
+                .into_iter()
+                .map(|k| WitKeyword {
+                    name: k.name,
+                    value: k.value,
+                })
+                .collect(),
+            size: e.size,
+            body_text: e.body_text,
+            body_html: e.body_html,
+            attachments: e.attachments.into_iter().map(into_wit_attachment).collect(),
+        }
+    }
+
+    fn into_wit_attachment(a: parse_thread_get::Attachment) -> WitAttachment {
+        WitAttachment {
+            id: a.id,
+            name: a.name,
+            type_: a.mime_type,
+            size: a.size,
+            cid: a.cid,
+            disposition: a.disposition,
         }
     }
 

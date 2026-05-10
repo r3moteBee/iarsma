@@ -4,9 +4,11 @@ import { resolve } from 'node:path';
 import {
   fetchMailboxList,
   fetchSession,
+  fetchThreadGet,
   fetchThreadList,
   parseMailboxes,
   parseSession,
+  parseThreadGet,
   parseThreadList,
   type Session,
 } from '../jmap-client.js';
@@ -24,6 +26,11 @@ const MAILBOX_FIXTURE = readFileSync(
 
 const EMAIL_QUERY_FIXTURE = readFileSync(
   resolve(__dirname, '../../../../components/jmap-client/tests/fixtures/email_query.json'),
+  'utf8',
+);
+
+const THREAD_GET_FIXTURE = readFileSync(
+  resolve(__dirname, '../../../../components/jmap-client/tests/fixtures/thread_get.json'),
   'utf8',
 );
 
@@ -413,6 +420,148 @@ describe('fetchThreadList (host fetch + WASM parse)', () => {
         fetch: makeFetchSpy(errorBody),
         session: SAMPLE_SESSION,
         mailboxId: 'Mb01',
+      }),
+    ).rejects.toMatchObject({ code: 'jmap_parse_error' });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// thread.get — Phase 1 work item 6
+// ──────────────────────────────────────────────────────────────────────
+
+describe('parseThreadGet (WASM component)', () => {
+  it('parses the recorded fixture into a typed ThreadGet', () => {
+    const result = parseThreadGet(THREAD_GET_FIXTURE);
+    expect(result.thread.id).toBe('T1');
+    expect(result.thread.emailIds).toEqual(['E1', 'E2']);
+    expect(result.emails).toHaveLength(2);
+    expect(result.emails[0]?.id).toBe('E1');
+    expect(result.emails[1]?.id).toBe('E2');
+  });
+
+  it('flattens body parts into bodyText / bodyHtml strings', () => {
+    const result = parseThreadGet(THREAD_GET_FIXTURE);
+    const first = result.emails[0]!;
+    expect(first.bodyText).toContain('Hi Alice');
+    expect(first.bodyHtml).toContain('<p>Hi Alice');
+  });
+
+  it('exposes attachments with cid, type, size, disposition', () => {
+    const result = parseThreadGet(THREAD_GET_FIXTURE);
+    const second = result.emails[1]!;
+    expect(second.attachments).toHaveLength(2);
+    const inline = second.attachments.find((a) => a.cid !== undefined);
+    expect(inline?.cid).toBe('logo@example');
+    expect(inline?.disposition).toBe('inline');
+    expect(inline?.type).toBe('image/png');
+    const pdf = second.attachments.find((a) => a.type === 'application/pdf');
+    expect(pdf?.name).toBe('contract.pdf');
+    expect(pdf?.size).toBe(12345);
+  });
+
+  it('preserves cc + sentAt when present', () => {
+    const result = parseThreadGet(THREAD_GET_FIXTURE);
+    const first = result.emails[0]!;
+    expect(first.cc).toEqual([{ email: 'cc@example.net' }]);
+    expect(first.sentAt).toBe('2026-05-09T15:41:50Z');
+  });
+
+  it('converts WIT bigint sizes + email size to JS number', () => {
+    const result = parseThreadGet(THREAD_GET_FIXTURE);
+    for (const e of result.emails) {
+      expect(typeof e.size).toBe('number');
+      for (const a of e.attachments) {
+        expect(typeof a.size).toBe('number');
+      }
+    }
+  });
+
+  it('throws ToolError-shaped value on malformed JSON', () => {
+    try {
+      parseThreadGet('{not json');
+      throw new Error('expected throw');
+    } catch (e) {
+      const err = e as ToolError;
+      expect(err.code).toBe('jmap_parse_error');
+    }
+  });
+});
+
+describe('fetchThreadGet (host fetch + WASM parse)', () => {
+  it('POSTs Thread/get + Email/get with back-reference, returns parsed thread', async () => {
+    const fetchSpy: FetchSpy = makeFetchSpy(THREAD_GET_FIXTURE);
+    const result = await fetchThreadGet({
+      baseUrl: 'https://sw-mail.example.net',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      threadId: 'T1',
+    });
+    expect(result.thread.id).toBe('T1');
+    expect(result.emails).toHaveLength(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(SAMPLE_SESSION.apiUrl);
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body));
+    expect(body.using).toEqual([
+      'urn:ietf:params:jmap:core',
+      'urn:ietf:params:jmap:mail',
+    ]);
+    expect(body.methodCalls).toHaveLength(2);
+    expect(body.methodCalls[0][0]).toBe('Thread/get');
+    expect(body.methodCalls[0][1]).toMatchObject({
+      accountId: 'c',
+      ids: ['T1'],
+    });
+    expect(body.methodCalls[1][0]).toBe('Email/get');
+    expect(body.methodCalls[1][1]['#ids']).toEqual({
+      resultOf: '0',
+      name: 'Thread/get',
+      path: '/list/0/emailIds',
+    });
+    expect(body.methodCalls[1][1].fetchTextBodyValues).toBe(true);
+    expect(body.methodCalls[1][1].fetchHTMLBodyValues).toBe(true);
+    expect(body.methodCalls[1][1].properties).toEqual(
+      expect.arrayContaining(['bodyValues', 'textBody', 'htmlBody', 'attachments']),
+    );
+  });
+
+  it('rejects with code=unauthorized when no token is available', async () => {
+    await expect(
+      fetchThreadGet({
+        baseUrl: 'https://x',
+        getAuthToken: () => null,
+        fetch: makeFetchSpy(THREAD_GET_FIXTURE),
+        session: SAMPLE_SESSION,
+        threadId: 'T1',
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('surfaces 401 as unauthorized', async () => {
+    await expect(
+      fetchThreadGet({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy('nope', { status: 401, statusText: 'Unauthorized' }),
+        session: SAMPLE_SESSION,
+        threadId: 'T1',
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('wraps a Thread/get method-error as jmap_parse_error', async () => {
+    const errorBody = JSON.stringify({
+      methodResponses: [['error', { type: 'tooManyMethods' }, '0']],
+    });
+    await expect(
+      fetchThreadGet({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy(errorBody),
+        session: SAMPLE_SESSION,
+        threadId: 'T1',
       }),
     ).rejects.toMatchObject({ code: 'jmap_parse_error' });
   });

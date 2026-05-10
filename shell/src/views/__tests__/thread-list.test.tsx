@@ -25,7 +25,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@iarsma/wasm-bindings/jmap-client', () => ({
   session: { parseSession: vi.fn() },
   mailbox: { parseMailboxGetResponse: vi.fn() },
-  email: { parseEmailQueryResponse: vi.fn() },
+  email: {
+    parseEmailQueryResponse: vi.fn(),
+    parseThreadGetResponse: vi.fn(),
+  },
 }));
 vi.mock('@iarsma/wasm-bindings/action-log', () => ({
   chain: { canonicalize: vi.fn(), verifyLinks: vi.fn() },

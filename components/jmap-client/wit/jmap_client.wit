@@ -17,7 +17,7 @@
 // invocation boundary into the workspace `IarsmaError` envelope (D-043);
 // the component layer keeps shapes narrow and explicit.
 
-package iarsma:jmap-client@0.2.0;
+package iarsma:jmap-client@0.3.0;
 
 interface session {
     /// Narrow projection of a JMAP session resource (RFC 8620 §2). Matches
@@ -225,6 +225,90 @@ interface email {
     /// JMAP guarantees matches `Email/query.ids` order — and the
     /// `position` / `total` fields from `Email/query`. Pure; no I/O.
     parse-email-query-response: func(json: string) -> result<email-query-result, parse-error>;
+
+    /// Attachment metadata for a single body part of role
+    /// `attachment` or `inline`. The host renders `name`/`type`/`size`
+    /// for download chrome; `cid` lets the host rewrite
+    /// `<img src="cid:...">` references when sanitizing the html body.
+    record attachment {
+        /// JMAP blob id — passed to a future `mail.attachment.download`
+        /// capability to fetch the bytes. Stable across the message's
+        /// lifetime.
+        id: string,
+        /// Filename as advertised by the sender (Content-Disposition
+        /// `filename` parameter or Content-Type `name`). Optional —
+        /// inline images often have none.
+        name: option<string>,
+        /// MIME type (e.g., `application/pdf`, `image/png`).
+        %type: string,
+        /// Decoded size in bytes. Inline-image data: URIs report 0.
+        size: u64,
+        /// Content-ID — present iff this is an inline-referenced part.
+        cid: option<string>,
+        /// Content-Disposition: `attachment` or `inline`. Surfaced so
+        /// the UI can decide whether to show the part inline (image
+        /// previews) or as a chrome row.
+        disposition: option<string>,
+    }
+
+    /// Full email — superset of `email-summary` with body parts and
+    /// attachments materialized. Returned by `parse-thread-get-response`.
+    /// The Rust parser walks JMAP's `bodyValues` / `textBody` / `htmlBody`
+    /// arrays and concatenates the part values into the flat
+    /// `body-text` / `body-html` strings here, so consumers don't need
+    /// to reassemble multi-part bodies. Consumers needing structured
+    /// body trees (for multipart/alternative selection or mid-message
+    /// inline-image rendering) can request a richer surface in a future
+    /// minor bump.
+    record email-full {
+        id: string,
+        thread-id: string,
+        %from: option<list<email-address>>,
+        %to: option<list<email-address>>,
+        cc: option<list<email-address>>,
+        bcc: option<list<email-address>>,
+        subject: option<string>,
+        preview: option<string>,
+        received-at: string,
+        /// Sender-stamped send time — separate from `received-at`,
+        /// which is when the receiving server ingested it. Optional
+        /// because some legacy messages omit the `Date:` header.
+        sent-at: option<string>,
+        keywords: list<keyword>,
+        size: u64,
+        /// Concatenated plain-text body. Joined from each part in
+        /// JMAP's `textBody`, separated by `\n\n`. None when the
+        /// message has no `text/plain` part.
+        body-text: option<string>,
+        /// Concatenated HTML body. Joined from each part in JMAP's
+        /// `htmlBody`, separated by `\n`. None when the message has no
+        /// `text/html` part. Hosts MUST run this through
+        /// `iarsma:html-sanitizer` before rendering.
+        body-html: option<string>,
+        attachments: list<attachment>,
+    }
+
+    /// Result of a `Thread/get` + chained `Email/get` round-trip. The
+    /// host sends one JMAP request with two methodCalls; the second
+    /// uses a `#ids` back-reference into `Thread/get.list/0/emailIds`
+    /// to fetch the bodies of all messages in the thread.
+    record thread-get-result {
+        /// Thread id echoed back from `Thread/get`.
+        thread-id: string,
+        /// Email ids in the order JMAP returned them — chronological
+        /// per RFC 8621 §3.4 ("by reception time, oldest first"). The
+        /// `emails` list below is in the same order.
+        email-ids: list<string>,
+        /// Full email payloads, ordered to match `email-ids`.
+        emails: list<email-full>,
+    }
+
+    /// Parse a JMAP request response body containing both a
+    /// `Thread/get` and a chained `Email/get` method response. Returns
+    /// the materialized thread (with `email-ids` order preserved) and
+    /// each email's body parts flattened to `body-text` / `body-html`.
+    /// Pure; no I/O.
+    parse-thread-get-response: func(json: string) -> result<thread-get-result, parse-error>;
 }
 
 world jmap-client {
