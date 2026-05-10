@@ -1,6 +1,6 @@
 [package]
 name = "html-sanitizer"
-version = "0.0.0"
+version = "0.1.0"
 description = "HTML sanitizer using ammonia. Pure function: receives raw HTML, returns sanitized HTML. No network, no filesystem."
 edition.workspace = true
 license.workspace = true
@@ -9,14 +9,18 @@ authors.workspace = true
 rust-version.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+# `rlib` so `cargo test` can link the crate on the host target; `cdylib`
+# so `cargo component build` can produce the WASM component artifact.
+# Mirrors action-log + jmap-client.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-wit-bindgen-rt.workspace = true
 ammonia = "4.0"
+wit-bindgen-rt.workspace = true
 
 [package.metadata.component]
 package = "iarsma:html-sanitizer"
+
+[package.metadata.component.target]
+path = "wit"
+world = "html-sanitizer"
