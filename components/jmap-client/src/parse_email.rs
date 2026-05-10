@@ -135,9 +135,7 @@ struct RawMethodErrorPayload {
 // Public parser
 // ──────────────────────────────────────────────────────────────────────
 
-pub fn parse_email_query_response(
-    json: &str,
-) -> Result<EmailQueryResult, EmailQueryParseError> {
+pub fn parse_email_query_response(json: &str) -> Result<EmailQueryResult, EmailQueryParseError> {
     let raw: RawResponse = serde_json::from_str(json).map_err(|e| {
         let code = match e.classify() {
             serde_json::error::Category::Data => EmailQueryParseErrorCode::WrongType,
@@ -165,10 +163,8 @@ pub fn parse_email_query_response(
     let (query_method, query_payload) = decode_entry(query_entry, "methodResponses[0]")?;
 
     if query_method == "error" {
-        let payload: RawMethodErrorPayload =
-            serde_json::from_value(query_payload.clone()).unwrap_or(RawMethodErrorPayload {
-                error_type: None,
-            });
+        let payload: RawMethodErrorPayload = serde_json::from_value(query_payload.clone())
+            .unwrap_or(RawMethodErrorPayload { error_type: None });
         return Err(EmailQueryParseError {
             code: EmailQueryParseErrorCode::MethodError,
             message: payload.error_type.unwrap_or_else(|| "(no type)".into()),
@@ -181,12 +177,11 @@ pub fn parse_email_query_response(
         });
     }
 
-    let query: RawQueryPayload = serde_json::from_value(query_payload.clone()).map_err(|e| {
-        EmailQueryParseError {
+    let query: RawQueryPayload =
+        serde_json::from_value(query_payload.clone()).map_err(|e| EmailQueryParseError {
             code: EmailQueryParseErrorCode::WrongType,
             message: format!("Email/query payload not parseable: {e}"),
-        }
-    })?;
+        })?;
     let position = query.position.unwrap_or(0);
     let _ids = require(query.ids, "Email/query.ids")?;
 
@@ -200,10 +195,8 @@ pub fn parse_email_query_response(
     let (get_method, get_payload) = decode_entry(get_entry, "methodResponses[1]")?;
 
     if get_method == "error" {
-        let payload: RawMethodErrorPayload =
-            serde_json::from_value(get_payload.clone()).unwrap_or(RawMethodErrorPayload {
-                error_type: None,
-            });
+        let payload: RawMethodErrorPayload = serde_json::from_value(get_payload.clone())
+            .unwrap_or(RawMethodErrorPayload { error_type: None });
         return Err(EmailQueryParseError {
             code: EmailQueryParseErrorCode::MethodError,
             message: payload.error_type.unwrap_or_else(|| "(no type)".into()),
@@ -216,12 +209,11 @@ pub fn parse_email_query_response(
         });
     }
 
-    let get: RawGetPayload = serde_json::from_value(get_payload.clone()).map_err(|e| {
-        EmailQueryParseError {
+    let get: RawGetPayload =
+        serde_json::from_value(get_payload.clone()).map_err(|e| EmailQueryParseError {
             code: EmailQueryParseErrorCode::WrongType,
             message: format!("Email/get payload not parseable: {e}"),
-        }
-    })?;
+        })?;
     let raw_list = require(get.list, "Email/get.list")?;
 
     let emails = raw_list
@@ -369,7 +361,10 @@ mod tests {
             .iter()
             .flat_map(|e| &e.keywords)
             .any(|k| k.name == "$seen");
-        assert!(any_seen, "fixture should include at least one $seen keyword");
+        assert!(
+            any_seen,
+            "fixture should include at least one $seen keyword"
+        );
     }
 
     #[test]

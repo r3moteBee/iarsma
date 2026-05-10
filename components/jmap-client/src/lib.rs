@@ -177,8 +177,12 @@ mod component {
         WitEmailSummary {
             id: e.id,
             thread_id: e.thread_id,
-            from: e.from.map(|list| list.into_iter().map(into_wit_address).collect()),
-            to: e.to.map(|list| list.into_iter().map(into_wit_address).collect()),
+            from: e
+                .from
+                .map(|list| list.into_iter().map(into_wit_address).collect()),
+            to: e
+                .to
+                .map(|list| list.into_iter().map(into_wit_address).collect()),
             subject: e.subject,
             preview: e.preview,
             received_at: e.received_at,
