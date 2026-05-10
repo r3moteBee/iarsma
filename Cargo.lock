@@ -117,12 +117,9 @@ dependencies = [
 
 [[package]]
 name = "html-sanitizer"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ammonia",
- "serde",
- "serde_json",
- "thiserror",
  "wit-bindgen-rt",
 ]
 

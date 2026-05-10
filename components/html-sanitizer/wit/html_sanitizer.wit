@@ -1,12 +1,41 @@
-// WIT contract for html-sanitizer.
+// WIT contract for iarsma:html-sanitizer.
 //
-// HTML sanitizer using ammonia. Pure function: receives raw HTML, returns sanitized HTML. No network, no filesystem.
+// Pure function — receives raw HTML and returns sanitized HTML safe to
+// render in the message viewer. No network, no filesystem, no DOM. The
+// underlying engine is the `ammonia` Rust crate (a maintained allow-list
+// HTML sanitizer); this WIT exposes only the narrow surface the shell
+// (and any other host) actually consumes.
 //
-// Real interface lands in F-3 / Phase 0 work item 4.
-// This placeholder lets the workspace resolve.
+// Per D-038 the component does no I/O. This satisfies the brief's
+// "Critical security boundary" framing for the sanitizer (project-brief.md,
+// "HTML Sanitizer" component): it's a pure function the host calls with
+// already-fetched bytes, returning bytes the host renders.
 
-package iarsma:html-sanitizer@0.0.0;
+package iarsma:html-sanitizer@0.1.0;
 
-world placeholder {
-    // export hello: func() -> string;
+interface sanitize {
+    /// Sanitize an HTML fragment for safe rendering.
+    ///
+    /// Strips: `<script>`, `<style>`, `<iframe>`, `<object>`, `<embed>`,
+    /// `<form>`, `<input>`, `<meta>`, `<link>`; on*-attribute event
+    /// handlers; `javascript:` URIs in any URL-bearing attribute; CSS
+    /// expressions and external `@import` rules in inline styles.
+    ///
+    /// `allow-external-images`:
+    ///   - `false` (default for incoming mail): `<img>` tags with
+    ///     `http(s):` `src` are stripped. `cid:` (referenced inline
+    ///     attachments) and `data:` URIs pass through. Used for
+    ///     "block remote content unless the user opts in."
+    ///   - `true`: `<img>` with `http(s):` `src` is allowed. The user
+    ///     opted into showing external content for this message
+    ///     (Phase 1 work item 7's MessageView surfaces the toggle).
+    ///
+    /// Returns the sanitized HTML as a string. Always succeeds —
+    /// malformed HTML is interpreted as best-effort by ammonia's parser
+    /// (html5ever) the same way browsers do.
+    sanitize: func(html: string, allow-external-images: bool) -> string;
+}
+
+world html-sanitizer {
+    export sanitize;
 }
