@@ -17,6 +17,7 @@ import {
   IarsmaProvider,
   cachedInvoker,
   jmapInvoker,
+  loggingInvoker,
   type Invoker,
 } from './runtime/index.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
@@ -114,16 +115,27 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
   const setAgentContext = useSetAtom(agentContextAtom);
   const invoker = useMemo<Invoker>(
     () =>
-      // The persistent cache wraps the jmap invoker so cacheable reads
-      // (mailbox.list / thread.list / thread.get) return instantly on
-      // subsequent loads while a background revalidation refreshes the
-      // entry. Non-cacheable tools and dry-runs pass through unchanged.
-      cachedInvoker({
-        inner: jmapInvoker({
-          baseUrl: config.jmapBaseUrl ?? config.oidcIssuer,
-          getAuthToken: () => authStorage.loadTokens()?.accessToken ?? null,
+      // Three-layer composition (outermost → innermost):
+      //   loggingInvoker — appends an action-log entry on every
+      //                    successful invocation (D-052).
+      //   cachedInvoker  — stale-while-revalidate persistent cache
+      //                    (D-051). Cache hits skip the network but
+      //                    are still logged.
+      //   jmapInvoker    — actual JMAP fetch via the WASM client.
+      loggingInvoker({
+        inner: cachedInvoker({
+          inner: jmapInvoker({
+            baseUrl: config.jmapBaseUrl ?? config.oidcIssuer,
+            getAuthToken: () => authStorage.loadTokens()?.accessToken ?? null,
+          }),
+          store: cacheStorage,
         }),
-        store: cacheStorage,
+        log: actionLog,
+        getIdentity: () => {
+          const t = authStorage.loadTokens();
+          if (t === null) return null;
+          return { id: t.subject ?? t.email ?? 'unknown' };
+        },
       }),
     [config],
   );

@@ -12,7 +12,9 @@ import {
   createActionLog,
   inMemoryActionLogStore,
   type ActionLog,
+  type ActionLogStore,
 } from './runtime/action-log.js';
+import { indexedDbActionLogStore } from './runtime/action-log-store.js';
 import {
   indexedDbAuthStorage,
   inMemoryAuthStorage,
@@ -74,17 +76,28 @@ export const tokensAtom = atom<StoredTokens | null>((get) => {
 export const isSignedInAtom = atom((get) => get(tokensAtom) !== null);
 
 /**
- * Singleton action log for the shell. Phase 0 backs it with the in-memory
- * store; Phase 1 swaps the store for the encrypted IndexedDB-backed
- * implementation behind the same `ActionLogStore` interface (D-027 / D-038).
+ * Singleton action log for the shell.
  *
- * The shell appends to this log on every capability invocation and
- * security-relevant event (sign-in / sign-out, token refresh, etc.). Phase 0
- * lights up only the sign-in event — the broader instrumentation lands as
- * the corresponding capabilities do.
+ * In the browser the chain persists to IndexedDB encrypted under the
+ * same wrap key as auth tokens, AAD-domain-separated by purpose
+ * `action-log.entries.v1` (D-052, third consumer of D-050's wrap key).
+ * Server / SSR / test environments fall back to the in-memory store.
+ *
+ * The shell appends here on:
+ *   - sign-in (`auth.signin` event in App.tsx callback handler)
+ *   - every successful capability invocation, via the `loggingInvoker`
+ *     wrapper around the production invoker (D-052).
+ *
+ * The log is *not* cleared on sign-out — it is per-installation, not
+ * per-session, and the `identity` field on each entry distinguishes
+ * mixed sign-ins on a shared browser.
  */
+const actionLogStore: ActionLogStore = isBrowser
+  ? indexedDbActionLogStore({ auth: authStorage })
+  : inMemoryActionLogStore();
+
 export const actionLog: ActionLog = createActionLog({
-  store: inMemoryActionLogStore(),
+  store: actionLogStore,
 });
 
 /**
