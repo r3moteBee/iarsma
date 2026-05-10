@@ -61,13 +61,21 @@ export function walkZod(schema: z.ZodTypeAny): TypeNode {
       const fields: Field[] = Object.entries(shape).map(([name, child]) => {
         const optional = child.isOptional();
         const description = child.description;
+        // If the child is `ZodOptional` (not `ZodNullable`), unwrap to its
+        // inner type for AST purposes. The Field's `optional: true` flag
+        // captures the optionality; wrapping the type in `option<T>` too
+        // would produce `name?: T | null` in TS (doubly-optional), since
+        // `?` already means "or undefined." `ZodNullable` keeps wrapping
+        // in `option<T>` because it's a type-level claim ("the value may
+        // be `null`"), distinct from "the field may be absent."
+        const childForType = unwrapOptional(child);
         const field: Field = optional && description !== undefined
-          ? { name, type: walkZod(child), optional, description }
+          ? { name, type: walkZod(childForType), optional, description }
           : optional
-            ? { name, type: walkZod(child), optional }
+            ? { name, type: walkZod(childForType), optional }
             : description !== undefined
-              ? { name, type: walkZod(child), optional: false, description }
-              : { name, type: walkZod(child), optional: false };
+              ? { name, type: walkZod(childForType), optional: false, description }
+              : { name, type: walkZod(childForType), optional: false };
         return field;
       });
       return { kind: 'record', fields };
@@ -187,4 +195,18 @@ export function walkZod(schema: z.ZodTypeAny): TypeNode {
     default:
       throw new UnhandledZodKind(`unhandled Zod kind: ${typeName ?? '<unknown>'}`);
   }
+}
+
+/**
+ * If `schema` is `ZodOptional`, return its inner type; otherwise return
+ * `schema` unchanged. Used inside `ZodObject` walking to keep optional
+ * fields' types unwrapped — see the comment in the `ZodObject` case for
+ * the rationale.
+ */
+function unwrapOptional(schema: z.ZodTypeAny): z.ZodTypeAny {
+  const def = schema._def as { typeName?: string; innerType?: z.ZodTypeAny };
+  if (def.typeName === 'ZodOptional' && def.innerType !== undefined) {
+    return def.innerType;
+  }
+  return schema;
 }

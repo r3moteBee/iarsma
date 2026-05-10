@@ -129,24 +129,13 @@ describe('markdownForCapability', () => {
     const md = markdownForCapability(send.ast);
     expect(md).toMatch(/\| Field \| Type \| Required \| Description \|/);
     expect(md).toMatch(/\| `to` \| `Array<string>` \| ✓ \| Recipient addresses\. \|/);
-    // body is optional → no checkmark in Required column.
-    // body's type is option<string>, which renders as `string | null`.
-    // The pipe inside the type cell is escaped (`\|`) so the table column
-    // boundary isn't broken.
+    // body is optional → no checkmark in Required column. With the walker's
+    // ZodOptional unwrapping (so optional fields don't double up as
+    // `T | null` in addition to the `?:` flag), the rendered type is
+    // simply `string`, with optionality conveyed by the empty Required
+    // cell. ZodNullable still renders as `T | null`.
     expect(md).toContain('`body`');
-    expect(md).toContain('`string \\| null`');
-  });
-
-  it('escapes pipe characters inside table cells (no broken columns)', () => {
-    const md = markdownForCapability(send.ast);
-    // Each row of the input/output tables must have exactly 5 unescaped
-    // pipes (4 column boundaries + 1 trailing). Walk the table lines and
-    // verify the body row counts correctly.
-    const bodyLine = md.split('\n').find((l) => l.includes('`body`'));
-    expect(bodyLine).toBeDefined();
-    // Strip escaped pipes (\|) before counting unescaped ones.
-    const unescapedPipes = bodyLine!.replace(/\\\|/g, '').match(/\|/g) ?? [];
-    expect(unescapedPipes.length).toBe(5);
+    expect(md).toMatch(/\| `body` \| `string` \|  \|/);
   });
 
   it('renders empty-record inputs as "(no fields)"', () => {

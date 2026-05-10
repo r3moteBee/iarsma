@@ -14,6 +14,7 @@ import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { IarsmaProvider, jmapInvoker, type Invoker } from './runtime/index.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
+import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
 
 type Phase =
@@ -151,24 +152,50 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   };
 
   return (
-    <section aria-labelledby="signedin-heading">
-      <h2 id="signedin-heading">Signed in</h2>
-      {session.isLoading ? <p>Loading session…</p> : null}
-      {session.error !== undefined ? (
-        <p role="alert">Session error: {session.error.message}</p>
-      ) : null}
-      {session.data !== undefined ? (
+    <section
+      aria-labelledby="signedin-heading"
+      style={{ display: 'grid', gridTemplateColumns: '16em 1fr', gap: '1em', alignItems: 'start' }}
+    >
+      <header style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <h2 id="signedin-heading">Signed in</h2>
+        <span>
+          {session.data !== undefined ? (
+            <span>
+              {session.data.username} (
+              <button type="button" onClick={onSignOut}>
+                Sign out
+              </button>
+              )
+            </span>
+          ) : tokens?.email !== undefined ? (
+            <span>
+              {tokens.email} (
+              <button type="button" onClick={onSignOut}>
+                Sign out
+              </button>
+              )
+            </span>
+          ) : (
+            <button type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          )}
+        </span>
+      </header>
+      <aside aria-label="Mailbox sidebar">
+        <MailboxList />
+      </aside>
+      <main aria-label="Selected mailbox">
+        {session.isLoading ? <p>Loading session…</p> : null}
+        {session.error !== undefined ? (
+          <p role="alert">Session error: {session.error.message}</p>
+        ) : null}
         <p>
-          Signed in as <strong>{session.data.username}</strong>.
+          {/* Phase 1 work item 4 wires ThreadList here, reading the
+              selected mailbox id from selectedMailboxIdAtom. */}
+          Select a mailbox from the sidebar.
         </p>
-      ) : tokens?.email !== undefined ? (
-        <p>
-          Signed in as <strong>{tokens.email}</strong>.
-        </p>
-      ) : null}
-      <button type="button" onClick={onSignOut}>
-        Sign out
-      </button>
+      </main>
     </section>
   );
 }
