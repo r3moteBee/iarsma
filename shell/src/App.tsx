@@ -16,6 +16,7 @@ import { IarsmaProvider, jmapInvoker, type Invoker } from './runtime/index.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
+import { ThreadList } from './views/thread-list.js';
 
 type Phase =
   | { kind: 'loading' }
@@ -190,11 +191,7 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
         {session.error !== undefined ? (
           <p role="alert">Session error: {session.error.message}</p>
         ) : null}
-        <p>
-          {/* Phase 1 work item 4 wires ThreadList here, reading the
-              selected mailbox id from selectedMailboxIdAtom. */}
-          Select a mailbox from the sidebar.
-        </p>
+        <ThreadList />
       </main>
     </section>
   );

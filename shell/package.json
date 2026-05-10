@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@iarsma/wasm-bindings": "workspace:*",
+    "@tanstack/react-virtual": "^3.13.24",
     "jotai": "^2.10.1",
     "oauth4webapi": "^3.8.6",
     "react": "^18.3.1",
