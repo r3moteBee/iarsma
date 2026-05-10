@@ -19,6 +19,11 @@ import {
   type AuthStorage,
   type StoredTokens,
 } from './runtime/auth-storage.js';
+import {
+  inMemoryCacheStorage,
+  indexedDbCacheStorage,
+  type CacheStorage,
+} from './runtime/cache-storage.js';
 
 const isBrowser = typeof window !== 'undefined' && typeof indexedDB !== 'undefined';
 
@@ -39,6 +44,21 @@ const isBrowser = typeof window !== 'undefined' && typeof indexedDB !== 'undefin
 export const authStorage: AuthStorage = isBrowser
   ? indexedDbAuthStorage()
   : inMemoryAuthStorage();
+
+/**
+ * Persistent capability-result cache (D-051). Backed by IndexedDB in
+ * the browser, in-memory elsewhere. Encrypts each row with the same
+ * wrap key as `authStorage`, AAD-domain-separated per cache purpose.
+ *
+ * Wired into the production invoker via `cachedInvoker(jmapInvoker, ...)`
+ * in App.tsx.
+ *
+ * On sign-out, App.tsx calls `cacheStorage.clearAll()` alongside
+ * `authStorage.clearTokens()` to drop all cached email data.
+ */
+export const cacheStorage: CacheStorage = isBrowser
+  ? indexedDbCacheStorage({ auth: authStorage })
+  : inMemoryCacheStorage();
 
 /** Increment to force `tokensAtom` to re-read storage. */
 export const authVersionAtom = atom(0);

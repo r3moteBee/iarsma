@@ -1,0 +1,260 @@
+/**
+ * cachedInvoker tests (D-051).
+ *
+ * Validates the stale-while-revalidate semantics:
+ *
+ *   - Cache miss: fetch + write-through; result returned.
+ *   - Cache hit: cached value returned synchronously; background
+ *     fetch fires; cache is updated when the background fetch
+ *     completes.
+ *   - Non-cacheable tool: pass-through (cache untouched, no SWR).
+ *   - Dry-run: pass-through.
+ *   - In-flight dedup: two simultaneous misses share one fetch.
+ *   - Background-revalidation errors: silent by default, surfaced via
+ *     the `onRevalidationError` callback when provided.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cachedInvoker } from '../cached-invoker.js';
+import {
+  inMemoryCacheStorage,
+  type CacheStorage,
+} from '../cache-storage.js';
+import type { Invoker } from '../invoker.js';
+
+function inner(handlers: Record<string, () => unknown>): {
+  invoker: Invoker;
+  calls: { name: string; input: unknown }[];
+} {
+  const calls: { name: string; input: unknown }[] = [];
+  const invoker: Invoker = {
+    async invoke(name, input) {
+      calls.push({ name, input });
+      const handler = handlers[name];
+      if (handler === undefined) throw new Error(`no handler for ${name}`);
+      return handler() as never;
+    },
+  };
+  return { invoker, calls };
+}
+
+/** Wait for the macrotask queue to flush. */
+async function flush(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0));
+}
+
+let cache: CacheStorage;
+
+beforeEach(() => {
+  cache = inMemoryCacheStorage();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('cachedInvoker — cache miss', () => {
+  it('fetches via inner and writes through to the cache', async () => {
+    const { invoker, calls } = inner({
+      'thread.list': () => ({ threads: [], position: 0, total: 0 }),
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+    const out = await wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    expect(out).toEqual({ threads: [], position: 0, total: 0 });
+    expect(calls).toHaveLength(1);
+    expect(await cache.get('threads', '{"mailboxId":"mb1"}')).toEqual({
+      threads: [],
+      position: 0,
+      total: 0,
+    });
+  });
+
+  it('dedups concurrent misses for the same (tool, input)', async () => {
+    let resolveFetch!: (v: unknown) => void;
+    const fetchPromise = new Promise((r) => {
+      resolveFetch = r;
+    });
+    const { invoker, calls } = inner({
+      'thread.list': () => fetchPromise,
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    const a = wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    const b = wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    // Let the IIFE bodies run past the cache lookup so `inner.invoke`
+    // gets entered for the first call. The dedup gate catches the
+    // second call before it spawns a parallel fetch.
+    await flush();
+    expect(calls).toHaveLength(1);
+    resolveFetch({ threads: [{ id: 'T1' }] });
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(ra).toEqual({ threads: [{ id: 'T1' }] });
+    expect(rb).toEqual({ threads: [{ id: 'T1' }] });
+  });
+});
+
+describe('cachedInvoker — cache hit (stale-while-revalidate)', () => {
+  it('returns the cached value and dispatches a background fetch', async () => {
+    await cache.put('threads', '{"mailboxId":"mb1"}', {
+      threads: [{ id: 'OLD' }],
+      position: 0,
+      total: 1,
+    });
+    const fetched = { threads: [{ id: 'NEW' }], position: 0, total: 1 };
+    const { invoker, calls } = inner({ 'thread.list': () => fetched });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    const out = await wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    // Returned the CACHED value, not the fetched one.
+    expect(out).toEqual({
+      threads: [{ id: 'OLD' }],
+      position: 0,
+      total: 1,
+    });
+    // Background revalidation fired anyway.
+    await flush();
+    expect(calls).toHaveLength(1);
+    // After the revalidation, the cache reflects the fresh data.
+    expect(await cache.get('threads', '{"mailboxId":"mb1"}')).toEqual(fetched);
+  });
+
+  it('coalesces a SWR background fetch with an in-flight cache-miss fetch', async () => {
+    let resolveFetch!: (v: unknown) => void;
+    const fetchPromise = new Promise((r) => {
+      resolveFetch = r;
+    });
+    const { invoker, calls } = inner({
+      'thread.list': () => fetchPromise,
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    // First call: cache miss, kicks off the fetch.
+    const first = wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    // Second call before the first resolves: still no cached value, so
+    // it joins the in-flight fetch (dedup).
+    const second = wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    await flush();
+    expect(calls).toHaveLength(1);
+    resolveFetch({ threads: [{ id: 'X' }] });
+    await Promise.all([first, second]);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('cachedInvoker — pass-through', () => {
+  it('non-cacheable tools never touch the store', async () => {
+    const { invoker, calls } = inner({
+      'session.get': () => ({ apiUrl: 'https://j', primaryAccountIdMail: 'A' }),
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke('session.get', {});
+    await wrapped.invoke('session.get', {});
+    expect(calls).toHaveLength(2);
+  });
+
+  it('dry-run invocations are not cached', async () => {
+    const previewResult = { mode: 'preview', plan: { willSend: true } };
+    const { invoker, calls } = inner({
+      'thread.list': () => previewResult,
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke('thread.list', { mailboxId: 'mb1' }, { dryRun: true });
+    await wrapped.invoke('thread.list', { mailboxId: 'mb1' }, { dryRun: true });
+    expect(calls).toHaveLength(2);
+    // The dry-run preview MUST NOT pollute the cache.
+    expect(await cache.get('threads', '{"mailboxId":"mb1"}')).toBeNull();
+  });
+});
+
+describe('cachedInvoker — cache key canonicalization', () => {
+  it('treats inputs differing only by key order as the same cache key', async () => {
+    // Pre-populate with a sentinel under the canonicalized key
+    // (alphabetical-by-key JSON). Both call shapes below should
+    // canonicalize to the same key and hit the cache. The handler
+    // returns the same sentinel so background SWR overwrite is a
+    // no-op — keeps the test focused on canonicalization rather than
+    // SWR ordering.
+    const SENTINEL = { threads: [{ id: 'CACHED' }], position: 0, total: 1 };
+    await cache.put('threads', '{"limit":50,"mailboxId":"mb1"}', SENTINEL);
+    const { invoker } = inner({ 'thread.list': () => SENTINEL });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    const a = await wrapped.invoke('thread.list', { mailboxId: 'mb1', limit: 50 });
+    const b = await wrapped.invoke('thread.list', { limit: 50, mailboxId: 'mb1' });
+    expect(a).toEqual(SENTINEL);
+    expect(b).toEqual(SENTINEL);
+  });
+
+  it('treats different inputs as different cache keys', async () => {
+    const { invoker, calls } = inner({
+      'thread.list': () => ({ threads: [], position: 0, total: 0 }),
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    await wrapped.invoke('thread.list', { mailboxId: 'mb2' });
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe('cachedInvoker — revalidation errors', () => {
+  it('swallows background-fetch errors silently by default', async () => {
+    await cache.put('threads', '{"mailboxId":"mb1"}', {
+      threads: [],
+      position: 0,
+      total: 0,
+    });
+    const { invoker } = inner({
+      'thread.list': () => {
+        throw new Error('upstream blew up');
+      },
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    // The cache hit returns successfully; the background fetch
+    // rejects but its rejection must not propagate to the caller.
+    const out = await wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    expect(out).toEqual({ threads: [], position: 0, total: 0 });
+    await flush();
+  });
+
+  it('surfaces background-fetch errors via the onRevalidationError callback', async () => {
+    await cache.put('threads', '{"mailboxId":"mb1"}', {
+      threads: [],
+      position: 0,
+      total: 0,
+    });
+    const { invoker } = inner({
+      'thread.list': () => {
+        throw new Error('boom');
+      },
+    });
+    const onRevalidationError = vi.fn();
+    const wrapped = cachedInvoker({
+      inner: invoker,
+      store: cache,
+      onRevalidationError,
+    });
+    await wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    await flush();
+    expect(onRevalidationError).toHaveBeenCalledTimes(1);
+    expect(onRevalidationError.mock.calls[0]?.[0]).toBe('thread.list');
+    expect((onRevalidationError.mock.calls[0]?.[1] as Error).message).toBe(
+      'boom',
+    );
+  });
+
+  it('cache-miss errors propagate to the caller', async () => {
+    const { invoker } = inner({
+      'thread.list': () => {
+        throw new Error('miss-time error');
+      },
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+    await expect(
+      wrapped.invoke('thread.list', { mailboxId: 'mb1' }),
+    ).rejects.toThrow('miss-time error');
+  });
+});

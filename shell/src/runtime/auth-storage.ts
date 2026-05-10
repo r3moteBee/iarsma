@@ -82,6 +82,17 @@ export interface AuthStorage {
   takePkce(state: string): Promise<StoredPkce | null>;
   /** Drop all PKCE entries (e.g., on sign-out). */
   clearAllPkce(): Promise<void>;
+
+  /**
+   * Provide the AES-GCM-256 wrap key + its `kid` for encrypting
+   * non-token data (the capability-result cache, D-051). The key is
+   * the same one used to wrap tokens; AAD-domain-separation keeps
+   * cross-purpose decrypts cryptographically distinct.
+   *
+   * Production (`indexedDbAuthStorage`) returns the persisted key.
+   * Test/in-memory impls generate a fresh key on first call.
+   */
+  getWrapKey(): Promise<{ readonly key: CryptoKey; readonly kid: string }>;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -91,6 +102,9 @@ export interface AuthStorage {
 export function inMemoryAuthStorage(): AuthStorage {
   let tokens: StoredTokens | null = null;
   const pkce = new Map<string, StoredPkce>();
+  // Wrap key generated on first use. Tests and SSR don't persist
+  // anything, so each fresh in-memory storage starts with a fresh key.
+  let wrapPromise: Promise<{ key: CryptoKey; kid: string }> | null = null;
   return {
     ready: async () => {},
     loadTokens: () => tokens,
@@ -109,6 +123,15 @@ export function inMemoryAuthStorage(): AuthStorage {
       return v;
     },
     clearAllPkce: async () => pkce.clear(),
+    getWrapKey: () => {
+      if (wrapPromise === null) {
+        wrapPromise = (async () => ({
+          key: await generateWrapKey(),
+          kid: generateKid(),
+        }))();
+      }
+      return wrapPromise;
+    },
   };
 }
 
@@ -174,6 +197,27 @@ export function sessionAuthStorage(): AuthStorage {
       }
       for (const k of toDelete) ss.removeItem(k);
     },
+    getWrapKey: makeInMemoryKeyAccessor(),
+  };
+}
+
+/**
+ * Cache + sessionStorage impls don't persist a wrap key. They generate
+ * one on first call and cache it for the lifetime of the storage
+ * instance. The cache module relies on this being stable per-instance —
+ * a fresh instance can't decrypt a previous instance's cache, but
+ * those impls also don't persist cache, so the lifetimes match.
+ */
+function makeInMemoryKeyAccessor(): AuthStorage['getWrapKey'] {
+  let promise: Promise<{ key: CryptoKey; kid: string }> | null = null;
+  return () => {
+    if (promise === null) {
+      promise = (async () => ({
+        key: await generateWrapKey(),
+        kid: generateKid(),
+      }))();
+    }
+    return promise;
   };
 }
 
@@ -342,6 +386,10 @@ export function indexedDbAuthStorage(
     clearAllPkce: async () => {
       const db = await openDb();
       await idbClear(db, STORE_PKCE);
+    },
+    getWrapKey: async () => {
+      const wk = await loadOrCreateWrapKey();
+      return { key: wk.key, kid: wk.kid };
     },
   };
 }

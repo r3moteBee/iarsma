@@ -52,3 +52,17 @@ export type { UseReadHookOptions, UseReadHookResult } from './read-hook.js';
 
 export { useWriteHook } from './write-hook.js';
 export type { UseWriteHookOptions, UseWriteHookResult } from './write-hook.js';
+
+export {
+  CACHE_PURPOSES,
+  inMemoryCacheStorage,
+  indexedDbCacheStorage,
+} from './cache-storage.js';
+export type {
+  CacheStorage,
+  CachePurposeKey,
+  IndexedDbCacheStorageOptions,
+} from './cache-storage.js';
+export { CACHEABLE_TOOLS, purposeFor } from './cache-policy.js';
+export { cachedInvoker } from './cached-invoker.js';
+export type { CachedInvokerOptions } from './cached-invoker.js';

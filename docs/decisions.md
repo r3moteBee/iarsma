@@ -346,6 +346,33 @@ For *transit* security, Iarsma rides on the platform's TLS — TLS 1.3 with X255
 - Per-purpose key derivation via HKDF-SHA-384 from a master CryptoKey. The current design uses a single AES-GCM-256 key with AAD-based domain separation — simpler and sufficient. HKDF lands when a second consumer of the wrapping key emerges (e.g., wrapping a separate database of cached email metadata).
 - Tauri secure-storage upgrade (Phase 6+). The Web Crypto path inside the Tauri WebView works today; OS keychain integration is a hardening pass for native distributions.
 
+## D-051 — Capability-result cache: encrypted IndexedDB, AAD-domain-separated, stale-while-revalidate
+**Date:** 2026-05-10
+**Decision:** Phase 1 work item 8 lands a persistent cache for capability invocations (mailbox tree, thread lists, opened thread bodies) backed by IndexedDB.
+
+- **Plug point:** a `cachedInvoker(inner, store)` wrapper around the production `jmapInvoker`. Tests still construct `mockInvoker(...)` raw — the cache is opt-in at the runtime boundary, not baked into `useReadHook` so individual capabilities can declare themselves uncacheable later (e.g., `mail.send` has no cacheable read).
+- **Cache key:** `(toolName, canonicalize(input))`. Reuses the same input-canonicalization function the read-hook already uses for atom-family keys, so cache and atom invalidation align.
+- **Invalidation:** stale-while-revalidate. A cache hit resolves the call immediately; the wrapper fires the underlying fetch in the background and writes the result through. A cache miss does the round-trip fetch + write-through. Future delta-sync via JMAP `state` tokens (Phase 2 push subscriptions) will flip this to "always serve cache, only revalidate when state changes."
+- **Storage:** new IndexedDB database `iarsma-cache` (separate lifecycle from `iarsma-auth` — clear-on-sign-out is one-store).
+- **Encryption:** triggers the D-050 "second consumer" branch but takes the *AAD-domain-separated* path rather than HKDF. The same AES-GCM-256 wrap key persisted in `iarsma-auth/wrap-keys` decrypts the cache, with AAD purposes `cache.mailboxes.v1`, `cache.threads.v1`, `cache.thread-bodies.v1`. Each store-class has its own AAD so a cross-purpose decrypt fails closed (e.g., a corrupted thread row can't accidentally decrypt as a mailbox row). HKDF lands when there's a second *origin* — multi-account, e.g. — or a credential-isolation requirement.
+- **AuthStorage coupling:** the cache module imports the wrap-key accessor from `auth-storage.ts` rather than re-implementing key management. AuthStorage exposes a new `withWrapKey(<callback>)` accessor used by both auth and cache encrypt/decrypt paths.
+
+**Why:** The implementation plan named "second consumer of the wrapping key" as the trigger for the HKDF follow-up to D-050. We're at that trigger today but the marginal security gain over AAD-domain-separation is small — AAD already provides cryptographic domain separation, and HKDF would only protect against *full key compromise*, which AES-GCM already considers catastrophic. The complexity-vs-benefit tradeoff favors AAD now; HKDF stays a future-work item with a clearer driver (multi-account, third-party-shared keys).
+
+Stale-while-revalidate matches the project ethos better than TTL: this is offline-capable agent collaboration territory; users should see their mailbox even with no network. A TTL would force unnecessary spinners on the common path. The downside (a 1-2-frame staleness window) is acceptable because the revalidation is non-blocking and the UI re-renders on success.
+
+**How to apply:**
+- Production reads of `mailbox.list`, `thread.list`, `thread.get` now serve from cache on subsequent loads.
+- New cacheable capabilities add themselves to a `CACHEABLE_TOOLS` set in `cache-policy.ts` with their AAD purpose; non-cacheable capabilities pass through unchanged.
+- Writes (`mail.send`, future `mail.draft.create`) bypass cache. They will (in Phase 2) emit cache-invalidation events that drop affected entries.
+- On sign-out, the cache DB is cleared alongside the token store.
+- Tests around cached invocations should construct a `mockInvoker` and a `cachedInvoker(mock, fakeStore)` to exercise the wrapper without IDB.
+
+**Out of scope (follow-ups):**
+- HKDF-derived per-purpose keys. Re-evaluate when multi-account lands or a third party (e.g., extension) needs scoped access to a subset of the cache.
+- JMAP `state`-token-based delta sync — currently we revalidate the full result on every cache hit. State-token-aware delta sync is the Phase 2 push-subscription work item.
+- LRU eviction — current schema has no size cap. Becomes important once mailbox bodies dominate the cache; at that point we'll add `lastAccessedAt` indexing and a budget.
+
 ## D-034 — Project name: Iarsma
 **Date:** 2026-04-26
 **Decision:** The project is named **Iarsma** (Irish, "EER-sma" — *relic, artifact, durable remnant*). Domains owned: `iarsma.com` (primary user-facing) and `iarsma.io` (developer-facing). The `.ai` TLD was deliberately *not* purchased — Iarsma is communication infrastructure, not an AI product, and the `.ai` framing would mis-position it. Use `Iarsma` as the proper noun in prose and titles; `iarsma` as the lowercase identifier in package names, URNs (`urn:iarsma:agent-context`), and component namespaces (`iarsma:jmap-client@0.0.0`).
