@@ -373,6 +373,35 @@ Stale-while-revalidate matches the project ethos better than TTL: this is offlin
 - JMAP `state`-token-based delta sync — currently we revalidate the full result on every cache hit. State-token-aware delta sync is the Phase 2 push-subscription work item.
 - LRU eviction — current schema has no size cap. Becomes important once mailbox bodies dominate the cache; at that point we'll add `lastAccessedAt` indexing and a budget.
 
+## D-052 — Action-log writes on every invocation: outer-wrap, log-after-success, opt-out list
+**Date:** 2026-05-10
+**Decision:** Phase 1 work item 9 lights up real action-log writes for capability invocations. The mechanism is a `loggingInvoker(inner, log, ...)` wrapper that:
+
+- **Plugs in outermost** — `loggingInvoker(cachedInvoker(jmapInvoker(...)))`. Cache hits and network round-trips alike produce log entries, because the audit chain is about *what was requested*, not *how it was served*. The user-or-agent-initiated read is the auditable event regardless of cache state.
+- **Logs after success** — the inner `invoke()` runs first; the log append happens only if it returned. Failures aren't recorded today (a future "negative-acks" follow-up may add them, but Phase 1's goal is "the action log shows the read trail" per the implementation plan, not "the action log is a crash log").
+- **Best-effort append** — log-append errors are caught and warned to console; they never propagate to the caller. The chain is integrity-checked separately via `actionLog.verify()`. A broken append doesn't break the user's UI.
+- **Opt-out list, not opt-in** — every cacheable read tool logs by default. `EXCLUDED_FROM_LOG` carves out tools whose calls are uninteresting for audit (today: only `session.get`, which fires once per invoker construction and never again). New tools auto-log unless explicitly excluded — bias toward over-logging is correct for an audit chain.
+- **Persistent store** — the singleton `actionLog` swaps `inMemoryActionLogStore()` for `indexedDbActionLogStore({auth})` in browser. Each row is a `CryptoEnvelope` under AAD purpose `action-log.entries.v1`, reusing the same wrap key as auth and cache (third consumer, same AAD-domain-separation rationale as D-051).
+- **Identity comes from the active token** — `subject` (id_token sub) preferred, then `email`, then `'unknown'`. Same fallback chain as the existing `auth.signin` event in App.tsx; logged calls carry the same identity tag the JMAP fetch already trusts.
+- **Caller-class is `'ui'`** — the shell is a human-driven UI session. The MCP server records `'mcp'` on its own log when those handlers wire up (Phase 2). Library-API-class loggers ship later.
+
+**Why:** The brief commits to "tamper-evident action log as inbox-adjacent surface" — and Phase 1's definition of done explicitly calls out "the action log shows the read trail." Without per-invocation writes, the chain is empty and the brief's commitment is aspirational. Outer-wrap keeps the chain's semantic ("what did the user ask to see") clean; logging cache hits would be confusing audit data ("user looked at inbox 7 times in 30s" when they actually scrolled back-and-forth between windows).
+
+Logging after success rather than before-and-after avoids the "what does a half-logged failure mean" problem without losing detection power: a tamper attempt has to forge BOTH a successful response AND a chain link, and the chain link's prev-hash check still holds. A future negative-ack mode is straightforward to add (`status: 'success' | 'error'` field, schema version bump).
+
+The persistent store is encrypted because the params often carry mailbox + thread IDs and timestamps — useful audit trail for the user, but not something other origins / extensions on the device should be able to enumerate. Same threat model as auth tokens (D-050) and the cache (D-051); same key, different AAD.
+
+**How to apply:**
+- New cacheable read capabilities auto-log on every invocation. Add to `EXCLUDED_FROM_LOG` only when the call is too noisy to be useful (e.g., a future `notification.heartbeat` ping).
+- Destructive capabilities (`mail.send`, etc., Phase 2) record `mode: 'commit'` + `provenance` per D-047 — they go through `useWriteHook` which constructs the input with the destructive-call envelope. The logging-invoker passes the existing `mode` field through unchanged.
+- The action log persists across sign-outs. It is *not* cleared with `cacheStorage.clearAll()` — the audit trail is per-installation, not per-session, and the `identity` field on each entry distinguishes mixed sign-ins on a shared browser.
+
+**Out of scope (follow-ups):**
+- Activity / log-viewer UI surface — Phase 3 work item 11.
+- Negative-ack logging (failure events) — schema-version bump when there's a clear use case (today's "invocation failed" already surfaces via tool errors in the UI; the audit value is marginal until policy-seam denials need recording).
+- Cross-entry provenance verification (recomputing preview-hash from a referenced earlier entry) — Phase 3 hardening, per D-047's existing follow-up.
+- Server-side action-log integration: the MCP server keeps its own chain on the server filesystem; reconciling client + server chains under one identity is a Phase 2+ design problem.
+
 ## D-034 — Project name: Iarsma
 **Date:** 2026-04-26
 **Decision:** The project is named **Iarsma** (Irish, "EER-sma" — *relic, artifact, durable remnant*). Domains owned: `iarsma.com` (primary user-facing) and `iarsma.io` (developer-facing). The `.ai` TLD was deliberately *not* purchased — Iarsma is communication infrastructure, not an AI product, and the `.ai` framing would mis-position it. Use `Iarsma` as the proper noun in prose and titles; `iarsma` as the lowercase identifier in package names, URNs (`urn:iarsma:agent-context`), and component namespaces (`iarsma:jmap-client@0.0.0`).

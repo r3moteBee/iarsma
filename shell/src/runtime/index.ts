@@ -66,3 +66,10 @@ export type {
 export { CACHEABLE_TOOLS, purposeFor } from './cache-policy.js';
 export { cachedInvoker } from './cached-invoker.js';
 export type { CachedInvokerOptions } from './cached-invoker.js';
+
+export { indexedDbActionLogStore } from './action-log-store.js';
+export type { IndexedDbActionLogStoreOptions } from './action-log-store.js';
+export { EXCLUDED_FROM_LOG, isLoggable } from './loggable-tools.js';
+export { loggingInvoker } from './logging-invoker.js';
+export type { LoggingInvokerOptions } from './logging-invoker.js';
+export type { CallerClass, CallMode } from './action-log.js';
