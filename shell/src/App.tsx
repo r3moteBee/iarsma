@@ -13,6 +13,7 @@ import {
 } from './auth-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
+import { keyboardHelpOpenAtom } from './keyboard-state.js';
 import {
   IarsmaProvider,
   cachedInvoker,
@@ -21,6 +22,7 @@ import {
   type Invoker,
 } from './runtime/index.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
+import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
 import { ThreadList } from './views/thread-list.js';
@@ -154,14 +156,56 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
 
 function Shell({ config }: { readonly config: ShellConfig }) {
   const isSignedIn = useAtomValue(isSignedInAtom);
+  useGlobalKeyboardShortcuts();
   return (
     <main aria-label={isSignedIn ? 'Iarsma — signed in' : 'Iarsma — sign in'}>
       <header>
         <h1>Iarsma</h1>
       </header>
       {isSignedIn ? <SignedInView config={config} /> : <SignedOutView config={config} />}
+      <KeyboardHelpOverlay />
     </main>
   );
+}
+
+/**
+ * Window-level keyboard shortcuts:
+ *   - `?` opens the keyboard help overlay (suppressed while focus is
+ *     inside a text input or contenteditable surface so it doesn't
+ *     hijack the question-mark literal).
+ *   - `Escape` closes the overlay.
+ *
+ * Bound to `window` rather than a React subtree because the overlay is
+ * triggered from anywhere — including states with no rendered children
+ * (e.g. the loading splash).
+ */
+function useGlobalKeyboardShortcuts(): void {
+  const setOpen = useSetAtom(keyboardHelpOpenAtom);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === '?') {
+        if (isEditableElement(event.target)) return;
+        event.preventDefault();
+        setOpen(true);
+        return;
+      }
+      if (event.key === 'Escape') {
+        // Close even from inside the dialog — the dialog itself doesn't
+        // need a separate listener.
+        setOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setOpen]);
+}
+
+function isEditableElement(target: EventTarget | null): boolean {
+  if (target === null || !(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (target.isContentEditable) return true;
+  return false;
 }
 
 
