@@ -22,7 +22,9 @@
 import { createContext, useContext } from 'react';
 import {
   buildMailDraftRequest,
+  buildMailSendRequest,
   fetchMailDraftCommit,
+  fetchMailSendCommit,
   fetchMailboxList,
   fetchSession,
   fetchThreadGet,
@@ -31,6 +33,8 @@ import {
   type Mailbox,
   type MailDraftInput,
   type MailDraftResult,
+  type MailSendInput,
+  type MailSendResult,
   type Session,
   type ThreadGet,
   type ThreadList,
@@ -206,6 +210,22 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           });
           return result as unknown as O;
         }
+        case 'mail.send': {
+          // Phase 2 work item 3. Destructive contract — dry-run builds
+          // the recipient + body preview locally; commit issues the
+          // chained Email/set + EmailSubmission/set.
+          const params = _input as unknown as MailSendInput;
+          if (_options.dryRun === true) {
+            return makeMailSendPreview(params) as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: MailSendResult = await fetchMailSendCommit({
+            ...opts,
+            session,
+            params,
+          });
+          return result as unknown as O;
+        }
         default:
           throw makeToolError(
             'tool_not_found',
@@ -299,4 +319,76 @@ function makeMailDraftPreview(params: MailDraftInput): {
     },
     estimatedSize: envelope.length,
   };
+}
+
+/**
+ * Build the dry-run preview for `mail.send` locally. Recipients flatten
+ * to a single SMTP envelope list (to + cc + bcc) so the UI can warn the
+ * user that a bcc'd recipient is silently included.
+ *
+ * `bodyPreview` strips HTML tags as a last resort when only `bodyHtml`
+ * is present — good enough for a confirmation snippet; not exposed to
+ * any rendering surface. Real preview rendering happens via the
+ * already-sanitized `bodyHtml`.
+ */
+function makeMailSendPreview(params: MailSendInput): {
+  recipients: {
+    to: ReadonlyArray<{ name?: string; email: string }>;
+    cc?: ReadonlyArray<{ name?: string; email: string }>;
+    bcc?: ReadonlyArray<{ name?: string; email: string }>;
+    envelopeRcptTo: string[];
+  };
+  subject: string;
+  bodyPreview: string;
+  hasBodyText: boolean;
+  hasBodyHtml: boolean;
+  attachmentCount: number;
+  attachmentBlobIds: string[];
+  estimatedSendTime: string;
+  estimatedSize: number;
+  identityId: string;
+} {
+  const envelopeRcptTo = [
+    ...params.to.map((a) => a.email),
+    ...(params.cc ?? []).map((a) => a.email),
+    ...(params.bcc ?? []).map((a) => a.email),
+  ];
+  const preview = previewSnippet(params.bodyText, params.bodyHtml);
+  const envelope = buildMailSendRequest({
+    accountId: 'preview-account',
+    params,
+  });
+  return {
+    recipients: {
+      to: params.to,
+      ...(params.cc !== undefined ? { cc: params.cc } : {}),
+      ...(params.bcc !== undefined ? { bcc: params.bcc } : {}),
+      envelopeRcptTo,
+    },
+    subject: params.subject,
+    bodyPreview: preview,
+    hasBodyText: params.bodyText !== undefined,
+    hasBodyHtml: params.bodyHtml !== undefined,
+    // Phase 2 item 7 lands attachments; for now the preview reflects
+    // the empty wire shape.
+    attachmentCount: 0,
+    attachmentBlobIds: [],
+    estimatedSendTime: params.sendAt ?? new Date().toISOString(),
+    estimatedSize: envelope.length,
+    identityId: params.identityId,
+  };
+}
+
+function previewSnippet(text: string | undefined, html: string | undefined): string {
+  if (text !== undefined && text.length > 0) {
+    return text.slice(0, 200);
+  }
+  if (html !== undefined && html.length > 0) {
+    // Strip tags + collapse whitespace. This is a confirmation snippet,
+    // not a rendering surface — the html that ships down the wire is
+    // already sanitized by the composer pipeline.
+    const stripped = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    return stripped.slice(0, 200);
+  }
+  return '';
 }

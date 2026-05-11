@@ -784,6 +784,285 @@ export function parseEmailSetResponse(body: string): MailDraftResult {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Email/set + EmailSubmission/set (mail.send commit)
+// ──────────────────────────────────────────────────────────────────────
+
+const JMAP_USING_MAIL_SUBMISSION = [
+  'urn:ietf:params:jmap:core',
+  'urn:ietf:params:jmap:mail',
+  'urn:ietf:params:jmap:submission',
+];
+
+export type MailSendInput = {
+  readonly sentMailboxId: string;
+  readonly identityId: string;
+  readonly from: EmailAddress;
+  readonly to: ReadonlyArray<EmailAddress>;
+  readonly cc?: ReadonlyArray<EmailAddress>;
+  readonly bcc?: ReadonlyArray<EmailAddress>;
+  readonly subject: string;
+  readonly bodyText?: string;
+  readonly bodyHtml?: string;
+  readonly inReplyTo?: string;
+  readonly references?: string;
+  readonly sendAt?: string;
+};
+
+export type MailSendResult = {
+  readonly emailId: string;
+  readonly blobId: string;
+  readonly threadId: string;
+  readonly size: number;
+  readonly submissionId: string;
+  readonly sendAt?: string;
+};
+
+export type FetchMailSendOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly params: MailSendInput;
+};
+
+/**
+ * Build the chained JMAP `Email/set` + `EmailSubmission/set` request
+ * for a send. Pure function — production AND dry-run share this so the
+ * preview's `estimatedSize` matches what the server would receive.
+ *
+ * Differences vs `buildMailDraftRequest`:
+ *   - Files under the SENT mailbox (no `$draft`, sets `$seen`).
+ *   - Adds an `EmailSubmission/set` create that back-references the
+ *     Email/set creation (`emailId: "#c0"`).
+ *   - Adds the submission URN to the `using` array.
+ */
+export function buildMailSendRequest(opts: {
+  readonly accountId: string;
+  readonly params: MailSendInput;
+}): string {
+  const { accountId, params } = opts;
+  const bodyParts: Array<{ partId: string; type: string }> = [];
+  const bodyValues: Record<string, { value: string }> = {};
+  let nextPartId = 1;
+  if (params.bodyText !== undefined) {
+    const partId = String(nextPartId++);
+    bodyParts.push({ partId, type: 'text/plain' });
+    bodyValues[partId] = { value: params.bodyText };
+  }
+  if (params.bodyHtml !== undefined) {
+    const partId = String(nextPartId++);
+    bodyParts.push({ partId, type: 'text/html' });
+    bodyValues[partId] = { value: params.bodyHtml };
+  }
+  const bodyStructure =
+    bodyParts.length === 1
+      ? bodyParts[0]
+      : { type: 'multipart/alternative', subParts: bodyParts };
+
+  const email: Record<string, unknown> = {
+    mailboxIds: { [params.sentMailboxId]: true },
+    keywords: { $seen: true },
+    from: params.from.name !== undefined ? [params.from] : [{ email: params.from.email }],
+    to: params.to.map((a) => (a.name !== undefined ? a : { email: a.email })),
+    subject: params.subject,
+    bodyStructure,
+    bodyValues,
+  };
+  if (params.cc !== undefined && params.cc.length > 0) {
+    email.cc = params.cc.map((a) => (a.name !== undefined ? a : { email: a.email }));
+  }
+  if (params.bcc !== undefined && params.bcc.length > 0) {
+    email.bcc = params.bcc.map((a) => (a.name !== undefined ? a : { email: a.email }));
+  }
+  if (params.inReplyTo !== undefined) {
+    email.inReplyTo = [params.inReplyTo];
+  }
+  if (params.references !== undefined) {
+    email.references = params.references.split(/\s+/).filter((s) => s.length > 0);
+  }
+
+  const submission: Record<string, unknown> = {
+    identityId: params.identityId,
+    emailId: '#c0',
+  };
+  if (params.sendAt !== undefined) {
+    submission.sendAt = params.sendAt;
+  }
+
+  return JSON.stringify({
+    using: JMAP_USING_MAIL_SUBMISSION,
+    methodCalls: [
+      [
+        'Email/set',
+        {
+          accountId,
+          create: { c0: email },
+        },
+        '0',
+      ],
+      [
+        'EmailSubmission/set',
+        {
+          accountId,
+          create: { s0: submission },
+        },
+        '1',
+      ],
+    ],
+  });
+}
+
+/**
+ * POST a chained `Email/set` + `EmailSubmission/set` and parse the
+ * response. Returns the union of both `created` records.
+ */
+export async function fetchMailSendCommit(
+  opts: FetchMailSendOptions,
+): Promise<MailSendResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  if (opts.params.bodyText === undefined && opts.params.bodyHtml === undefined) {
+    throw makeError(
+      'invalid_argument',
+      'mail.send requires at least one of bodyText or bodyHtml.',
+    );
+  }
+  if (opts.params.to.length === 0) {
+    throw makeError('invalid_argument', 'mail.send requires at least one recipient.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildMailSendRequest({ accountId, params: opts.params });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Email/set+EmailSubmission/set returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseEmailSubmissionSetResponse(text);
+}
+
+/**
+ * Parse the response from the chained Email/set + EmailSubmission/set
+ * request. Extracts:
+ *   - email creation `c0` (id / blobId / threadId / size)
+ *   - submission creation `s0` (id / sendAt)
+ *
+ * Surfaces `notCreated` for either step as a structured error. The
+ * EmailSubmission failure path is the more interesting one — it
+ * surfaces relay-level errors (rate limits, address rejections, etc.)
+ * that the client otherwise wouldn't see until a bounce.
+ */
+export function parseEmailSubmissionSetResponse(body: string): MailSendResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/set+EmailSubmission/set response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Send response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length < 2) {
+    throw makeError(
+      'jmap_parse_error',
+      'Send response needs at least two methodResponses (Email/set, EmailSubmission/set).',
+    );
+  }
+  const emailResp = methodResponses[0] as unknown;
+  const subResp = methodResponses[1] as unknown;
+  if (!Array.isArray(emailResp) || emailResp[0] !== 'Email/set') {
+    throw makeError('jmap_parse_error', 'First methodResponse is not Email/set.');
+  }
+  if (!Array.isArray(subResp) || subResp[0] !== 'EmailSubmission/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'Second methodResponse is not EmailSubmission/set.',
+    );
+  }
+  // Email/set first
+  const emailResult = emailResp[1] as {
+    created?: Record<string, unknown>;
+    notCreated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (emailResult.notCreated !== undefined) {
+    const c0 = emailResult.notCreated['c0'];
+    if (c0 !== undefined) {
+      throw makeError(
+        'jmap_set_error',
+        `Email/set rejected: ${c0.type ?? 'unknown'}${c0.description !== undefined ? ` — ${c0.description}` : ''}`,
+        c0,
+      );
+    }
+  }
+  const createdEmail = emailResult.created?.['c0'] as
+    | { id?: string; blobId?: string; threadId?: string; size?: number | bigint }
+    | undefined;
+  if (
+    createdEmail === undefined ||
+    typeof createdEmail.id !== 'string' ||
+    typeof createdEmail.blobId !== 'string' ||
+    typeof createdEmail.threadId !== 'string'
+  ) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/set created["c0"] is missing required fields.',
+    );
+  }
+  // EmailSubmission/set second
+  const subResult = subResp[1] as {
+    created?: Record<string, unknown>;
+    notCreated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (subResult.notCreated !== undefined) {
+    const s0 = subResult.notCreated['s0'];
+    if (s0 !== undefined) {
+      throw makeError(
+        'submission_rejected',
+        `EmailSubmission/set rejected: ${s0.type ?? 'unknown'}${s0.description !== undefined ? ` — ${s0.description}` : ''}`,
+        s0,
+      );
+    }
+  }
+  const createdSub = subResult.created?.['s0'] as
+    | { id?: string; sendAt?: string }
+    | undefined;
+  if (createdSub === undefined || typeof createdSub.id !== 'string') {
+    throw makeError(
+      'jmap_parse_error',
+      'EmailSubmission/set created["s0"] is missing required fields.',
+    );
+  }
+  return {
+    emailId: createdEmail.id,
+    blobId: createdEmail.blobId,
+    threadId: createdEmail.threadId,
+    size: Number(createdEmail.size ?? 0),
+    submissionId: createdSub.id,
+    ...(createdSub.sendAt !== undefined ? { sendAt: createdSub.sendAt } : {}),
+  };
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }
