@@ -131,17 +131,24 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
-      if (focusedIndex === null) return;
+      // `focusedIndex` starts null and is set to 0 by the
+      // selection-sync useEffect. A keystroke that arrives *between*
+      // the initial render and the effect commit would otherwise be a
+      // silent no-op — manifests as a CI race and as a real-user UX
+      // glitch (press j on a freshly-loaded mailbox, nothing happens).
+      // Treat null as "before the cursor" so j/ArrowDown moves to 0
+      // and k/ArrowUp / Home behave consistently.
+      const i = focusedIndex ?? -1;
       switch (event.key) {
         case 'j':
         case 'ArrowDown':
           event.preventDefault();
-          moveFocus(focusedIndex + 1);
+          moveFocus(i + 1);
           break;
         case 'k':
         case 'ArrowUp':
           event.preventDefault();
-          moveFocus(focusedIndex - 1);
+          moveFocus(i - 1);
           break;
         case 'Home':
           event.preventDefault();
@@ -154,7 +161,10 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
         case 'Enter':
         case ' ':
           event.preventDefault();
-          onSelect(focusedIndex);
+          // Activation requires a real focus position — null means the
+          // user never moved the cursor, so Enter is a no-op (matches
+          // a fresh-load listbox with no row highlighted).
+          if (i >= 0) onSelect(i);
           break;
       }
     },
