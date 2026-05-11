@@ -11,6 +11,7 @@ import {
   isSignedInAtom,
   tokensAtom,
 } from './auth-state.js';
+import { composeStateAtom } from './compose-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
@@ -22,6 +23,7 @@ import {
   type Invoker,
 } from './runtime/index.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
+import { ComposeView } from './views/compose-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
@@ -164,6 +166,7 @@ function Shell({ config }: { readonly config: ShellConfig }) {
       </header>
       {isSignedIn ? <SignedInView config={config} /> : <SignedOutView config={config} />}
       <KeyboardHelpOverlay />
+      {isSignedIn ? <ComposeView /> : null}
     </main>
   );
 }
@@ -213,6 +216,8 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   const session = useSessionGet({});
   const bumpAuth = useSetAtom(authVersionAtom);
   const tokens = useAtomValue(tokensAtom);
+  const setCompose = useSetAtom(composeStateAtom);
+  const openCompose = () => setCompose({ kind: 'open', prefill: {} });
 
   const onSignOut = () => {
     void (async () => {
@@ -254,7 +259,10 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
     >
       <header style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <h2 id="signedin-heading">Signed in</h2>
-        <span>
+        <span style={{ display: 'flex', gap: '0.75em', alignItems: 'baseline' }}>
+          <button type="button" onClick={openCompose} aria-label="Compose new message">
+            Compose
+          </button>
           {session.data !== undefined ? (
             <span>
               {session.data.username} (
