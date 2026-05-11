@@ -3,17 +3,21 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildMailDraftRequest,
+  buildMailSendRequest,
   fetchMailDraftCommit,
+  fetchMailSendCommit,
   fetchMailboxList,
   fetchSession,
   fetchThreadGet,
   fetchThreadList,
   parseEmailSetResponse,
+  parseEmailSubmissionSetResponse,
   parseMailboxes,
   parseSession,
   parseThreadGet,
   parseThreadList,
   type MailDraftInput,
+  type MailSendInput,
   type Session,
 } from '../jmap-client.js';
 import type { ToolError } from '../types.js';
@@ -832,5 +836,276 @@ describe('fetchMailDraftCommit (host fetch + parse)', () => {
         params: SAMPLE_DRAFT_INPUT,
       }),
     ).rejects.toMatchObject({ code: 'jmap_http_error' });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// mail.send (Email/set + EmailSubmission/set) — Phase 2 item 3
+// ──────────────────────────────────────────────────────────────────────
+
+const SAMPLE_SEND_INPUT: MailSendInput = {
+  sentMailboxId: 'Mb-sent',
+  identityId: 'I-brent',
+  from: { name: 'Brent', email: 'brent@example.net' },
+  to: [{ name: 'Alice', email: 'alice@example.net' }],
+  subject: 'project plan',
+  bodyText: 'Hi Alice — here\'s the schedule.',
+};
+
+const EMAIL_SUBMISSION_OK_BODY = JSON.stringify({
+  methodResponses: [
+    [
+      'Email/set',
+      {
+        accountId: 'c',
+        created: {
+          c0: { id: 'E-001', blobId: 'B-001', threadId: 'T-001', size: 256 },
+        },
+      },
+      '0',
+    ],
+    [
+      'EmailSubmission/set',
+      {
+        accountId: 'c',
+        created: {
+          s0: { id: 'S-001', sendAt: '2026-05-11T18:30:00Z' },
+        },
+      },
+      '1',
+    ],
+  ],
+});
+
+describe('buildMailSendRequest', () => {
+  it('files the message under the Sent mailbox with $seen (not $draft)', () => {
+    const body = buildMailSendRequest({
+      accountId: 'c',
+      params: SAMPLE_SEND_INPUT,
+    });
+    const parsed = JSON.parse(body) as {
+      using: string[];
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    expect(parsed.using).toContain('urn:ietf:params:jmap:submission');
+    const email = (
+      parsed.methodCalls[0]![1] as {
+        create: Record<string, Record<string, unknown>>;
+      }
+    ).create['c0']!;
+    expect(email.mailboxIds).toEqual({ 'Mb-sent': true });
+    expect(email.keywords).toEqual({ $seen: true });
+  });
+
+  it('emits a second methodCall: EmailSubmission/set with #c0 back-reference', () => {
+    const body = buildMailSendRequest({
+      accountId: 'c',
+      params: SAMPLE_SEND_INPUT,
+    });
+    const parsed = JSON.parse(body) as {
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    expect(parsed.methodCalls).toHaveLength(2);
+    const sub = parsed.methodCalls[1]!;
+    expect(sub[0]).toBe('EmailSubmission/set');
+    const submission = (
+      sub[1] as { create: Record<string, Record<string, unknown>> }
+    ).create['s0']!;
+    expect(submission.identityId).toBe('I-brent');
+    expect(submission.emailId).toBe('#c0');
+    expect(submission.sendAt).toBeUndefined();
+  });
+
+  it('passes sendAt through to the submission when supplied (delayed send)', () => {
+    const body = buildMailSendRequest({
+      accountId: 'c',
+      params: {
+        ...SAMPLE_SEND_INPUT,
+        sendAt: '2026-05-12T09:00:00Z',
+      },
+    });
+    const submission = (
+      JSON.parse(body) as {
+        methodCalls: Array<[string, Record<string, unknown>, string]>;
+      }
+    ).methodCalls[1]![1] as { create: Record<string, Record<string, unknown>> };
+    expect(submission.create['s0']!.sendAt).toBe('2026-05-12T09:00:00Z');
+  });
+});
+
+describe('parseEmailSubmissionSetResponse', () => {
+  it('extracts the email + submission ids into a MailSendResult', () => {
+    const r = parseEmailSubmissionSetResponse(EMAIL_SUBMISSION_OK_BODY);
+    expect(r).toEqual({
+      emailId: 'E-001',
+      blobId: 'B-001',
+      threadId: 'T-001',
+      size: 256,
+      submissionId: 'S-001',
+      sendAt: '2026-05-11T18:30:00Z',
+    });
+  });
+
+  it('omits sendAt when the server treats the submission as immediate', () => {
+    const body = JSON.stringify({
+      methodResponses: [
+        [
+          'Email/set',
+          {
+            created: {
+              c0: { id: 'E-002', blobId: 'B-002', threadId: 'T-002', size: 100 },
+            },
+          },
+          '0',
+        ],
+        [
+          'EmailSubmission/set',
+          {
+            created: {
+              s0: { id: 'S-002' },
+            },
+          },
+          '1',
+        ],
+      ],
+    });
+    const r = parseEmailSubmissionSetResponse(body);
+    expect(r.sendAt).toBeUndefined();
+  });
+
+  it('throws code=submission_rejected when EmailSubmission notCreated["s0"] is set', () => {
+    const body = JSON.stringify({
+      methodResponses: [
+        [
+          'Email/set',
+          {
+            created: {
+              c0: { id: 'E-001', blobId: 'B-001', threadId: 'T-001', size: 256 },
+            },
+          },
+          '0',
+        ],
+        [
+          'EmailSubmission/set',
+          {
+            notCreated: {
+              s0: {
+                type: 'forbiddenMailFrom',
+                description: 'identity does not permit this from address',
+              },
+            },
+          },
+          '1',
+        ],
+      ],
+    });
+    try {
+      parseEmailSubmissionSetResponse(body);
+      throw new Error('expected throw');
+    } catch (e) {
+      const err = e as ToolError;
+      expect(err.code).toBe('submission_rejected');
+      expect(err.message).toContain('forbiddenMailFrom');
+    }
+  });
+
+  it('throws code=jmap_set_error when Email/set itself rejected the create', () => {
+    const body = JSON.stringify({
+      methodResponses: [
+        [
+          'Email/set',
+          {
+            notCreated: {
+              c0: { type: 'invalidProperties', description: 'subject required' },
+            },
+          },
+          '0',
+        ],
+        ['EmailSubmission/set', { created: {} }, '1'],
+      ],
+    });
+    try {
+      parseEmailSubmissionSetResponse(body);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect((e as ToolError).code).toBe('jmap_set_error');
+    }
+  });
+
+  it('throws code=jmap_parse_error when only one methodResponse is present', () => {
+    const body = JSON.stringify({
+      methodResponses: [
+        [
+          'Email/set',
+          {
+            created: { c0: { id: 'E', blobId: 'B', threadId: 'T', size: 1 } },
+          },
+          '0',
+        ],
+      ],
+    });
+    try {
+      parseEmailSubmissionSetResponse(body);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect((e as ToolError).code).toBe('jmap_parse_error');
+    }
+  });
+});
+
+describe('fetchMailSendCommit (host fetch + parse)', () => {
+  it('POSTs the chained request and returns the MailSendResult', async () => {
+    const fetchSpy = makeFetchSpy(EMAIL_SUBMISSION_OK_BODY);
+    const result = await fetchMailSendCommit({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      params: SAMPLE_SEND_INPUT,
+    });
+    expect(result.submissionId).toBe('S-001');
+    expect(result.emailId).toBe('E-001');
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(SAMPLE_SESSION.apiUrl);
+    const sentBody = init?.body as string;
+    expect(sentBody).toContain('EmailSubmission/set');
+    expect(sentBody).toContain('Email/set');
+  });
+
+  it('rejects with code=invalid_argument when the recipient list is empty', async () => {
+    await expect(
+      fetchMailSendCommit({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy(EMAIL_SUBMISSION_OK_BODY),
+        session: SAMPLE_SESSION,
+        params: { ...SAMPLE_SEND_INPUT, to: [] },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
+  });
+
+  it('rejects with code=invalid_argument when both body fields are absent', async () => {
+    const { bodyText: _t, ...noBody } = SAMPLE_SEND_INPUT;
+    await expect(
+      fetchMailSendCommit({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy(EMAIL_SUBMISSION_OK_BODY),
+        session: SAMPLE_SESSION,
+        params: noBody,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
+  });
+
+  it('rejects with code=unauthorized when no token is available', async () => {
+    await expect(
+      fetchMailSendCommit({
+        baseUrl: 'https://x',
+        getAuthToken: () => null,
+        fetch: makeFetchSpy(EMAIL_SUBMISSION_OK_BODY),
+        session: SAMPLE_SESSION,
+        params: SAMPLE_SEND_INPUT,
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
   });
 });
