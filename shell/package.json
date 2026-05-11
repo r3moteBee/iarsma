@@ -17,7 +17,7 @@
     "typecheck": "tsc -b --noEmit",
     "fmt": "prettier --write src",
     "fmt:check": "prettier --check src",
-    "a11y": "pa11y-ci --config .pa11yci.cjs",
+    "a11y": "pa11y-ci --config .pa11yci.json",
     "a11y:preview": "vite preview --port 4173 --strictPort"
   },
   "dependencies": {

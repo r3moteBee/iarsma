@@ -1,0 +1,14 @@
+{
+  "_comment": "pa11y-ci v3 only parses JSON. Chromium location is resolved by Puppeteer via the standard PUPPETEER_EXECUTABLE_PATH env var — CI sets it to /usr/bin/chromium-browser (apt install). Local devs export PUPPETEER_EXECUTABLE_PATH to wherever their Chromium lives. See docs/a11y.md.",
+  "defaults": {
+    "standard": "WCAG2AA",
+    "runners": ["axe"],
+    "timeout": 60000,
+    "threshold": 0,
+    "wait": 1500,
+    "chromeLaunchConfig": {
+      "args": ["--no-sandbox", "--disable-dev-shm-usage"]
+    }
+  },
+  "urls": ["http://localhost:4173/"]
+}

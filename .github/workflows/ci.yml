@@ -298,7 +298,11 @@ jobs:
 
       - name: Run pa11y-ci against the served preview
         env:
-          PA11Y_CHROMIUM_PATH: /usr/bin/chromium-browser
+          # pa11y → pa11y-ci → Puppeteer chain. Puppeteer respects the
+          # standard PUPPETEER_EXECUTABLE_PATH env var; the `.npmrc`
+          # PUPPETEER_SKIP_DOWNLOAD=true skipped the bundled Chromium
+          # download, so we point Puppeteer at the apt-installed one.
+          PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
         run: |
           set -euo pipefail
           pnpm --filter '@iarsma/shell' exec vite preview --port 4173 --strictPort &
