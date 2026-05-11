@@ -1,0 +1,391 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Tests for the ComposeView modal (Phase 2 work item 4).
+ *
+ * Covers:
+ *   - Closed by default; opens via the `composeStateAtom` flip.
+ *   - Form fields render with ARIA wiring; first focus lands in the
+ *     dialog.
+ *   - Send button is disabled until a valid recipient is present.
+ *   - Invalid recipient shows an inline error.
+ *   - Save-on-blur (debounced 500ms) calls `mail.draft`.
+ *   - Send click runs `mail.send.preview` → renders the preview modal.
+ *     Confirm runs `mail.send.commit` → closes the composer.
+ *   - Cancel / Esc closes without sending.
+ *   - axe-core baseline on the open modal.
+ */
+
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
+import { Provider as JotaiProvider, useSetAtom } from 'jotai';
+import { useEffect } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@iarsma/wasm-bindings/jmap-client', () => ({
+  session: { parseSession: vi.fn() },
+  mailbox: { parseMailboxGetResponse: vi.fn() },
+  email: {
+    parseEmailQueryResponse: vi.fn(),
+    parseThreadGetResponse: vi.fn(),
+  },
+}));
+vi.mock('@iarsma/wasm-bindings/action-log', () => ({
+  chain: { canonicalize: vi.fn(), verifyLinks: vi.fn() },
+}));
+vi.mock('@iarsma/wasm-bindings/html-sanitizer', () => ({
+  sanitize: {
+    sanitize: (html: string, _allowExternalImages: boolean) => html,
+  },
+}));
+
+import { composeStateAtom } from '../../compose-state.js';
+import { IarsmaProvider, mockInvoker } from '../../runtime/index.js';
+import type { Invoker } from '../../runtime/index.js';
+import { runAxe } from '../../__tests__/util/axe.js';
+import { ComposeView } from '../compose-view.js';
+
+const MAILBOXES = [
+  {
+    id: 'Mb-drafts',
+    name: 'Drafts',
+    role: 'drafts',
+    sortOrder: 2,
+    totalEmails: 0,
+    unreadEmails: 0,
+    totalThreads: 0,
+    unreadThreads: 0,
+    isSubscribed: true,
+    myRights: {
+      mayReadItems: true,
+      mayAddItems: true,
+      mayRemoveItems: true,
+      maySetSeen: true,
+      maySetKeywords: true,
+      mayCreateChild: false,
+      mayRename: false,
+      mayDelete: false,
+      maySubmit: false,
+    },
+  },
+  {
+    id: 'Mb-sent',
+    name: 'Sent',
+    role: 'sent',
+    sortOrder: 3,
+    totalEmails: 0,
+    unreadEmails: 0,
+    totalThreads: 0,
+    unreadThreads: 0,
+    isSubscribed: true,
+    myRights: {
+      mayReadItems: true,
+      mayAddItems: true,
+      mayRemoveItems: true,
+      maySetSeen: true,
+      maySetKeywords: true,
+      mayCreateChild: false,
+      mayRename: false,
+      mayDelete: false,
+      maySubmit: true,
+    },
+  },
+];
+
+const DRAFT_OK = {
+  emailId: 'E-draft-1',
+  blobId: 'B-1',
+  threadId: 'T-1',
+  size: 100,
+};
+
+const SEND_PREVIEW = {
+  recipients: {
+    to: [{ email: 'alice@example.net' }],
+    envelopeRcptTo: ['alice@example.net'],
+  },
+  subject: 'hello',
+  bodyPreview: 'Body content',
+  hasBodyText: false,
+  hasBodyHtml: true,
+  attachmentCount: 0,
+  attachmentBlobIds: [],
+  estimatedSendTime: '2026-05-11T19:00:00Z',
+  estimatedSize: 200,
+  identityId: 'placeholder-identity',
+};
+
+const SEND_OK = {
+  emailId: 'E-sent-1',
+  blobId: 'B-2',
+  threadId: 'T-2',
+  size: 200,
+  submissionId: 'S-1',
+};
+
+afterEach(() => {
+  cleanup();
+});
+
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+function WithOpen({ children }: { children: React.ReactNode }) {
+  const setState = useSetAtom(composeStateAtom);
+  useEffect(() => {
+    setState({ kind: 'open', prefill: {} });
+  }, [setState]);
+  return <>{children}</>;
+}
+
+function makeInvoker(
+  overrides: {
+    draft?: (input: unknown) => unknown;
+    sendPreview?: () => unknown;
+    sendCommit?: () => unknown;
+  } = {},
+): { invoker: Invoker; calls: Array<{ name: string; dryRun: boolean }> } {
+  const calls: Array<{ name: string; dryRun: boolean }> = [];
+  const invoker = mockInvoker({
+    'mailbox.list': async () => MAILBOXES,
+    'mail.draft': async (input, dryRun) => {
+      calls.push({ name: 'mail.draft', dryRun });
+      return overrides.draft !== undefined ? overrides.draft(input) : DRAFT_OK;
+    },
+    'mail.send': async (_input, dryRun) => {
+      calls.push({ name: 'mail.send', dryRun });
+      if (dryRun) {
+        return overrides.sendPreview !== undefined
+          ? overrides.sendPreview()
+          : SEND_PREVIEW;
+      }
+      return overrides.sendCommit !== undefined ? overrides.sendCommit() : SEND_OK;
+    },
+  });
+  return { invoker, calls };
+}
+
+function renderComposer(overrides: Parameters<typeof makeInvoker>[0] = {}) {
+  const { invoker, calls } = makeInvoker(overrides);
+  const r = render(
+    <JotaiProvider>
+      <IarsmaProvider value={invoker}>
+        <WithOpen>
+          <ComposeView />
+        </WithOpen>
+      </IarsmaProvider>
+    </JotaiProvider>,
+  );
+  return { ...r, calls };
+}
+
+describe('ComposeView — closed by default', () => {
+  it('does not render anything when composeStateAtom is closed', () => {
+    const { invoker } = makeInvoker();
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <ComposeView />
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('ComposeView — open state', () => {
+  it('renders a dialog with the form fields', () => {
+    renderComposer();
+    const dialog = screen.getByRole('dialog', { name: /new message/i });
+    expect(within(dialog).getByLabelText('To')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Cc')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Bcc')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Subject')).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('textbox', { name: 'Message body' }),
+    ).toBeInTheDocument();
+  });
+
+  it('Send button is disabled with no recipients', () => {
+    renderComposer();
+    const send = screen.getByRole('button', { name: 'Send…' });
+    expect(send).toBeDisabled();
+  });
+
+  it('Send button enables once a valid recipient is typed (and mailboxes load)', async () => {
+    renderComposer();
+    const toField = screen.getByLabelText('To');
+    fireEvent.change(toField, { target: { value: 'alice@example.net' } });
+    // Send also gates on the Sent mailbox being resolved — wait for
+    // mailbox.list (microtask-async) to populate before the assertion.
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send…' })).toBeEnabled();
+    });
+  });
+
+  it('shows an inline error for an invalid recipient', () => {
+    renderComposer();
+    const toField = screen.getByLabelText('To');
+    fireEvent.change(toField, { target: { value: 'not-an-email' } });
+    expect(screen.getByText(/Invalid recipient/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send…' })).toBeDisabled();
+  });
+});
+
+describe('ComposeView — save-on-blur', () => {
+  it('debounces and calls mail.draft 500ms after a field blur', async () => {
+    const { calls } = renderComposer();
+    const toField = screen.getByLabelText('To');
+    fireEvent.change(toField, { target: { value: 'alice@example.net' } });
+    // Wait for the mailbox.list hook to resolve — proxied via Send
+    // becoming enabled (Send disables until sentMailboxId is known).
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send…' })).toBeEnabled();
+    });
+    fireEvent.change(screen.getByLabelText('Subject'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.blur(screen.getByLabelText('Subject'));
+    expect(calls.filter((c) => c.name === 'mail.draft')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(500);
+    await waitFor(() => {
+      expect(calls.filter((c) => c.name === 'mail.draft')).toHaveLength(1);
+    });
+  });
+
+  it('does NOT save when the form is empty', async () => {
+    const { calls } = renderComposer();
+    // Even with mailboxes loaded, an empty form shouldn't save.
+    await waitFor(() => {
+      // Subject field present means render happened; mailbox.list is
+      // microtask-async, but doSaveDraft's empty-check runs before
+      // the mailbox check, so this test passes either way.
+      expect(screen.getByLabelText('Subject')).toBeInTheDocument();
+    });
+    fireEvent.blur(screen.getByLabelText('Subject'));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls.filter((c) => c.name === 'mail.draft')).toHaveLength(0);
+  });
+});
+
+async function fillRecipientAndWaitForSendEnabled() {
+  fireEvent.change(screen.getByLabelText('To'), {
+    target: { value: 'alice@example.net' },
+  });
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Send…' })).toBeEnabled();
+  });
+}
+
+describe('ComposeView — send flow', () => {
+  it('Send click runs preview → renders preview modal with the right data', async () => {
+    const { calls } = renderComposer();
+    await fillRecipientAndWaitForSendEnabled();
+    fireEvent.change(screen.getByLabelText('Subject'), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole('dialog', { name: /send this message/i }),
+      ).toBeInTheDocument();
+    });
+    const sentDryRun = calls.find(
+      (c) => c.name === 'mail.send' && c.dryRun,
+    );
+    expect(sentDryRun).toBeDefined();
+    expect(screen.getByText('alice@example.net')).toBeInTheDocument();
+    expect(screen.getByText('Body content')).toBeInTheDocument();
+  });
+
+  it('Confirm in preview calls mail.send.commit and closes the composer', async () => {
+    const { calls } = renderComposer();
+    await fillRecipientAndWaitForSendEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    await waitFor(() => screen.getByRole('dialog', { name: /send this message/i }));
+    const previewDialog = screen.getByRole('dialog', {
+      name: /send this message/i,
+    });
+    const sendButtons = within(previewDialog).getAllByRole('button', {
+      name: 'Send',
+    });
+    fireEvent.click(sendButtons[0]!);
+    await waitFor(() => {
+      expect(
+        calls.find((c) => c.name === 'mail.send' && !c.dryRun),
+      ).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /new message/i }),
+      ).toBeNull();
+    });
+  });
+
+  it('Cancel in preview keeps the composer open and does not commit', async () => {
+    const { calls } = renderComposer();
+    await fillRecipientAndWaitForSendEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    await waitFor(() => screen.getByRole('dialog', { name: /send this message/i }));
+    const previewDialog = screen.getByRole('dialog', {
+      name: /send this message/i,
+    });
+    fireEvent.click(within(previewDialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /send this message/i }),
+      ).toBeNull();
+    });
+    expect(
+      screen.getByRole('dialog', { name: /new message/i }),
+    ).toBeInTheDocument();
+    expect(calls.find((c) => c.name === 'mail.send' && !c.dryRun)).toBeUndefined();
+  });
+});
+
+describe('ComposeView — dismissal', () => {
+  it('Esc closes the compose dialog', async () => {
+    renderComposer();
+    fireEvent.keyDown(screen.getByRole('dialog', { name: /new message/i }), {
+      key: 'Escape',
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /new message/i }),
+      ).toBeNull();
+    });
+  });
+
+  it('Cancel button closes the dialog', async () => {
+    renderComposer();
+    const dialog = screen.getByRole('dialog', { name: /new message/i });
+    const cancelButtons = within(dialog).getAllByRole('button', {
+      name: 'Cancel',
+    });
+    fireEvent.click(cancelButtons[0]!);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: /new message/i }),
+      ).toBeNull();
+    });
+  });
+});
+
+describe('ComposeView — a11y', () => {
+  it('has zero axe-core violations against WCAG 2.1 AA', async () => {
+    const { container } = renderComposer();
+    const violations = await runAxe(container);
+    expect(violations.map((v) => v.id)).toEqual([]);
+  });
+});
