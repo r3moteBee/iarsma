@@ -1,10 +1,11 @@
 # Iarsma CI — runs on every push to main and every PR.
 #
-# Three jobs run in parallel; main blocks until all pass:
+# Four jobs; main blocks until all required pass:
 #   - ts:           typecheck + tests across all TypeScript workspaces
 #   - rust:         cargo fmt --check + cargo check + cargo test on the
 #                   Rust component workspace
 #   - shell-build:  smoke-test the shell's Vite build (depends on ts)
+#   - a11y:        pa11y-ci against the built bundle (depends on shell-build)
 #
 # Concurrency control cancels in-progress runs when a new commit lands on
 # the same ref — useful for tight feedback on PRs.
@@ -222,3 +223,94 @@ jobs:
           test -f shell/dist/index.html || (echo "::error::shell/dist/index.html missing"; exit 1)
           ls -la shell/dist
           du -sh shell/dist
+
+  # ──────────────────────────────────────────────────────────────────────
+  # A11y: pa11y-ci against the built bundle.
+  # Catches accessibility regressions that only show up in the production
+  # build (post-minification, post-CSS-pipeline). Per-component a11y is
+  # already covered by axe-core in the `ts` job; this gate is the
+  # deploy-time integration check. See `docs/a11y.md`.
+  # ──────────────────────────────────────────────────────────────────────
+  a11y:
+    name: A11y (pa11y-ci on built bundle)
+    runs-on: ubuntu-latest
+    needs: shell-build
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+
+      - name: Cache cargo build state
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm-${{ env.CARGO_COMPONENT_VERSION }}
+
+      - name: Install cargo-component
+        run: |
+          if ! command -v cargo-component >/dev/null; then
+            cargo install --locked --version ${{ env.CARGO_COMPONENT_VERSION }} cargo-component
+          fi
+          cargo component --version
+
+      - name: Install Chromium
+        # pa11y drives Chromium via Puppeteer; we use the system Chromium
+        # rather than Puppeteer's bundled one (`.npmrc` sets
+        # PUPPETEER_SKIP_DOWNLOAD=true so the install step doesn't fail
+        # in restricted networks).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+          which chromium-browser
+          chromium-browser --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build + transpile WASM components
+        run: bash .github/scripts/build-wasm.sh
+
+      - name: Run codegen
+        run: pnpm codegen
+
+      - name: Build the shell bundle
+        env:
+          VITE_OIDC_ISSUER: 'https://example.invalid'
+          VITE_OAUTH_CLIENT_ID: 'webmail'
+          VITE_OAUTH_REDIRECT_URI: 'http://localhost:5173/auth/callback'
+        run: pnpm --filter '@iarsma/shell' run build
+
+      - name: Run pa11y-ci against the served preview
+        env:
+          PA11Y_CHROMIUM_PATH: /usr/bin/chromium-browser
+        run: |
+          set -euo pipefail
+          pnpm --filter '@iarsma/shell' exec vite preview --port 4173 --strictPort &
+          PREVIEW_PID=$!
+          # Trap so we always kill the preview server even on pa11y failure.
+          trap "kill $PREVIEW_PID 2>/dev/null || true" EXIT
+          # Wait for the preview to be reachable (up to 30s).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4173/ >/dev/null; then
+              echo "preview ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          pnpm --filter '@iarsma/shell' run a11y
