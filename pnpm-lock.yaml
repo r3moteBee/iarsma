@@ -71,6 +71,9 @@ importers:
       react-router-dom:
         specifier: ^6.27.0
         version: 6.30.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      squire-rte:
+        specifier: ^2.4.4
+        version: 2.4.4
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -2425,6 +2428,9 @@ packages:
   split2@4.2.0:
     resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
     engines: {node: '>= 10.x'}
+
+  squire-rte@2.4.4:
+    resolution: {integrity: sha512-UIzl9ynO6Bke5M0pM+Tp7IMMl86wLX93wEuqXe1CFdVSxK9E7rgryny8WOfztRnHp1k3Dd7Vq3FzECjwA4H6lQ==}
 
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
@@ -4949,6 +4955,8 @@ snapshots:
   source-map-js@1.2.1: {}
 
   split2@4.2.0: {}
+
+  squire-rte@2.4.4: {}
 
   stackback@0.0.2: {}
 
