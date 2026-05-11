@@ -53,6 +53,13 @@ export type { UseReadHookOptions, UseReadHookResult } from './read-hook.js';
 export { useWriteHook } from './write-hook.js';
 export type { UseWriteHookOptions, UseWriteHookResult } from './write-hook.js';
 
+// `sanitizer.ts` and `sanitize-fragment.ts` are NOT re-exported here:
+// they import the `@iarsma/wasm-bindings/html-sanitizer` module
+// eagerly, which trips jsdom (WASM fetch with a non-`file:` URL) for
+// any test that imports from this barrel. Direct callers (MessageView
+// in thread-view.tsx, Composer in composer.tsx) import them by name
+// from `../runtime/sanitizer.js` / `../runtime/sanitize-fragment.js`.
+
 export {
   CACHE_PURPOSES,
   inMemoryCacheStorage,
