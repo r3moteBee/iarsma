@@ -21,12 +21,16 @@
 
 import { createContext, useContext } from 'react';
 import {
+  buildMailDraftRequest,
+  fetchMailDraftCommit,
   fetchMailboxList,
   fetchSession,
   fetchThreadGet,
   fetchThreadList,
   type JmapClientOptions,
   type Mailbox,
+  type MailDraftInput,
+  type MailDraftResult,
   type Session,
   type ThreadGet,
   type ThreadList,
@@ -186,6 +190,22 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           });
           return result as unknown as O;
         }
+        case 'mail.draft': {
+          // Phase 2 work item 2. Destructive contract — dry-run returns
+          // the proposed Email without touching JMAP; commit issues
+          // Email/set create.
+          const params = _input as unknown as MailDraftInput;
+          if (_options.dryRun === true) {
+            return makeMailDraftPreview(params) as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: MailDraftResult = await fetchMailDraftCommit({
+            ...opts,
+            session,
+            params,
+          });
+          return result as unknown as O;
+        }
         default:
           throw makeToolError(
             'tool_not_found',
@@ -222,4 +242,61 @@ export function mockInvoker(handlers: Record<string, MockInvokerHandler>): Invok
 
 function makeToolError(code: string, message: string): ToolError {
   return { code, message };
+}
+
+/**
+ * Build the dry-run preview for `mail.draft` locally (no JMAP call).
+ * D-046 wraps destructive outputs in `DryRunPreview<O>` — but here we
+ * return the *natural* preview shape from the contract; the
+ * `cachedInvoker` + `loggingInvoker` wrappers (D-051, D-052) treat it
+ * as the canonical preview value, and the call site uses the
+ * generated `MailDraftPreview` type.
+ *
+ * `estimatedSize` is intentionally rough: it's the JSON-stringified
+ * envelope length, which is close enough to RFC 822 wire size for
+ * "give the user a sense of message size" without round-tripping the
+ * server.
+ */
+function makeMailDraftPreview(params: MailDraftInput): {
+  proposedEmail: {
+    mailboxId: string;
+    keywords: string[];
+    from: ReadonlyArray<{ name?: string; email: string }>;
+    to: ReadonlyArray<{ name?: string; email: string }>;
+    cc?: ReadonlyArray<{ name?: string; email: string }>;
+    bcc?: ReadonlyArray<{ name?: string; email: string }>;
+    subject: string;
+    hasBodyText: boolean;
+    hasBodyHtml: boolean;
+    bodyTextSize: number;
+    bodyHtmlSize: number;
+    inReplyTo?: string;
+    references?: string;
+  };
+  estimatedSize: number;
+} {
+  const bodyTextSize = params.bodyText?.length ?? 0;
+  const bodyHtmlSize = params.bodyHtml?.length ?? 0;
+  const envelope = buildMailDraftRequest({
+    accountId: 'preview-account',
+    params,
+  });
+  return {
+    proposedEmail: {
+      mailboxId: params.mailboxId,
+      keywords: ['$draft'],
+      from: [params.from],
+      to: params.to,
+      ...(params.cc !== undefined ? { cc: params.cc } : {}),
+      ...(params.bcc !== undefined ? { bcc: params.bcc } : {}),
+      subject: params.subject,
+      hasBodyText: params.bodyText !== undefined,
+      hasBodyHtml: params.bodyHtml !== undefined,
+      bodyTextSize,
+      bodyHtmlSize,
+      ...(params.inReplyTo !== undefined ? { inReplyTo: params.inReplyTo } : {}),
+      ...(params.references !== undefined ? { references: params.references } : {}),
+    },
+    estimatedSize: envelope.length,
+  };
 }

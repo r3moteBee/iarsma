@@ -2,14 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  buildMailDraftRequest,
+  fetchMailDraftCommit,
   fetchMailboxList,
   fetchSession,
   fetchThreadGet,
   fetchThreadList,
+  parseEmailSetResponse,
   parseMailboxes,
   parseSession,
   parseThreadGet,
   parseThreadList,
+  type MailDraftInput,
   type Session,
 } from '../jmap-client.js';
 import type { ToolError } from '../types.js';
@@ -564,5 +568,269 @@ describe('fetchThreadGet (host fetch + WASM parse)', () => {
         threadId: 'T1',
       }),
     ).rejects.toMatchObject({ code: 'jmap_parse_error' });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// mail.draft (Email/set create) — Phase 2 item 2
+// ──────────────────────────────────────────────────────────────────────
+
+const SAMPLE_DRAFT_INPUT: MailDraftInput = {
+  mailboxId: 'Mb-drafts',
+  from: { name: 'Brent', email: 'brent@example.net' },
+  to: [{ name: 'Alice', email: 'alice@example.net' }],
+  subject: 'project plan',
+  bodyText: "Hi Alice,\n\nHere's the schedule.\n\nBrent",
+};
+
+const EMAIL_SET_OK_BODY = JSON.stringify({
+  methodResponses: [
+    [
+      'Email/set',
+      {
+        accountId: 'c',
+        newState: 'state-2',
+        created: {
+          c0: {
+            id: 'E-001',
+            blobId: 'B-001',
+            threadId: 'T-001',
+            size: 256,
+          },
+        },
+      },
+      '0',
+    ],
+  ],
+});
+
+describe('buildMailDraftRequest', () => {
+  it('builds a single-part text body when only bodyText is set', () => {
+    const body = buildMailDraftRequest({
+      accountId: 'c',
+      params: SAMPLE_DRAFT_INPUT,
+    });
+    const parsed = JSON.parse(body) as {
+      using: string[];
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    expect(parsed.using).toContain('urn:ietf:params:jmap:mail');
+    expect(parsed.methodCalls[0]?.[0]).toBe('Email/set');
+    const args = parsed.methodCalls[0]?.[1] as {
+      accountId: string;
+      create: Record<string, Record<string, unknown>>;
+    };
+    expect(args.accountId).toBe('c');
+    const email = args.create['c0']!;
+    expect(email.mailboxIds).toEqual({ 'Mb-drafts': true });
+    expect(email.keywords).toEqual({ $draft: true });
+    expect(email.subject).toBe('project plan');
+    // Single body part → bodyStructure is the part itself, not multipart.
+    expect((email.bodyStructure as { type: string }).type).toBe('text/plain');
+  });
+
+  it('builds multipart/alternative when both text and html are set', () => {
+    const body = buildMailDraftRequest({
+      accountId: 'c',
+      params: {
+        ...SAMPLE_DRAFT_INPUT,
+        bodyHtml: '<p>Hi</p>',
+      },
+    });
+    const parsed = JSON.parse(body) as {
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    const email = (
+      parsed.methodCalls[0]?.[1] as {
+        create: Record<string, Record<string, unknown>>;
+      }
+    ).create['c0']!;
+    const structure = email.bodyStructure as {
+      type: string;
+      subParts: Array<{ type: string }>;
+    };
+    expect(structure.type).toBe('multipart/alternative');
+    expect(structure.subParts.map((p) => p.type)).toEqual([
+      'text/plain',
+      'text/html',
+    ]);
+  });
+
+  it('includes cc + bcc when supplied (and omits them when not)', () => {
+    const body = buildMailDraftRequest({
+      accountId: 'c',
+      params: {
+        ...SAMPLE_DRAFT_INPUT,
+        cc: [{ email: 'cc@example.net' }],
+        bcc: [{ email: 'bcc@example.net' }],
+      },
+    });
+    const email = (
+      JSON.parse(body) as {
+        methodCalls: Array<[string, Record<string, unknown>, string]>;
+      }
+    ).methodCalls[0]![1] as {
+      create: Record<string, Record<string, unknown>>;
+    };
+    const e = email.create['c0']!;
+    expect(e.cc).toEqual([{ email: 'cc@example.net' }]);
+    expect(e.bcc).toEqual([{ email: 'bcc@example.net' }]);
+
+    const bodyNoCcBcc = buildMailDraftRequest({
+      accountId: 'c',
+      params: SAMPLE_DRAFT_INPUT,
+    });
+    const eNoCc = (
+      JSON.parse(bodyNoCcBcc) as {
+        methodCalls: Array<[string, Record<string, unknown>, string]>;
+      }
+    ).methodCalls[0]![1] as {
+      create: Record<string, Record<string, unknown>>;
+    };
+    expect(eNoCc.create['c0']!.cc).toBeUndefined();
+    expect(eNoCc.create['c0']!.bcc).toBeUndefined();
+  });
+
+  it('wires inReplyTo + references as RFC-shaped arrays', () => {
+    const body = buildMailDraftRequest({
+      accountId: 'c',
+      params: {
+        ...SAMPLE_DRAFT_INPUT,
+        inReplyTo: '<msg-id-1@example.net>',
+        references: '<msg-id-1@example.net> <msg-id-2@example.net>',
+      },
+    });
+    const email = (
+      (
+        JSON.parse(body) as {
+          methodCalls: Array<[string, Record<string, unknown>, string]>;
+        }
+      ).methodCalls[0]![1] as {
+        create: Record<string, Record<string, unknown>>;
+      }
+    ).create['c0']!;
+    expect(email.inReplyTo).toEqual(['<msg-id-1@example.net>']);
+    expect(email.references).toEqual([
+      '<msg-id-1@example.net>',
+      '<msg-id-2@example.net>',
+    ]);
+  });
+});
+
+describe('parseEmailSetResponse', () => {
+  it('extracts the created entry into a MailDraftResult', () => {
+    const r = parseEmailSetResponse(EMAIL_SET_OK_BODY);
+    expect(r).toEqual({
+      emailId: 'E-001',
+      blobId: 'B-001',
+      threadId: 'T-001',
+      size: 256,
+    });
+  });
+
+  it('throws code=jmap_set_error when notCreated["c0"] is set', () => {
+    const body = JSON.stringify({
+      methodResponses: [
+        [
+          'Email/set',
+          {
+            notCreated: {
+              c0: {
+                type: 'invalidProperties',
+                description: 'mailboxIds: not a writable mailbox',
+              },
+            },
+          },
+          '0',
+        ],
+      ],
+    });
+    try {
+      parseEmailSetResponse(body);
+      throw new Error('expected throw');
+    } catch (e) {
+      const err = e as ToolError;
+      expect(err.code).toBe('jmap_set_error');
+      expect(err.message).toContain('invalidProperties');
+    }
+  });
+
+  it('throws code=jmap_parse_error on a missing first methodResponse', () => {
+    const body = JSON.stringify({ methodResponses: [] });
+    try {
+      parseEmailSetResponse(body);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect((e as ToolError).code).toBe('jmap_parse_error');
+    }
+  });
+
+  it('throws code=jmap_parse_error on malformed JSON', () => {
+    try {
+      parseEmailSetResponse('not json');
+      throw new Error('expected throw');
+    } catch (e) {
+      expect((e as ToolError).code).toBe('jmap_parse_error');
+    }
+  });
+});
+
+describe('fetchMailDraftCommit (host fetch + parse)', () => {
+  it('POSTs Email/set with the right body and returns the MailDraftResult', async () => {
+    const fetchSpy = makeFetchSpy(EMAIL_SET_OK_BODY);
+    const result = await fetchMailDraftCommit({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      params: SAMPLE_DRAFT_INPUT,
+    });
+    expect(result.emailId).toBe('E-001');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(SAMPLE_SESSION.apiUrl);
+    expect(init?.method).toBe('POST');
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    expect(headers.authorization).toBe('Bearer tok');
+    const sentBody = init?.body as string;
+    expect(sentBody).toContain('Email/set');
+    expect(sentBody).toContain('Mb-drafts');
+  });
+
+  it('rejects with code=unauthorized when no token is available', async () => {
+    await expect(
+      fetchMailDraftCommit({
+        baseUrl: 'https://x',
+        getAuthToken: () => null,
+        fetch: makeFetchSpy(EMAIL_SET_OK_BODY),
+        session: SAMPLE_SESSION,
+        params: SAMPLE_DRAFT_INPUT,
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('rejects with code=invalid_argument when both body fields are absent', async () => {
+    const { bodyText: _t, ...noBody } = SAMPLE_DRAFT_INPUT;
+    await expect(
+      fetchMailDraftCommit({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy(EMAIL_SET_OK_BODY),
+        session: SAMPLE_SESSION,
+        params: noBody,
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
+  });
+
+  it('rejects with code=jmap_http_error on a non-2xx response', async () => {
+    await expect(
+      fetchMailDraftCommit({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy('err', { status: 500, statusText: 'Server Error' }),
+        session: SAMPLE_SESSION,
+        params: SAMPLE_DRAFT_INPUT,
+      }),
+    ).rejects.toMatchObject({ code: 'jmap_http_error' });
   });
 });
