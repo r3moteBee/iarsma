@@ -547,6 +547,243 @@ export function parseThreadGet(body: string): ThreadGet {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Email/set (mail.draft commit)
+// ──────────────────────────────────────────────────────────────────────
+//
+// D-038 generally puts response parsing in the Rust component to keep the
+// host away from untrusted-input parsing. We carve out an exception here:
+// `Email/set`'s success response is four scalars (`id`, `blobId`,
+// `threadId`, `size`) with no nesting or sender-controlled content, and
+// the contract codegen already validates it via Zod. Adding a WASM
+// boundary for it would buy ~nothing in safety. If `Email/set` later
+// grows a sender-influenced response shape (e.g., echoed body parts),
+// move the parser into `components/jmap-client/`.
+
+export type MailDraftInput = {
+  readonly mailboxId: string;
+  readonly from: EmailAddress;
+  readonly to: ReadonlyArray<EmailAddress>;
+  readonly cc?: ReadonlyArray<EmailAddress>;
+  readonly bcc?: ReadonlyArray<EmailAddress>;
+  readonly subject: string;
+  readonly bodyText?: string;
+  readonly bodyHtml?: string;
+  readonly inReplyTo?: string;
+  readonly references?: string;
+};
+
+export type MailDraftResult = {
+  readonly emailId: string;
+  readonly blobId: string;
+  readonly threadId: string;
+  readonly size: number;
+};
+
+export type FetchMailDraftOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly params: MailDraftInput;
+};
+
+/**
+ * Build the JMAP `Email/set` create payload for a draft. Pure function —
+ * no I/O, no Squire / DOM dependency. The output is the request body
+ * the host POSTs at commit time AND the basis for the dry-run preview.
+ */
+export function buildMailDraftRequest(opts: {
+  readonly accountId: string;
+  readonly params: MailDraftInput;
+}): string {
+  const { accountId, params } = opts;
+  const bodyParts: Array<{
+    partId: string;
+    type: string;
+  }> = [];
+  const bodyValues: Record<string, { value: string }> = {};
+  let nextPartId = 1;
+  // Build text/plain part first if present (downstream clients render
+  // text/plain as the fallback when html is the alternative).
+  if (params.bodyText !== undefined) {
+    const partId = String(nextPartId++);
+    bodyParts.push({ partId, type: 'text/plain' });
+    bodyValues[partId] = { value: params.bodyText };
+  }
+  if (params.bodyHtml !== undefined) {
+    const partId = String(nextPartId++);
+    bodyParts.push({ partId, type: 'text/html' });
+    bodyValues[partId] = { value: params.bodyHtml };
+  }
+  // multipart/alternative when both bodies are present; single-part
+  // when only one. Either way JMAP expects a `bodyStructure` tree, not
+  // separate `textBody` / `htmlBody` properties — those are GET-only.
+  const bodyStructure =
+    bodyParts.length === 1
+      ? bodyParts[0]
+      : {
+          type: 'multipart/alternative',
+          subParts: bodyParts,
+        };
+
+  const email: Record<string, unknown> = {
+    mailboxIds: { [params.mailboxId]: true },
+    keywords: { $draft: true },
+    from: params.from.name !== undefined ? [params.from] : [{ email: params.from.email }],
+    to: params.to.map((a) =>
+      a.name !== undefined ? a : { email: a.email },
+    ),
+    subject: params.subject,
+    bodyStructure,
+    bodyValues,
+  };
+  if (params.cc !== undefined && params.cc.length > 0) {
+    email.cc = params.cc.map((a) => (a.name !== undefined ? a : { email: a.email }));
+  }
+  if (params.bcc !== undefined && params.bcc.length > 0) {
+    email.bcc = params.bcc.map((a) => (a.name !== undefined ? a : { email: a.email }));
+  }
+  if (params.inReplyTo !== undefined) {
+    email.inReplyTo = [params.inReplyTo];
+  }
+  if (params.references !== undefined) {
+    email.references = params.references.split(/\s+/).filter((s) => s.length > 0);
+  }
+
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Email/set',
+        {
+          accountId,
+          create: { c0: email },
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+/**
+ * POST a JMAP `Email/set` create and parse the response into a
+ * `MailDraftResult`. Use in the `mail.draft` commit branch of the
+ * invoker; the dry-run branch should NOT call this — it constructs
+ * the preview locally.
+ */
+export async function fetchMailDraftCommit(
+  opts: FetchMailDraftOptions,
+): Promise<MailDraftResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  if (opts.params.bodyText === undefined && opts.params.bodyHtml === undefined) {
+    throw makeError(
+      'invalid_argument',
+      'mail.draft requires at least one of bodyText or bodyHtml.',
+    );
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildMailDraftRequest({ accountId, params: opts.params });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Email/set returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseEmailSetResponse(text);
+}
+
+/**
+ * Parse a JMAP `Email/set` response and extract the single creation
+ * result (we always use creation id `c0` in the request). Surfaces a
+ * structured `not_created` error when the JMAP server rejected the
+ * create.
+ */
+export function parseEmailSetResponse(body: string): MailDraftResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/set response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Email/set response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/set response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'Email/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Email/set.',
+    );
+  }
+  const result = first[1] as {
+    created?: Record<string, unknown>;
+    notCreated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notCreated !== undefined) {
+    const c0 = result.notCreated['c0'];
+    if (c0 !== undefined) {
+      throw makeError(
+        'jmap_set_error',
+        `Email/set rejected: ${c0.type ?? 'unknown'}${c0.description !== undefined ? ` — ${c0.description}` : ''}`,
+        c0,
+      );
+    }
+  }
+  const created = result.created?.['c0'] as
+    | { id?: string; blobId?: string; threadId?: string; size?: number | bigint }
+    | undefined;
+  if (created === undefined) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/set response has no created["c0"] entry.',
+    );
+  }
+  if (
+    typeof created.id !== 'string' ||
+    typeof created.blobId !== 'string' ||
+    typeof created.threadId !== 'string'
+  ) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/set created["c0"] is missing required fields.',
+    );
+  }
+  return {
+    emailId: created.id,
+    blobId: created.blobId,
+    threadId: created.threadId,
+    size: Number(created.size ?? 0),
+  };
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }
