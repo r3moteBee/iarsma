@@ -8,6 +8,7 @@
  */
 
 import { useState } from 'react';
+import { authStorage } from '../auth-state.js';
 import type { ShellConfig } from '../config.js';
 import { startSignIn } from '../runtime/oauth.js';
 
@@ -23,7 +24,13 @@ export function SignedOutView({ config }: { readonly config: ShellConfig }) {
     setError(null);
     setSigningIn(true);
     try {
-      await startSignIn({ config });
+      // Use the IDB-backed authStorage so PKCE persists where
+      // `handleCallback` will look for it. Without this, the OAuth
+      // default `sessionAuthStorage()` saves PKCE in sessionStorage but
+      // `handleCallback` (passed `storage: authStorage` from App.tsx)
+      // reads from IndexedDB — sign-in completes but the shell
+      // perpetually renders the signed-out view.
+      await startSignIn({ config, storage: authStorage });
       // startSignIn navigates away; if we reach this line, navigation failed.
     } catch (e) {
       setSigningIn(false);

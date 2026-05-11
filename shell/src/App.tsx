@@ -216,7 +216,11 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
 
   const onSignOut = () => {
     void (async () => {
-      await signOut({ config });
+      // Thread the IDB-backed authStorage through explicitly.
+      // signOut's default `storage: sessionAuthStorage()` would clear
+      // the wrong backing — leaving tokens still in IndexedDB and the
+      // user appearing signed-in on the next reload.
+      await signOut({ config, storage: authStorage });
       // Drop every cached email row so the next sign-in (possibly a
       // different user) doesn't read another user's mail. Failure is
       // non-fatal — the auth tokens are already gone, so the next
@@ -324,7 +328,12 @@ function CallbackView({
     hasHandledRef.current = true;
     (async () => {
       try {
-        const tokens = await handleCallback({ config }, url);
+        // Pass `storage: authStorage` so the callback reads PKCE +
+        // writes tokens into the IDB-backed store (D-050). Default is
+        // `sessionAuthStorage()`, which would split the auth state
+        // across two backings and leave the shell perpetually signed
+        // out after a successful sign-in.
+        const tokens = await handleCallback({ config, storage: authStorage }, url);
         // Record the sign-in to the tamper-evident action log (item 8).
         // Identity is the verified id_token subject when available, then
         // email, then a "unknown" sentinel — we never want this append to

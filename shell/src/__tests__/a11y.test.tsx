@@ -15,7 +15,31 @@
  */
 
 import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// SignedOutView now imports `authStorage` from `auth-state.ts` to thread
+// it through the OAuth call sites (fixes the storage-backing mismatch
+// where startSignIn defaulted to sessionStorage while the rest of the
+// shell uses IndexedDB). That pulls in the action-log + jmap-client +
+// html-sanitizer WASM modules transitively; stub them so jsdom doesn't
+// trip on the real WASM bindings.
+vi.mock('@iarsma/wasm-bindings/jmap-client', () => ({
+  session: { parseSession: vi.fn() },
+  mailbox: { parseMailboxGetResponse: vi.fn() },
+  email: {
+    parseEmailQueryResponse: vi.fn(),
+    parseThreadGetResponse: vi.fn(),
+  },
+}));
+vi.mock('@iarsma/wasm-bindings/action-log', () => ({
+  chain: { canonicalize: vi.fn(), verifyLinks: vi.fn() },
+}));
+vi.mock('@iarsma/wasm-bindings/html-sanitizer', () => ({
+  sanitize: {
+    sanitize: (html: string, _allowExternalImages: boolean) => html,
+  },
+}));
+
 import { SignedOutView } from '../views/signed-out-view.js';
 import { runAxe } from './util/axe.js';
 
