@@ -81,6 +81,19 @@ const EmailFull = z.object({
       "Concatenated HTML body (each `text/html` part joined by `\\n`). Absent when the message has no `text/html` part. Hosts MUST run this through `iarsma:html-sanitizer` before rendering.",
     ),
   attachments: z.array(Attachment),
+  messageId: z
+    .array(z.string())
+    .describe(
+      "RFC 5322 `Message-ID` value(s) the email carries (almost always a single id; spec allows multiple). Empty when the server didn't surface it. Used as the `In-Reply-To` source when composing a reply.",
+    ),
+  inReplyTo: z
+    .array(z.string())
+    .describe('RFC 5322 `In-Reply-To` Message-ID(s). Empty when absent.'),
+  references: z
+    .array(z.string())
+    .describe(
+      'RFC 5322 `References` Message-IDs — the full thread chain, oldest first. Empty when absent.',
+    ),
 });
 
 const Thread = z.object({

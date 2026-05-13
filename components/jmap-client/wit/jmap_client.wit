@@ -17,7 +17,7 @@
 // invocation boundary into the workspace `IarsmaError` envelope (D-043);
 // the component layer keeps shapes narrow and explicit.
 
-package iarsma:jmap-client@0.3.0;
+package iarsma:jmap-client@0.4.0;
 
 interface session {
     /// Narrow projection of a JMAP session resource (RFC 8620 §2). Matches
@@ -286,6 +286,17 @@ interface email {
         /// `iarsma:html-sanitizer` before rendering.
         body-html: option<string>,
         attachments: list<attachment>,
+        /// RFC 5322 `Message-ID` value(s) the email itself carries.
+        /// Empty list if the server didn't surface it. Used as the
+        /// `In-Reply-To` value when composing a reply.
+        message-id: list<string>,
+        /// RFC 5322 `In-Reply-To` header value(s) — Message-IDs of
+        /// the message(s) this one replies to. Empty when absent.
+        in-reply-to: list<string>,
+        /// RFC 5322 `References` header value(s) — the full chain
+        /// of Message-IDs in the thread, oldest first. Empty when
+        /// absent.
+        %references: list<string>,
     }
 
     /// Result of a `Thread/get` + chained `Email/get` round-trip. The

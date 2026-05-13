@@ -13,12 +13,14 @@ import {
 } from '../keyboard-bindings.js';
 
 describe('KEYBOARD_BINDINGS', () => {
-  it('declares the Phase 1 binding set with the expected counts per scope', () => {
+  it('declares the binding set with the expected counts per scope', () => {
     const grouped = bindingsByScope();
-    expect(grouped.get('global')?.length).toBe(2);
+    // Phase 1 + Phase 2 item 5: global gains `c`, thread-view gains
+    // `r` + `R`.
+    expect(grouped.get('global')?.length).toBe(3);
     expect(grouped.get('mailbox-sidebar')?.length).toBe(7);
     expect(grouped.get('thread-list')?.length).toBe(5);
-    expect(grouped.get('thread-view')?.length).toBe(3);
+    expect(grouped.get('thread-view')?.length).toBe(5);
   });
 
   it('every binding has a non-empty keys + action label', () => {

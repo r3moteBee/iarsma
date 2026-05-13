@@ -92,6 +92,9 @@ type Email = {
     cid?: string;
     disposition?: string;
   }>;
+  messageId: string[];
+  inReplyTo: string[];
+  references: string[];
 };
 
 function email(over: Partial<Email> = {}): Email {
@@ -106,6 +109,9 @@ function email(over: Partial<Email> = {}): Email {
     keywords: [{ name: '$seen', value: true }],
     size: 1024,
     attachments: [],
+    messageId: [],
+    inReplyTo: [],
+    references: [],
     ...over,
   };
 }
@@ -561,5 +567,156 @@ describe('ThreadView — a11y', () => {
     });
     const violations = await runAxe(container);
     expect(violations.map((v) => v.id)).toEqual([]);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Reply / Reply All / Forward — Phase 2 item 5
+// ──────────────────────────────────────────────────────────────────────
+
+import { composeStateAtom } from '../../compose-state.js';
+import { useAtomValue } from 'jotai';
+
+describe('ThreadView — reply actions', () => {
+  /** Test harness that exposes composeStateAtom so we can assert it
+   *  flipped open with the right prefill after a button click. */
+  function ComposeStateProbe() {
+    const state = useAtomValue(composeStateAtom);
+    return (
+      <div
+        data-testid="compose-state"
+        data-kind={state.kind}
+        data-subject={state.kind === 'open' ? state.prefill.subject ?? '' : ''}
+        data-to={
+          state.kind === 'open'
+            ? (state.prefill.to ?? []).map((a) => a.email).join(',')
+            : ''
+        }
+        data-cc={
+          state.kind === 'open'
+            ? (state.prefill.cc ?? []).map((a) => a.email).join(',')
+            : ''
+        }
+      />
+    );
+  }
+
+  function renderWithProbe(emails: Array<Email>) {
+    return render(
+      <JotaiProvider>
+        <IarsmaProvider
+          value={mockInvoker({
+            'thread.get': async () => fixtureThreadGet(emails),
+          })}
+        >
+          <WithSelectedThread threadId="T1">
+            <ThreadView />
+          </WithSelectedThread>
+          <ComposeStateProbe />
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+  }
+
+  it('Reply opens compose with to=sender, subject prefixed Re:', async () => {
+    renderWithProbe([
+      email({
+        id: 'E1',
+        from: [{ email: 'bob@example.net' }],
+        to: [{ email: 'brent@example.net' }],
+        subject: 'Project plan',
+        messageId: ['<m-1@example.net>'],
+      }),
+    ]);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Reply' }),
+      ).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    await waitFor(() => {
+      const probe = screen.getByTestId('compose-state');
+      expect(probe).toHaveAttribute('data-kind', 'open');
+      expect(probe).toHaveAttribute('data-subject', 'Re: Project plan');
+      expect(probe).toHaveAttribute('data-to', 'bob@example.net');
+      expect(probe).toHaveAttribute('data-cc', '');
+    });
+  });
+
+  it('Reply all opens compose with cc filled from the original to + cc', async () => {
+    // In tests `tokensAtom` is null → userEmail falls back to
+    // 'unknown@example.invalid', so the "minus self" rule doesn't
+    // filter anything by accident. The reply-prefill self-exclusion
+    // logic is unit-tested directly in `reply-prefill.test.ts`.
+    renderWithProbe([
+      email({
+        id: 'E1',
+        from: [{ email: 'bob@example.net' }],
+        to: [
+          { email: 'alice@example.net' },
+          { email: 'carol@example.net' },
+        ],
+        messageId: ['<m-1@example.net>'],
+      }),
+    ]);
+    await waitFor(() => screen.getByRole('button', { name: 'Reply all' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reply all' }));
+    await waitFor(() => {
+      const probe = screen.getByTestId('compose-state');
+      expect(probe).toHaveAttribute('data-kind', 'open');
+      expect(probe).toHaveAttribute('data-to', 'bob@example.net');
+      expect(probe).toHaveAttribute(
+        'data-cc',
+        'alice@example.net,carol@example.net',
+      );
+    });
+  });
+
+  it('Forward opens compose with empty recipients and Fwd: subject', async () => {
+    renderWithProbe([
+      email({
+        id: 'E1',
+        from: [{ email: 'bob@example.net' }],
+        subject: 'Project plan',
+        messageId: ['<m-1@example.net>'],
+      }),
+    ]);
+    await waitFor(() => screen.getByRole('button', { name: 'Forward' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+    await waitFor(() => {
+      const probe = screen.getByTestId('compose-state');
+      expect(probe).toHaveAttribute('data-kind', 'open');
+      expect(probe).toHaveAttribute('data-subject', 'Fwd: Project plan');
+      expect(probe).toHaveAttribute('data-to', '');
+    });
+  });
+
+  it('`r` keyboard binding replies to the focused message', async () => {
+    renderWithProbe([
+      email({
+        id: 'E1',
+        from: [{ email: 'bob@example.net' }],
+        subject: 'Older message',
+        receivedAt: '2026-05-01T00:00:00Z',
+        messageId: ['<older@example.net>'],
+      }),
+      email({
+        id: 'E2',
+        from: [{ email: 'carol@example.net' }],
+        subject: 'Newer message',
+        receivedAt: '2026-05-09T00:00:00Z',
+        messageId: ['<newer@example.net>'],
+      }),
+    ]);
+    await waitFor(() => screen.getByRole('region', { name: 'Thread' }));
+    // Latest message starts focused (E2). Press `r`.
+    const section = screen.getByRole('region', { name: 'Thread' });
+    fireEvent.keyDown(section, { key: 'r' });
+    await waitFor(() => {
+      const probe = screen.getByTestId('compose-state');
+      expect(probe).toHaveAttribute('data-kind', 'open');
+      expect(probe).toHaveAttribute('data-subject', 'Re: Newer message');
+      expect(probe).toHaveAttribute('data-to', 'carol@example.net');
+    });
   });
 });

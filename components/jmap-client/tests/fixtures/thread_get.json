@@ -32,6 +32,7 @@
             "preview": "Hi Alice — please find the schedule attached.",
             "receivedAt": "2026-05-09T15:42:11Z",
             "sentAt": "2026-05-09T15:41:50Z",
+            "messageId": ["<bob-001@example.net>"],
             "keywords": {"$seen": true},
             "size": 4321,
             "bodyValues": {
@@ -51,6 +52,9 @@
             "preview": "Looks good — see embedded logo.",
             "receivedAt": "2026-05-09T16:10:00Z",
             "sentAt": "2026-05-09T16:09:42Z",
+            "messageId": ["<alice-002@example.net>"],
+            "inReplyTo": ["<bob-001@example.net>"],
+            "references": ["<bob-001@example.net>"],
             "keywords": {"$seen": true, "$flagged": true, "$answered": true},
             "size": 8190,
             "bodyValues": {

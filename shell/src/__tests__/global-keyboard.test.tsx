@@ -17,6 +17,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { Provider as JotaiProvider, useAtomValue, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { composeStateAtom } from '../compose-state.js';
 import { keyboardHelpOpenAtom } from '../keyboard-state.js';
 
 afterEach(() => {
@@ -28,6 +29,7 @@ afterEach(() => {
 // changes the rules will fail here.
 function useGlobalKeyboardShortcuts(): void {
   const setOpen = useSetAtom(keyboardHelpOpenAtom);
+  const setComposeState = useSetAtom(composeStateAtom);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === '?') {
@@ -36,13 +38,19 @@ function useGlobalKeyboardShortcuts(): void {
         setOpen(true);
         return;
       }
+      if (event.key === 'c') {
+        if (isEditableElement(event.target)) return;
+        event.preventDefault();
+        setComposeState({ kind: 'open', prefill: {} });
+        return;
+      }
       if (event.key === 'Escape') {
         setOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setOpen]);
+  }, [setOpen, setComposeState]);
 }
 
 function isEditableElement(target: EventTarget | null): boolean {
@@ -56,9 +64,11 @@ function isEditableElement(target: EventTarget | null): boolean {
 function Harness({ inputId }: { inputId?: string }) {
   useGlobalKeyboardShortcuts();
   const open = useAtomValue(keyboardHelpOpenAtom);
+  const compose = useAtomValue(composeStateAtom);
   return (
     <div>
       <span data-testid="state">{open ? 'open' : 'closed'}</span>
+      <span data-testid="compose-state">{compose.kind}</span>
       {inputId !== undefined ? <input id={inputId} data-testid="text-input" /> : null}
     </div>
   );
@@ -105,6 +115,27 @@ describe('Global keyboard shortcuts', () => {
     const input = getByTestId('text-input');
     fireEvent.keyDown(input, { key: '?' });
     expect(getByTestId('state').textContent).toBe('closed');
+  });
+
+  it('c opens the compose modal', () => {
+    const { getByTestId } = render(
+      <JotaiProvider>
+        <Harness />
+      </JotaiProvider>,
+    );
+    fireEvent.keyDown(document.body, { key: 'c' });
+    expect(getByTestId('compose-state').textContent).toBe('open');
+  });
+
+  it('c does NOT open the composer when typed inside an <input>', () => {
+    const { getByTestId } = render(
+      <JotaiProvider>
+        <Harness inputId="search" />
+      </JotaiProvider>,
+    );
+    const input = getByTestId('text-input');
+    fireEvent.keyDown(input, { key: 'c' });
+    expect(getByTestId('compose-state').textContent).toBe('closed');
   });
 
   it('detaches the window listener on unmount', () => {
