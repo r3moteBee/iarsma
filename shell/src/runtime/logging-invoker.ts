@@ -82,5 +82,15 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
 
       return result;
     },
+    // Attachment uploads pass through without their own log entry —
+    // the eventual mail.draft / mail.send invocation that REFERENCES
+    // the blob is what carries the audit value (the blob id appears
+    // in the params field of that entry).
+    ...(opts.inner.uploadAttachment !== undefined
+      ? {
+          uploadAttachment: (blob, uploadOpts) =>
+            opts.inner.uploadAttachment!(blob, uploadOpts),
+        }
+      : {}),
   };
 }
