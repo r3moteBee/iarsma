@@ -9,11 +9,13 @@ import { describe, expect, it } from 'vitest';
 import { CACHEABLE_TOOLS, purposeFor } from '../cache-policy.js';
 
 describe('cache-policy', () => {
-  it('maps the Phase 1 read capabilities to their cache purposes', () => {
+  it('maps the cacheable read capabilities to their cache purposes', () => {
     expect(CACHEABLE_TOOLS).toEqual({
       'mailbox.list': 'mailboxes',
       'thread.list': 'threads',
       'thread.get': 'threadBodies',
+      // Phase 2 item 6 — identities cached for compose-modal openness.
+      'identity.list': 'identities',
     });
   });
 

@@ -31,20 +31,19 @@ import {
 import { tokensAtom } from '../auth-state.js';
 import { composeStateAtom, type ComposePrefill } from '../compose-state.js';
 import { useMailDraft } from '../generated/capabilities/mail-draft.js';
+import { useIdentityList } from '../generated/capabilities/identity-list.js';
 import {
   useMailSend,
   type MailSendPreview,
 } from '../generated/capabilities/mail-send.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
+import type { Identity } from '../runtime/jmap-client.js';
 import {
   formatRecipients,
   parseRecipients,
   type ParsedRecipient,
 } from './recipient-parser.js';
 import { Composer } from './composer.js';
-
-/** Placeholder identity. Phase 2 item 6 replaces this with a selector. */
-const PLACEHOLDER_IDENTITY_ID = 'placeholder-identity';
 
 /** Debounce window before save-on-blur fires mail.draft.commit. */
 const SAVE_DEBOUNCE_MS = 500;
@@ -66,8 +65,8 @@ function ComposeModal(props: {
 }) {
   const { prefill, onClose } = props;
   const tokens = useAtomValue(tokensAtom);
-  const fromEmail = tokens?.email ?? 'unknown@example.invalid';
   const mailboxes = useMailboxList({});
+  const identityList = useIdentityList({});
   const draftHook = useMailDraft();
   const sendHook = useMailSend();
 
@@ -79,6 +78,39 @@ function ComposeModal(props: {
     () => findMailboxIdByRole(mailboxes.data, 'sent'),
     [mailboxes.data],
   );
+
+  // Identity selection: default to the first identity (item 6's first
+  // cut). "Per-recipient-domain" and "per-mailbox" rules land later
+  // when the UX has more shape. Falls back to a placeholder until
+  // identities load; the Send button gates on a real identity.
+  const identities: ReadonlyArray<Identity> = useMemo(
+    () =>
+      (identityList.data as { identities?: ReadonlyArray<Identity> } | undefined)
+        ?.identities ?? [],
+    [identityList.data],
+  );
+  const [selectedIdentityId, setSelectedIdentityId] = useState<string | null>(
+    null,
+  );
+  // When identities arrive (or change), pick the first one if the user
+  // hasn't manually changed selection.
+  useEffect(() => {
+    if (selectedIdentityId !== null) return;
+    if (identities.length === 0) return;
+    setSelectedIdentityId(identities[0]!.id);
+  }, [identities, selectedIdentityId]);
+
+  const selectedIdentity = useMemo(
+    () => identities.find((i) => i.id === selectedIdentityId) ?? null,
+    [identities, selectedIdentityId],
+  );
+  // The composer's "From" address derives from the selected identity.
+  // Until identities load we show the token-stamped email as a
+  // placeholder; capabilities won't actually call until selectedIdentity
+  // is set (Send is disabled).
+  const fromEmail =
+    selectedIdentity?.email ?? tokens?.email ?? 'unknown@example.invalid';
+  const fromName = selectedIdentity?.name;
 
   // Form fields. `to`/`cc`/`bcc` are plain strings; parsed lazily.
   const [toText, setToText] = useState(formatRecipients(prefill.to));
@@ -236,10 +268,16 @@ function ComposeModal(props: {
         setSendError('Fix invalid recipients before sending.');
         return;
       }
+      if (selectedIdentity === null) {
+        setSendError('No identity selected. Configure an Identity on the server first.');
+        return;
+      }
       try {
         const input = buildSendInput({
           sentMailboxId,
+          identityId: selectedIdentity.id,
           fromEmail,
+          ...(fromName !== undefined ? { fromName } : {}),
           parsedTo: parsedTo.recipients,
           parsedCc: parsedCc.recipients,
           parsedBcc: parsedBcc.recipients,
@@ -264,9 +302,11 @@ function ComposeModal(props: {
     },
     [
       sentMailboxId,
+      selectedIdentity,
       hasAtLeastOneRecipient,
       hasRecipientErrors,
       fromEmail,
+      fromName,
       parsedTo.recipients,
       parsedCc.recipients,
       parsedBcc.recipients,
@@ -279,11 +319,14 @@ function ComposeModal(props: {
 
   const onPreviewConfirm = useCallback(async () => {
     if (sentMailboxId === null) return;
+    if (selectedIdentity === null) return;
     setSendError(null);
     try {
       const input = buildSendInput({
         sentMailboxId,
+        identityId: selectedIdentity.id,
         fromEmail,
+        ...(fromName !== undefined ? { fromName } : {}),
         parsedTo: parsedTo.recipients,
         parsedCc: parsedCc.recipients,
         parsedBcc: parsedBcc.recipients,
@@ -300,7 +343,9 @@ function ComposeModal(props: {
     }
   }, [
     sentMailboxId,
+    selectedIdentity,
     fromEmail,
+    fromName,
     parsedTo.recipients,
     parsedCc.recipients,
     parsedBcc.recipients,
@@ -369,8 +414,35 @@ function ComposeModal(props: {
             </button>
           </header>
           <form onSubmit={onSendClick}>
-            <FieldRow label="From">
-              <output style={{ opacity: 0.75 }}>{fromEmail}</output>
+            <FieldRow label="From" htmlFor="compose-identity">
+              {identities.length === 0 ? (
+                <output style={{ opacity: 0.75 }}>
+                  {identityList.isLoading
+                    ? 'Loading identities…'
+                    : 'No sending identities configured on the server.'}
+                </output>
+              ) : identities.length === 1 ? (
+                // Single identity — render as static text + a hidden
+                // select so the field row still associates with the
+                // (auto-selected) value.
+                <output style={{ opacity: 0.75 }}>
+                  {formatIdentityLabel(identities[0]!)}
+                </output>
+              ) : (
+                <select
+                  id="compose-identity"
+                  value={selectedIdentityId ?? ''}
+                  onChange={(e) => setSelectedIdentityId(e.target.value)}
+                  style={fieldStyle}
+                  aria-label="Sending identity"
+                >
+                  {identities.map((id) => (
+                    <option key={id.id} value={id.id}>
+                      {formatIdentityLabel(id)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </FieldRow>
             <FieldRow label="To" htmlFor="compose-to">
               <input
@@ -476,7 +548,8 @@ function ComposeModal(props: {
                 disabled={
                   !hasAtLeastOneRecipient ||
                   hasRecipientErrors ||
-                  sentMailboxId === null
+                  sentMailboxId === null ||
+                  selectedIdentity === null
                 }
               >
                 Send…
@@ -641,6 +714,12 @@ function SendPreviewModal(props: {
   );
 }
 
+function formatIdentityLabel(identity: Identity): string {
+  return identity.name !== ''
+    ? `${identity.name} <${identity.email}>`
+    : identity.email;
+}
+
 function findMailboxIdByRole(
   data: unknown,
   role: 'drafts' | 'sent',
@@ -661,7 +740,9 @@ function findMailboxIdByRole(
 
 function buildSendInput(args: {
   sentMailboxId: string;
+  identityId: string;
   fromEmail: string;
+  fromName?: string;
   parsedTo: ReadonlyArray<ParsedRecipient>;
   parsedCc: ReadonlyArray<ParsedRecipient>;
   parsedBcc: ReadonlyArray<ParsedRecipient>;
@@ -671,8 +752,11 @@ function buildSendInput(args: {
 }) {
   return {
     sentMailboxId: args.sentMailboxId,
-    identityId: PLACEHOLDER_IDENTITY_ID,
-    from: { email: args.fromEmail },
+    identityId: args.identityId,
+    from:
+      args.fromName !== undefined
+        ? { name: args.fromName, email: args.fromEmail }
+        : { email: args.fromEmail },
     to: args.parsedTo as Array<ParsedRecipient>,
     ...(args.parsedCc.length > 0
       ? { cc: args.parsedCc as Array<ParsedRecipient> }

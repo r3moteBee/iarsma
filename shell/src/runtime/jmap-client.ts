@@ -800,6 +800,183 @@ export function parseEmailSetResponse(body: string): MailDraftResult {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Identity/get (identity.list)
+// ──────────────────────────────────────────────────────────────────────
+//
+// D-038 carve-out for the same reason mail.draft/mail.send have one:
+// `Identity/get` returns a flat list of operator-controlled records
+// (id, name, email, mayDelete + a few optional fields). No
+// sender-controlled content, no nested parsing, no security-sensitive
+// transformations. The contract codegen already validates the shape
+// via Zod.
+
+export type Identity = {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+  readonly replyTo?: ReadonlyArray<EmailAddress>;
+  readonly bcc?: ReadonlyArray<EmailAddress>;
+  readonly textSignature?: string;
+  readonly htmlSignature?: string;
+  readonly mayDelete: boolean;
+};
+
+export type IdentityList = {
+  readonly identities: ReadonlyArray<Identity>;
+};
+
+export type FetchIdentityListOptions = JmapClientOptions & {
+  readonly session: Session;
+};
+
+const JMAP_USING_SUBMISSION = [
+  'urn:ietf:params:jmap:core',
+  'urn:ietf:params:jmap:submission',
+];
+
+/**
+ * Build the JMAP `Identity/get` request. `ids: null` fetches every
+ * identity the authenticated account is permitted to see.
+ */
+export function buildIdentityListRequest(opts: {
+  readonly accountId: string;
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_SUBMISSION,
+    methodCalls: [
+      [
+        'Identity/get',
+        {
+          accountId: opts.accountId,
+          ids: null,
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+export async function fetchIdentityList(
+  opts: FetchIdentityListOptions,
+): Promise<IdentityList> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildIdentityListRequest({
+    accountId: opts.session.primaryAccountIdMail,
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Identity/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseIdentityListResponse(text);
+}
+
+export function parseIdentityListResponse(body: string): IdentityList {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Identity/get response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Identity/get response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Identity/get response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first[0] !== 'Identity/get') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Identity/get.',
+    );
+  }
+  const list = (first[1] as { list?: unknown }).list;
+  if (!Array.isArray(list)) {
+    throw makeError('jmap_parse_error', 'Identity/get response is missing list.');
+  }
+  const identities = list.map((raw, i) => parseIdentity(raw, i));
+  return { identities };
+}
+
+function parseIdentity(raw: unknown, index: number): Identity {
+  if (raw === null || typeof raw !== 'object') {
+    throw makeError(
+      'jmap_parse_error',
+      `Identity at index ${index} is not an object.`,
+    );
+  }
+  const r = raw as Record<string, unknown>;
+  if (
+    typeof r.id !== 'string' ||
+    typeof r.name !== 'string' ||
+    typeof r.email !== 'string' ||
+    typeof r.mayDelete !== 'boolean'
+  ) {
+    throw makeError(
+      'jmap_parse_error',
+      `Identity at index ${index} is missing required fields.`,
+    );
+  }
+  return {
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    mayDelete: r.mayDelete,
+    ...(Array.isArray(r.replyTo)
+      ? { replyTo: r.replyTo.map(parseAddress) }
+      : {}),
+    ...(Array.isArray(r.bcc) ? { bcc: r.bcc.map(parseAddress) } : {}),
+    ...(typeof r.textSignature === 'string'
+      ? { textSignature: r.textSignature }
+      : {}),
+    ...(typeof r.htmlSignature === 'string'
+      ? { htmlSignature: r.htmlSignature }
+      : {}),
+  };
+}
+
+function parseAddress(raw: unknown): EmailAddress {
+  if (raw === null || typeof raw !== 'object') {
+    throw makeError('jmap_parse_error', 'Email address is not an object.');
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.email !== 'string') {
+    throw makeError('jmap_parse_error', 'Email address is missing `email`.');
+  }
+  return typeof r.name === 'string'
+    ? { name: r.name, email: r.email }
+    : { email: r.email };
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Email/set + EmailSubmission/set (mail.send commit)
 // ──────────────────────────────────────────────────────────────────────
 
