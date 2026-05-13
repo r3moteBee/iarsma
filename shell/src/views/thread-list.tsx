@@ -38,8 +38,13 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
-import { selectedMailboxIdAtom, selectedThreadIdAtom } from '../mail-state.js';
+import { composeStateAtom } from '../compose-state.js';
+import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useThreadList } from '../generated/capabilities/thread-list.js';
+import { selectedMailboxIdAtom, selectedThreadIdAtom } from '../mail-state.js';
+import { useInvoker } from '../runtime/invoker.js';
+import type { EmailFull, ThreadGet } from '../runtime/jmap-client.js';
+import { buildDraftPrefill } from './draft-prefill.js';
 
 const ROW_HEIGHT_PX = 64;
 
@@ -63,6 +68,21 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
   const { data, error, isLoading } = useThreadList({ mailboxId });
   const selectedThreadId = useAtomValue(selectedThreadIdAtom);
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
+  const setComposeState = useSetAtom(composeStateAtom);
+  const invoker = useInvoker();
+  const mailboxes = useMailboxList({});
+
+  // Detect "this is the Drafts mailbox" by the JMAP role on the
+  // selected mailbox. Phase 2 item 8: clicking a thread in Drafts
+  // opens the composer with the draft prefilled instead of routing
+  // to the (read-only) ThreadView.
+  const isDrafts = useMemo(() => {
+    const list = (mailboxes.data ?? []) as ReadonlyArray<{
+      id: string;
+      role?: string;
+    }>;
+    return list.some((m) => m.id === mailboxId && m.role === 'drafts');
+  }, [mailboxes.data, mailboxId]);
 
   // Reset selection when the mailbox changes — the previous-mailbox
   // thread id isn't meaningful in this list.
@@ -123,10 +143,41 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
     (idx: number) => {
       const thread = threads[idx];
       if (thread === undefined) return;
-      setSelectedThreadId(thread.id);
       setFocusedIndex(idx);
+      if (!isDrafts) {
+        setSelectedThreadId(thread.id);
+        return;
+      }
+      // Drafts path: fetch thread.get imperatively, reopen the draft
+      // body in the composer. Don't update selectedThreadId — the
+      // composer modal is the user's view of this draft.
+      void (async () => {
+        try {
+          const result = (await invoker.invoke<{ threadId: string }, ThreadGet>(
+            'thread.get',
+            { threadId: thread.id },
+          )) as ThreadGet;
+          // A draft thread typically has a single email — take the
+          // latest one (chronological order is preserved by the
+          // parser).
+          const draftEmail = result.emails[result.emails.length - 1] as
+            | EmailFull
+            | undefined;
+          if (draftEmail === undefined) return;
+          setComposeState({
+            kind: 'open',
+            prefill: buildDraftPrefill(draftEmail),
+          });
+        } catch (e) {
+          // Surface via the existing thread-list error path? It's
+          // mid-click flow, no good UI surface yet. Console-log and
+          // leave the user in the thread list.
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] failed to reopen draft:', e);
+        }
+      })();
     },
-    [threads, setSelectedThreadId],
+    [threads, setSelectedThreadId, isDrafts, invoker, setComposeState],
   );
 
   const onKeyDown = useCallback(
