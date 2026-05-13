@@ -154,8 +154,16 @@ function renderThreadList(opts: {
 }
 
 async function waitForList(): Promise<void> {
+  // Wait for both the listbox to render AND the auto-focus useEffect
+  // to commit (focusedIndex 0 → first row has tabindex=0). Without the
+  // tabindex check the j/k tests race the effect on slower CI runs:
+  // listbox renders with no focused row, keydown fires with the null
+  // focusedIndex, and our `focusedIndex ?? -1` path moves to 0 (T1)
+  // instead of the expected "j from T1 → T2".
   await waitFor(() => {
-    expect(screen.getByRole('listbox', { name: 'Threads' })).toBeInTheDocument();
+    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    expect(listbox).toBeInTheDocument();
+    expect(listbox.querySelector('[tabindex="0"]')).not.toBeNull();
   });
 }
 
