@@ -40,7 +40,11 @@ import {
 import type { AuthStorage } from './auth-storage.js';
 
 const IDB_NAME = 'iarsma-cache';
-const IDB_VERSION = 1;
+// IDB_VERSION 2 adds the `identities` store (Phase 2 item 6, D-051).
+// `onupgradeneeded` iterates every entry in `CACHE_PURPOSES`, so the
+// upgrade path is "create any stores not already present" — additive
+// schema changes don't need version-specific migration code.
+const IDB_VERSION = 2;
 
 /**
  * Cache "purposes" — the object-store name on disk and the AAD bound
@@ -56,6 +60,7 @@ export const CACHE_PURPOSES = {
     store: 'thread-bodies',
     purpose: 'cache.thread-bodies.v1',
   },
+  identities: { store: 'identities', purpose: 'cache.identities.v1' },
 } as const;
 
 export type CachePurposeKey = keyof typeof CACHE_PURPOSES;

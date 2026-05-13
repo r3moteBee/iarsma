@@ -23,12 +23,14 @@ import { createContext, useContext } from 'react';
 import {
   buildMailDraftRequest,
   buildMailSendRequest,
+  fetchIdentityList,
   fetchMailDraftCommit,
   fetchMailSendCommit,
   fetchMailboxList,
   fetchSession,
   fetchThreadGet,
   fetchThreadList,
+  type IdentityList,
   type JmapClientOptions,
   type Mailbox,
   type MailDraftInput,
@@ -191,6 +193,14 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             ...opts,
             session,
             threadId: params.threadId,
+          });
+          return result as unknown as O;
+        }
+        case 'identity.list': {
+          const session = await getSession();
+          const result: IdentityList = await fetchIdentityList({
+            ...opts,
+            session,
           });
           return result as unknown as O;
         }

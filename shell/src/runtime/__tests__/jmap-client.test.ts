@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  buildIdentityListRequest,
   buildMailDraftRequest,
   buildMailSendRequest,
+  fetchIdentityList,
   fetchMailDraftCommit,
   fetchMailSendCommit,
   fetchMailboxList,
@@ -12,6 +14,7 @@ import {
   fetchThreadList,
   parseEmailSetResponse,
   parseEmailSubmissionSetResponse,
+  parseIdentityListResponse,
   parseMailboxes,
   parseSession,
   parseThreadGet,
@@ -1105,6 +1108,133 @@ describe('fetchMailSendCommit (host fetch + parse)', () => {
         fetch: makeFetchSpy(EMAIL_SUBMISSION_OK_BODY),
         session: SAMPLE_SESSION,
         params: SAMPLE_SEND_INPUT,
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// identity.list (Identity/get) — Phase 2 item 6
+// ──────────────────────────────────────────────────────────────────────
+
+const IDENTITY_OK_BODY = JSON.stringify({
+  methodResponses: [
+    [
+      'Identity/get',
+      {
+        accountId: 'c',
+        state: 'i-state-1',
+        list: [
+          {
+            id: 'I-1',
+            name: 'Brent',
+            email: 'brent@example.net',
+            mayDelete: false,
+          },
+          {
+            id: 'I-2',
+            name: 'Brent (work)',
+            email: 'brent@example.org',
+            replyTo: [{ email: 'work-reply@example.org' }],
+            mayDelete: true,
+          },
+        ],
+      },
+      '0',
+    ],
+  ],
+});
+
+describe('buildIdentityListRequest', () => {
+  it('asks for every identity (ids: null) under the submission URN', () => {
+    const body = buildIdentityListRequest({ accountId: 'c' });
+    const parsed = JSON.parse(body) as {
+      using: string[];
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    expect(parsed.using).toContain('urn:ietf:params:jmap:submission');
+    const [name, args] = parsed.methodCalls[0]!;
+    expect(name).toBe('Identity/get');
+    expect(args.accountId).toBe('c');
+    expect(args.ids).toBeNull();
+  });
+});
+
+describe('parseIdentityListResponse', () => {
+  it('parses every identity with optional fields preserved', () => {
+    const r = parseIdentityListResponse(IDENTITY_OK_BODY);
+    expect(r.identities).toHaveLength(2);
+    expect(r.identities[0]).toEqual({
+      id: 'I-1',
+      name: 'Brent',
+      email: 'brent@example.net',
+      mayDelete: false,
+    });
+    expect(r.identities[1]).toEqual({
+      id: 'I-2',
+      name: 'Brent (work)',
+      email: 'brent@example.org',
+      mayDelete: true,
+      replyTo: [{ email: 'work-reply@example.org' }],
+    });
+  });
+
+  it('throws code=jmap_parse_error on missing list', () => {
+    const body = JSON.stringify({
+      methodResponses: [['Identity/get', { accountId: 'c' }, '0']],
+    });
+    try {
+      parseIdentityListResponse(body);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect((e as ToolError).code).toBe('jmap_parse_error');
+    }
+  });
+
+  it('throws code=jmap_parse_error on malformed identity (missing required field)', () => {
+    const body = JSON.stringify({
+      methodResponses: [
+        [
+          'Identity/get',
+          {
+            list: [{ id: 'I-1', name: 'Brent', email: 'x@y.z' }], // no mayDelete
+          },
+          '0',
+        ],
+      ],
+    });
+    try {
+      parseIdentityListResponse(body);
+      throw new Error('expected throw');
+    } catch (e) {
+      expect((e as ToolError).code).toBe('jmap_parse_error');
+    }
+  });
+});
+
+describe('fetchIdentityList', () => {
+  it('POSTs Identity/get and returns the parsed list', async () => {
+    const fetchSpy = makeFetchSpy(IDENTITY_OK_BODY);
+    const r = await fetchIdentityList({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+    });
+    expect(r.identities).toHaveLength(2);
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(SAMPLE_SESSION.apiUrl);
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    expect(headers.authorization).toBe('Bearer tok');
+  });
+
+  it('rejects with code=unauthorized when no token is available', async () => {
+    await expect(
+      fetchIdentityList({
+        baseUrl: 'https://x',
+        getAuthToken: () => null,
+        fetch: makeFetchSpy(IDENTITY_OK_BODY),
+        session: SAMPLE_SESSION,
       }),
     ).rejects.toMatchObject({ code: 'unauthorized' });
   });

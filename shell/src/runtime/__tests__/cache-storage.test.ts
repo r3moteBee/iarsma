@@ -84,6 +84,7 @@ describe('CACHE_PURPOSES schema lock', () => {
         store: 'thread-bodies',
         purpose: 'cache.thread-bodies.v1',
       },
+      identities: { store: 'identities', purpose: 'cache.identities.v1' },
     };
     expect(CACHE_PURPOSES).toEqual(expected);
   });

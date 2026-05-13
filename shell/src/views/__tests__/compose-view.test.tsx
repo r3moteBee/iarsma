@@ -154,17 +154,30 @@ function makeInvoker(
     draft?: (input: unknown) => unknown;
     sendPreview?: () => unknown;
     sendCommit?: () => unknown;
+    identities?: ReadonlyArray<{
+      id: string;
+      name: string;
+      email: string;
+      mayDelete: boolean;
+    }>;
   } = {},
-): { invoker: Invoker; calls: Array<{ name: string; dryRun: boolean }> } {
-  const calls: Array<{ name: string; dryRun: boolean }> = [];
+): {
+  invoker: Invoker;
+  calls: Array<{ name: string; dryRun: boolean; input?: unknown }>;
+} {
+  const calls: Array<{ name: string; dryRun: boolean; input?: unknown }> = [];
+  const identities = overrides.identities ?? [
+    { id: 'I-1', name: 'Brent', email: 'brent@example.net', mayDelete: false },
+  ];
   const invoker = mockInvoker({
     'mailbox.list': async () => MAILBOXES,
+    'identity.list': async () => ({ identities }),
     'mail.draft': async (input, dryRun) => {
-      calls.push({ name: 'mail.draft', dryRun });
+      calls.push({ name: 'mail.draft', dryRun, input });
       return overrides.draft !== undefined ? overrides.draft(input) : DRAFT_OK;
     },
-    'mail.send': async (_input, dryRun) => {
-      calls.push({ name: 'mail.send', dryRun });
+    'mail.send': async (input, dryRun) => {
+      calls.push({ name: 'mail.send', dryRun, input });
       if (dryRun) {
         return overrides.sendPreview !== undefined
           ? overrides.sendPreview()
@@ -379,6 +392,93 @@ describe('ComposeView — dismissal', () => {
         screen.queryByRole('dialog', { name: /new message/i }),
       ).toBeNull();
     });
+  });
+});
+
+describe('ComposeView — identity selector', () => {
+  it('shows the single identity as static text (no dropdown when only one)', async () => {
+    renderComposer();
+    await waitFor(() => {
+      expect(
+        screen.getByText('Brent <brent@example.net>'),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('renders a dropdown when there are multiple identities, defaulting to the first', async () => {
+    renderComposer({
+      identities: [
+        { id: 'I-1', name: 'Brent', email: 'brent@example.net', mayDelete: false },
+        {
+          id: 'I-2',
+          name: 'Brent (work)',
+          email: 'brent@example.org',
+          mayDelete: true,
+        },
+      ],
+    });
+    const selector = await screen.findByRole('combobox', {
+      name: /sending identity/i,
+    });
+    expect((selector as HTMLSelectElement).value).toBe('I-1');
+    expect(within(selector).getAllByRole('option')).toHaveLength(2);
+  });
+
+  it('threads selectedIdentity through to mail.send commit', async () => {
+    const { calls } = renderComposer({
+      identities: [
+        { id: 'I-1', name: 'Brent', email: 'brent@example.net', mayDelete: false },
+        {
+          id: 'I-2',
+          name: 'Brent (work)',
+          email: 'brent@example.org',
+          mayDelete: true,
+        },
+      ],
+    });
+    const selector = await screen.findByRole('combobox', {
+      name: /sending identity/i,
+    });
+    fireEvent.change(selector, { target: { value: 'I-2' } });
+    fireEvent.change(screen.getByLabelText('To'), {
+      target: { value: 'alice@example.net' },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send…' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    await waitFor(() =>
+      screen.getByRole('dialog', { name: /send this message/i }),
+    );
+    const previewDialog = screen.getByRole('dialog', {
+      name: /send this message/i,
+    });
+    fireEvent.click(
+      within(previewDialog).getAllByRole('button', { name: 'Send' })[0]!,
+    );
+    await waitFor(() => {
+      const commit = calls.find(
+        (c) => c.name === 'mail.send' && !c.dryRun,
+      );
+      expect(commit).toBeDefined();
+      expect((commit!.input as { identityId: string }).identityId).toBe('I-2');
+    });
+  });
+
+  it('Send stays disabled when there are zero identities', async () => {
+    renderComposer({ identities: [] });
+    fireEvent.change(screen.getByLabelText('To'), {
+      target: { value: 'alice@example.net' },
+    });
+    // Wait long enough for identity.list to resolve (synchronously
+    // returns []). Send still gates on selectedIdentity !== null.
+    await waitFor(() => {
+      expect(
+        screen.getByText(/no sending identities configured/i),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Send…' })).toBeDisabled();
   });
 });
 

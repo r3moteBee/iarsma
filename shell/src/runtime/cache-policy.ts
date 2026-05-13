@@ -19,6 +19,11 @@ export const CACHEABLE_TOOLS: Readonly<Record<string, CachePurposeKey>> = {
   'mailbox.list': 'mailboxes',
   'thread.list': 'threads',
   'thread.get': 'threadBodies',
+  // Identities change rarely (a user adds an alias maybe once a year)
+  // and the compose modal opens many times per session. SWR keeps the
+  // dropdown instant while a background fetch picks up server-side
+  // changes within the same session.
+  'identity.list': 'identities',
   // session.get is intentionally NOT cached — it's resolved once
   // per invoker instance via in-memory caching inside jmapInvoker
   // (see invoker.ts), and re-fetching on sign-in is correct.
