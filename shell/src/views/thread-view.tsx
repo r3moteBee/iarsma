@@ -34,7 +34,7 @@
  *     renders broken until cid resolution lands.
  */
 
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
   useCallback,
   useEffect,
@@ -43,10 +43,13 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import { tokensAtom } from '../auth-state.js';
+import { composeStateAtom } from '../compose-state.js';
 import { selectedThreadIdAtom } from '../mail-state.js';
 import { useThreadGet } from '../generated/capabilities/thread-get.js';
 import { sanitizeHtml } from '../runtime/sanitizer.js';
 import type { EmailFull } from '../runtime/jmap-client.js';
+import { buildReplyPrefill, type ReplyMode } from './reply-prefill.js';
 
 export function ThreadView() {
   const threadId = useAtomValue(selectedThreadIdAtom);
@@ -93,6 +96,9 @@ function ThreadViewLoaded({
 }: {
   readonly emails: ReadonlyArray<EmailFull>;
 }) {
+  const tokens = useAtomValue(tokensAtom);
+  const setComposeState = useSetAtom(composeStateAtom);
+  const userEmail = tokens?.email ?? 'unknown@example.invalid';
   // Latest message is auto-expanded; older messages start collapsed.
   // Selection is keyed by index — emails are immutable per render so
   // index is stable across the lifetime of this view.
@@ -140,6 +146,18 @@ function ThreadViewLoaded({
     [emails.length],
   );
 
+  const replyToFocused = useCallback(
+    (mode: ReplyMode) => {
+      const target = emails[focusedIndex];
+      if (target === undefined) return;
+      setComposeState({
+        kind: 'open',
+        prefill: buildReplyPrefill({ email: target, mode, userEmail }),
+      });
+    },
+    [emails, focusedIndex, userEmail, setComposeState],
+  );
+
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       switch (event.key) {
@@ -157,9 +175,20 @@ function ThreadViewLoaded({
           event.preventDefault();
           expandAll();
           break;
+        case 'r':
+          // Plain `r` is reply; Shift+`r` (event.key === 'R') is
+          // reply-all. We branch on the literal key value so the
+          // shifted key is detected reliably across layouts.
+          event.preventDefault();
+          replyToFocused('reply');
+          break;
+        case 'R':
+          event.preventDefault();
+          replyToFocused('reply-all');
+          break;
       }
     },
-    [moveFocus, expandAll],
+    [moveFocus, expandAll, replyToFocused],
   );
 
   return (
@@ -338,9 +367,49 @@ function MessageView(props: {
           {email.attachments.length > 0 ? (
             <Attachments email={email} />
           ) : null}
+          <ReplyActions email={email} />
         </div>
       ) : null}
     </article>
+  );
+}
+
+/**
+ * Reply / Reply All / Forward action row — appears under the body of
+ * each expanded message. Click → buildReplyPrefill → composeStateAtom
+ * flips to `'open'` with the prefilled fields. The keyboard model
+ * (`r`, `R`) wires the same actions globally on the focused message.
+ */
+function ReplyActions({ email }: { readonly email: EmailFull }) {
+  const tokens = useAtomValue(tokensAtom);
+  const setComposeState = useSetAtom(composeStateAtom);
+  const userEmail = tokens?.email ?? 'unknown@example.invalid';
+  const open = (mode: ReplyMode) => {
+    setComposeState({
+      kind: 'open',
+      prefill: buildReplyPrefill({ email, mode, userEmail }),
+    });
+  };
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: '0.5em',
+        marginTop: '0.75em',
+        paddingTop: '0.5em',
+        borderTop: '1px solid rgba(0,0,0,0.06)',
+      }}
+    >
+      <button type="button" onClick={() => open('reply')}>
+        Reply
+      </button>
+      <button type="button" onClick={() => open('reply-all')}>
+        Reply all
+      </button>
+      <button type="button" onClick={() => open('forward')}>
+        Forward
+      </button>
+    </div>
   );
 }
 

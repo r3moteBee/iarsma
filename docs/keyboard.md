@@ -17,7 +17,8 @@ The keyboard model is the primary navigation surface for power users and an acce
 | Key | Action | Notes |
 |-----|--------|-------|
 | <kbd>?</kbd> | Open the keyboard help overlay | Suppressed while focus is inside a text input or contenteditable. |
-| <kbd>Escape</kbd> | Close any open overlay | Currently only the help overlay. Future modal flows (compose, settings) will share this binding. |
+| <kbd>c</kbd> | Compose new message | Opens the empty compose modal. Suppressed while focus is inside a text input or contenteditable. |
+| <kbd>Escape</kbd> | Close any open overlay | Closes the keyboard help, the compose modal, or the send-confirmation modal — whichever is on top. |
 
 ## Mailbox sidebar (left column)
 
@@ -56,6 +57,8 @@ Defined in `shell/src/views/thread-view.tsx`. The thread view contains an ordere
 | <kbd>n</kbd> / <kbd>↓</kbd> | Focus the next message (auto-expands it) |
 | <kbd>p</kbd> / <kbd>↑</kbd> | Focus the previous message (auto-expands it) |
 | <kbd>e</kbd> | Expand all messages in the thread |
+| <kbd>r</kbd> | Reply to the focused message |
+| <kbd>R</kbd> | Reply-all to the focused message |
 
 ## Reserved (Phase 2)
 
@@ -63,9 +66,7 @@ Documented here so they don't get accidentally bound to something else. Implemen
 
 | Key | Reserved for | Scope |
 |-----|--------------|-------|
-| <kbd>c</kbd> | **Compose** a new message | Global |
-| <kbd>r</kbd> | **Reply** to the focused thread or message | Thread list, thread view |
-| <kbd>R</kbd> | **Reply-all** | Thread list, thread view |
+| <kbd>f</kbd> | **Forward** the focused message | Thread view |
 | <kbd>x</kbd> | Toggle selection (multi-select for bulk operations) | Thread list |
 | <kbd>!</kbd> | Report as spam / move to junk | Thread list, thread view |
 | <kbd>#</kbd> | Delete | Thread list, thread view |

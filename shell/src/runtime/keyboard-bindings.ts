@@ -39,6 +39,7 @@ export type Binding = {
 export const KEYBOARD_BINDINGS: ReadonlyArray<Binding> = [
   // Global ─────────────────────────────────────────────────────────
   { keys: '?', action: 'Show this keyboard help', scope: 'global' },
+  { keys: 'c', action: 'Compose new message', scope: 'global' },
   { keys: 'Esc', action: 'Close any open overlay', scope: 'global' },
   // Mailbox sidebar ────────────────────────────────────────────────
   { keys: '↑', action: 'Focus previous mailbox', scope: 'mailbox-sidebar' },
@@ -84,6 +85,12 @@ export const KEYBOARD_BINDINGS: ReadonlyArray<Binding> = [
   {
     keys: 'e',
     action: 'Expand all messages in thread',
+    scope: 'thread-view',
+  },
+  { keys: 'r', action: 'Reply to focused message', scope: 'thread-view' },
+  {
+    keys: 'R',
+    action: 'Reply-all to focused message',
     scope: 'thread-view',
   },
 ];

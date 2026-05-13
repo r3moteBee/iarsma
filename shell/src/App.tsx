@@ -184,12 +184,21 @@ function Shell({ config }: { readonly config: ShellConfig }) {
  */
 function useGlobalKeyboardShortcuts(): void {
   const setOpen = useSetAtom(keyboardHelpOpenAtom);
+  const setComposeState = useSetAtom(composeStateAtom);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === '?') {
         if (isEditableElement(event.target)) return;
         event.preventDefault();
         setOpen(true);
+        return;
+      }
+      if (event.key === 'c') {
+        // `c` opens a new empty composer. Suppressed when focus is in
+        // a text input / contenteditable so it doesn't hijack typing.
+        if (isEditableElement(event.target)) return;
+        event.preventDefault();
+        setComposeState({ kind: 'open', prefill: {} });
         return;
       }
       if (event.key === 'Escape') {
@@ -200,7 +209,7 @@ function useGlobalKeyboardShortcuts(): void {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setOpen]);
+  }, [setOpen, setComposeState]);
 }
 
 function isEditableElement(target: EventTarget | null): boolean {

@@ -398,6 +398,12 @@ export type EmailFull = {
   readonly bodyText?: string;
   readonly bodyHtml?: string;
   readonly attachments: ReadonlyArray<Attachment>;
+  /** RFC 5322 `Message-ID` value(s). Empty when absent. */
+  readonly messageId: ReadonlyArray<string>;
+  /** RFC 5322 `In-Reply-To` Message-ID(s). Empty when absent. */
+  readonly inReplyTo: ReadonlyArray<string>;
+  /** RFC 5322 `References` Message-IDs (full thread chain, oldest first). Empty when absent. */
+  readonly references: ReadonlyArray<string>;
 };
 
 export type Thread = {
@@ -433,6 +439,12 @@ const EMAIL_FULL_PROPERTIES = [
   'textBody',
   'htmlBody',
   'attachments',
+  // RFC 5322 thread-linking headers — required for reply (Phase 2
+  // item 5) so `In-Reply-To` + `References` can be stamped on the
+  // composed reply.
+  'messageId',
+  'inReplyTo',
+  'references',
 ];
 
 /**
@@ -543,6 +555,9 @@ export function parseThreadGet(body: string): ThreadGet {
         ...(a.cid !== undefined ? { cid: a.cid } : {}),
         ...(a.disposition !== undefined ? { disposition: a.disposition } : {}),
       })),
+      messageId: e.messageId.slice(),
+      inReplyTo: e.inReplyTo.slice(),
+      references: e.references.slice(),
     })),
   };
 }

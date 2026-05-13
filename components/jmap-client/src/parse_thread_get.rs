@@ -71,6 +71,13 @@ pub struct EmailFull {
     pub body_text: Option<String>,
     pub body_html: Option<String>,
     pub attachments: Vec<Attachment>,
+    /// RFC 5322 `Message-ID` value(s) — JMAP returns this as a list
+    /// (almost always a single id; the spec allows multiple).
+    pub message_id: Vec<String>,
+    /// RFC 5322 `In-Reply-To` header value(s).
+    pub in_reply_to: Vec<String>,
+    /// RFC 5322 `References` header value(s) — the full thread chain.
+    pub references: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +144,11 @@ struct RawFullEmail {
     #[serde(rename = "htmlBody")]
     html_body: Option<Vec<RawBodyPart>>,
     attachments: Option<Vec<RawBodyPart>>,
+    #[serde(rename = "messageId")]
+    message_id: Option<Vec<String>>,
+    #[serde(rename = "inReplyTo")]
+    in_reply_to: Option<Vec<String>>,
+    references: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -337,6 +349,12 @@ fn into_full_email(raw: RawFullEmail) -> Result<EmailFull, ThreadGetParseError> 
         body_text,
         body_html,
         attachments,
+        // JMAP omits the headers entirely when absent (rare but
+        // legal for legacy or relay-stripped messages); default to
+        // an empty Vec rather than failing the parse.
+        message_id: raw.message_id.unwrap_or_default(),
+        in_reply_to: raw.in_reply_to.unwrap_or_default(),
+        references: raw.references.unwrap_or_default(),
     })
 }
 

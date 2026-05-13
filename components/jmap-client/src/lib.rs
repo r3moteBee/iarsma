@@ -249,6 +249,9 @@ mod component {
             body_text: e.body_text,
             body_html: e.body_html,
             attachments: e.attachments.into_iter().map(into_wit_attachment).collect(),
+            message_id: e.message_id,
+            in_reply_to: e.in_reply_to,
+            references: e.references,
         }
     }
 
