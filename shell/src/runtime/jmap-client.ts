@@ -365,6 +365,119 @@ export function parseThreadList(body: string): ThreadList {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Email/query + Email/get (thread.search — Phase 2 item 9)
+// ──────────────────────────────────────────────────────────────────────
+//
+// Mirror of `fetchThreadList` but with a `text` filter instead of
+// `inMailbox`. The response shape is identical (Email/query +
+// chained Email/get), so we reuse `parseThreadList` to extract it.
+
+export type FetchThreadSearchOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly query: string;
+  readonly inMailboxId?: string;
+  readonly position?: number;
+  readonly limit?: number;
+};
+
+/**
+ * Build the JMAP Email/query + Email/get chain for a text search.
+ * `inMailboxId` is folded into the filter via an `AND` combinator
+ * when supplied; omitted otherwise (search-everything semantics).
+ */
+export function buildEmailSearchRequest(opts: {
+  readonly accountId: string;
+  readonly query: string;
+  readonly inMailboxId?: string;
+  readonly position?: number;
+  readonly limit?: number;
+}): string {
+  const position = opts.position ?? 0;
+  const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+  const filter: Record<string, unknown> =
+    opts.inMailboxId !== undefined
+      ? {
+          operator: 'AND',
+          conditions: [
+            { text: opts.query },
+            { inMailbox: opts.inMailboxId },
+          ],
+        }
+      : { text: opts.query };
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: opts.accountId,
+          filter,
+          sort: [{ property: 'receivedAt', isAscending: false }],
+          collapseThreads: true,
+          position,
+          limit,
+          calculateTotal: true,
+        },
+        '0',
+      ],
+      [
+        'Email/get',
+        {
+          accountId: opts.accountId,
+          '#ids': { resultOf: '0', name: 'Email/query', path: '/ids' },
+          properties: EMAIL_LIST_PROPERTIES,
+        },
+        '1',
+      ],
+    ],
+  });
+}
+
+export async function fetchThreadSearch(
+  opts: FetchThreadSearchOptions,
+): Promise<ThreadList> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  if (opts.query.trim() === '') {
+    throw makeError('invalid_argument', 'thread.search requires a non-empty query.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildEmailSearchRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    query: opts.query,
+    ...(opts.inMailboxId !== undefined
+      ? { inMailboxId: opts.inMailboxId }
+      : {}),
+    ...(opts.position !== undefined ? { position: opts.position } : {}),
+    ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Email/query (text) returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseThreadList(text);
+}
+
 function normalizeAddress(a: { name?: string; email: string }): EmailAddress {
   return a.name !== undefined ? { name: a.name, email: a.email } : { email: a.email };
 }

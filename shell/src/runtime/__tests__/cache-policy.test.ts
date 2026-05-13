@@ -16,6 +16,8 @@ describe('cache-policy', () => {
       'thread.get': 'threadBodies',
       // Phase 2 item 6 — identities cached for compose-modal openness.
       'identity.list': 'identities',
+      // Phase 2 item 9 — search results cached SWR per (query, mailbox).
+      'thread.search': 'searchResults',
     });
   });
 
