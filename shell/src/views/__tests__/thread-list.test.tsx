@@ -110,17 +110,32 @@ function WithSelectedMailbox({ mailboxId, children }: { mailboxId: string; child
   return <>{children}</>;
 }
 
+type MailboxFixture = { id: string; role?: string };
+
 function renderThreadList(opts: {
   data?: ThreadListData;
   mailboxId?: string | null;
   invokerError?: Error;
+  mailboxes?: ReadonlyArray<MailboxFixture>;
+  threadGet?: (input: { threadId: string }) => unknown;
 } = {}) {
   const data = opts.data ?? FIXTURES;
   const mailboxId = opts.mailboxId === undefined ? 'Mb01' : opts.mailboxId;
+  // Default mailbox list: a single "Mb01" with no role. Tests that
+  // exercise the drafts path supply their own list with a
+  // `role: 'drafts'` entry.
+  const mailboxes = (opts.mailboxes ?? [{ id: 'Mb01' }]) as ReadonlyArray<unknown>;
   const invoker = mockInvoker({
     'thread.list': async () => {
       if (opts.invokerError !== undefined) throw opts.invokerError;
       return data;
+    },
+    'mailbox.list': async () => mailboxes,
+    'thread.get': async (input) => {
+      if (opts.threadGet !== undefined) {
+        return opts.threadGet(input as { threadId: string });
+      }
+      return { thread: { id: '', emailIds: [] }, emails: [] };
     },
   });
   return render(
@@ -139,8 +154,16 @@ function renderThreadList(opts: {
 }
 
 async function waitForList(): Promise<void> {
+  // Wait for both the listbox to render AND the auto-focus useEffect
+  // to commit (focusedIndex 0 → first row has tabindex=0). Without the
+  // tabindex check the j/k tests race the effect on slower CI runs:
+  // listbox renders with no focused row, keydown fires with the null
+  // focusedIndex, and our `focusedIndex ?? -1` path moves to 0 (T1)
+  // instead of the expected "j from T1 → T2".
   await waitFor(() => {
-    expect(screen.getByRole('listbox', { name: 'Threads' })).toBeInTheDocument();
+    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    expect(listbox).toBeInTheDocument();
+    expect(listbox.querySelector('[tabindex="0"]')).not.toBeNull();
   });
 }
 
@@ -317,5 +340,133 @@ describe('ThreadList — a11y', () => {
     await waitForList();
     const violations = await runAxe(container);
     expect(violations.map((v) => v.id)).toEqual([]);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Drafts panel — Phase 2 item 8
+// ──────────────────────────────────────────────────────────────────────
+
+import { useAtomValue } from 'jotai';
+import { composeStateAtom } from '../../compose-state.js';
+import { selectedThreadIdAtom } from '../../mail-state.js';
+
+describe('ThreadList — drafts click path', () => {
+  /** Probe component that surfaces composeStateAtom + selectedThreadIdAtom
+   *  for the assertions to consume. */
+  function StateProbe() {
+    const compose = useAtomValue(composeStateAtom);
+    const selectedThread = useAtomValue(selectedThreadIdAtom);
+    return (
+      <div
+        data-testid="state-probe"
+        data-compose-kind={compose.kind}
+        data-compose-subject={
+          compose.kind === 'open' ? compose.prefill.subject ?? '' : ''
+        }
+        data-compose-body-html={
+          compose.kind === 'open' ? compose.prefill.bodyHtml ?? '' : ''
+        }
+        data-selected-thread={selectedThread ?? ''}
+      />
+    );
+  }
+
+  it('opens the composer prefilled with the draft body when clicking a draft', async () => {
+    const renderWithProbe = (opts: Parameters<typeof renderThreadList>[0]) => {
+      const data = opts?.data ?? FIXTURES;
+      const mailboxId =
+        opts?.mailboxId === undefined ? 'Mb-drafts' : opts.mailboxId;
+      const mailboxes = (opts?.mailboxes ?? [
+        { id: 'Mb-drafts', role: 'drafts' },
+      ]) as ReadonlyArray<unknown>;
+      const invoker = mockInvoker({
+        'thread.list': async () => data,
+        'mailbox.list': async () => mailboxes,
+        'thread.get': async (input) =>
+          opts?.threadGet !== undefined
+            ? opts.threadGet(input as { threadId: string })
+            : { thread: { id: '', emailIds: [] }, emails: [] },
+      });
+      return render(
+        <JotaiProvider>
+          <IarsmaProvider value={invoker}>
+            {mailboxId !== null ? (
+              <WithSelectedMailbox mailboxId={mailboxId}>
+                <ThreadList />
+                <StateProbe />
+              </WithSelectedMailbox>
+            ) : (
+              <>
+                <ThreadList />
+                <StateProbe />
+              </>
+            )}
+          </IarsmaProvider>
+        </JotaiProvider>,
+      );
+    };
+
+    renderWithProbe({
+      mailboxId: 'Mb-drafts',
+      mailboxes: [{ id: 'Mb-drafts', role: 'drafts' }],
+      threadGet: () => ({
+        thread: { id: 'T1', emailIds: ['E-draft'] },
+        emails: [
+          {
+            id: 'E-draft',
+            threadId: 'T1',
+            from: [{ email: 'brent@example.net' }],
+            to: [{ email: 'alice@example.net' }],
+            subject: 'project plan (draft)',
+            preview: '',
+            receivedAt: '2026-05-12T00:00:00Z',
+            keywords: [{ name: '$draft', value: true }],
+            size: 256,
+            bodyHtml: '<p>Here is the plan.</p>',
+            attachments: [],
+            messageId: [],
+            inReplyTo: [],
+            references: [],
+          },
+        ],
+      }),
+    });
+
+    await waitForList();
+    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const t1 = listbox.querySelector('[data-thread-id="T1"]')!;
+    fireEvent.click(t1);
+
+    await waitFor(() => {
+      const probe = screen.getByTestId('state-probe');
+      expect(probe).toHaveAttribute('data-compose-kind', 'open');
+      expect(probe).toHaveAttribute(
+        'data-compose-subject',
+        'project plan (draft)',
+      );
+      expect(probe).toHaveAttribute(
+        'data-compose-body-html',
+        '<p>Here is the plan.</p>',
+      );
+      // Drafts path doesn't touch selectedThreadIdAtom — the composer
+      // is the user's surface for this thread.
+      expect(probe).toHaveAttribute('data-selected-thread', '');
+    });
+  });
+
+  it('keeps the normal thread-selection behavior in non-drafts mailboxes', async () => {
+    renderThreadList({
+      mailboxId: 'Mb01',
+      mailboxes: [{ id: 'Mb01' /* no role */ }],
+    });
+    await waitForList();
+    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    fireEvent.click(listbox.querySelector('[data-thread-id="T1"]')!);
+    await waitFor(() => {
+      expect(
+        listbox.querySelector('[data-thread-id="T1"]'),
+      ).toHaveAttribute('aria-selected', 'true');
+    });
   });
 });

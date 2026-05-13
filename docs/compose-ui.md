@@ -121,6 +121,20 @@ The plan's note that "`<img src="blob:...">` rewrites to `cid:<blobId>` on send"
 
 Until then, dropping an image into the composer body gets stripped by the sanitizer. The Attachments section is the working surface for sending images today.
 
+## Reopening a draft (item 8)
+
+When the user is in the **Drafts mailbox** and clicks a thread, the click opens the composer prefilled with the draft body — instead of routing to the read-only ThreadView. The detection lives in `ThreadList`: it reads `useMailboxList` and branches on `role === 'drafts'` for the currently-selected mailbox.
+
+### Known limitation: edit creates a new draft
+
+Today the save-on-blur path always calls `mail.draft.commit()` which JMAP-creates a *new* Email/set entry. Editing an existing draft therefore leaves the **original draft in place** and produces a *second* draft row with the user's edits. The composer's `lastDraftIdRef` tracks the most recent save id but doesn't issue a `destroy` against the previous one.
+
+Two future capabilities close this gap:
+- `mail.draft.update` — JMAP `Email/set { update }` operation. Replaces the draft body in-place; preserves the same `emailId`.
+- `mail.draft.delete` — JMAP `Email/set { destroy }`. Drops the original when the new save lands.
+
+Until those land, expect drafts to accumulate after each edit. The user can clean up via Stalwart admin or manual JMAP calls.
+
 ## Out of scope (item 4)
 
 - ~~Identity selector~~ → item 6.
