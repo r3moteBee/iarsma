@@ -103,11 +103,30 @@ Both resolve via `useMailboxList()` filtered by `role: 'drafts' | 'sent'`. The h
 - Focus trap: the focus moves into the dialog on open, leaves to the previously-focused element on close. The first focusable element gets focus by default.
 - The composer textbox is `role="textbox"` `aria-multiline="true"` (Squire's own ARIA, surfaced via item 1's `Composer` component).
 
+## Attachments (item 7)
+
+The Attachments section sits between the body and the footer. The user picks one or more files via a standard `<input type="file" multiple>`; each file uploads to JMAP's blob endpoint (`POST /jmap/upload/{accountId}/`) immediately on selection. Successful uploads add a row to the list with name / type / size and a Remove button. The Send button disables while any upload is in flight; the label flips to "Uploading…".
+
+On Send, every uploaded attachment is referenced from `mail.send.attachments` as `{ blobId, name, type, size, disposition: 'attachment' }`. JMAP fills the `attachments` array on the `Email/set` create with the same shape (per RFC 8621 §4.1.4).
+
+### Reserved: image-resize slot
+
+The picker UI reserves a slot for an image-resize component (Phase 5 fills it in). Today's flow is "drop file → upload at full size" — fine for small files, punishing for 12+ MB phone photos. The slot will land an inline downscale-to-N-px / quality-Q affordance before the upload fires.
+
+### Reserved: inline image rewriting
+
+The plan's note that "`<img src="blob:...">` rewrites to `cid:<blobId>` on send" lands in a future polish PR. The plumbing is wired (attachments accept `disposition: 'inline'` + a `cid` field), but the body-scanning + upload-and-rewrite flow needs:
+- The composer's sanitizer policy to accept `<img>` from local paste/drop (currently strips them).
+- An on-Send body-scan pass to find `<img src="blob:...">`, fetch the blob, upload, and replace the src.
+
+Until then, dropping an image into the composer body gets stripped by the sanitizer. The Attachments section is the working surface for sending images today.
+
 ## Out of scope (item 4)
 
-- Identity selector → item 6.
-- Attachments → item 7.
+- ~~Identity selector~~ → item 6.
+- ~~Attachments~~ → item 7.
 - Drafts panel (list + reopen) → item 8.
 - `mail.draft.update` / `mail.draft.delete` → future capabilities.
-- Reply / reply-all / forward variants → item 5.
-- `c` keyboard binding → wired with item 4 (reserved key promoted to active in `docs/keyboard.md`).
+- ~~Reply / reply-all / forward variants~~ → item 5.
+- ~~`c` keyboard binding~~ → wired with item 5.
+- Inline image cid: rewriting — Phase 2 polish PR (see "Reserved" above).

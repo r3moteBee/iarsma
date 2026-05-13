@@ -160,37 +160,69 @@ function makeInvoker(
       email: string;
       mayDelete: boolean;
     }>;
+    upload?: (
+      blob: Blob,
+      options: { readonly name?: string; readonly type?: string },
+    ) => {
+      accountId: string;
+      blobId: string;
+      type: string;
+      size: number;
+    };
   } = {},
 ): {
   invoker: Invoker;
   calls: Array<{ name: string; dryRun: boolean; input?: unknown }>;
+  uploads: Array<{ name: string; type: string; size: number }>;
 } {
   const calls: Array<{ name: string; dryRun: boolean; input?: unknown }> = [];
+  const uploads: Array<{ name: string; type: string; size: number }> = [];
   const identities = overrides.identities ?? [
     { id: 'I-1', name: 'Brent', email: 'brent@example.net', mayDelete: false },
   ];
-  const invoker = mockInvoker({
-    'mailbox.list': async () => MAILBOXES,
-    'identity.list': async () => ({ identities }),
-    'mail.draft': async (input, dryRun) => {
-      calls.push({ name: 'mail.draft', dryRun, input });
-      return overrides.draft !== undefined ? overrides.draft(input) : DRAFT_OK;
+  let nextBlobId = 1;
+  const invoker = mockInvoker(
+    {
+      'mailbox.list': async () => MAILBOXES,
+      'identity.list': async () => ({ identities }),
+      'mail.draft': async (input, dryRun) => {
+        calls.push({ name: 'mail.draft', dryRun, input });
+        return overrides.draft !== undefined ? overrides.draft(input) : DRAFT_OK;
+      },
+      'mail.send': async (input, dryRun) => {
+        calls.push({ name: 'mail.send', dryRun, input });
+        if (dryRun) {
+          return overrides.sendPreview !== undefined
+            ? overrides.sendPreview()
+            : SEND_PREVIEW;
+        }
+        return overrides.sendCommit !== undefined ? overrides.sendCommit() : SEND_OK;
+      },
     },
-    'mail.send': async (input, dryRun) => {
-      calls.push({ name: 'mail.send', dryRun, input });
-      if (dryRun) {
-        return overrides.sendPreview !== undefined
-          ? overrides.sendPreview()
-          : SEND_PREVIEW;
-      }
-      return overrides.sendCommit !== undefined ? overrides.sendCommit() : SEND_OK;
+    {
+      uploadAttachment: async (blob, opts) => {
+        uploads.push({
+          name: opts.name ?? '(unnamed)',
+          type: opts.type ?? blob.type,
+          size: blob.size,
+        });
+        if (overrides.upload !== undefined) {
+          return overrides.upload(blob, opts);
+        }
+        return {
+          accountId: 'c',
+          blobId: `B-${nextBlobId++}`,
+          type: opts.type ?? blob.type ?? 'application/octet-stream',
+          size: blob.size,
+        };
+      },
     },
-  });
-  return { invoker, calls };
+  );
+  return { invoker, calls, uploads };
 }
 
 function renderComposer(overrides: Parameters<typeof makeInvoker>[0] = {}) {
-  const { invoker, calls } = makeInvoker(overrides);
+  const { invoker, calls, uploads } = makeInvoker(overrides);
   const r = render(
     <JotaiProvider>
       <IarsmaProvider value={invoker}>
@@ -200,7 +232,7 @@ function renderComposer(overrides: Parameters<typeof makeInvoker>[0] = {}) {
       </IarsmaProvider>
     </JotaiProvider>,
   );
-  return { ...r, calls };
+  return { ...r, calls, uploads };
 }
 
 describe('ComposeView — closed by default', () => {
@@ -479,6 +511,77 @@ describe('ComposeView — identity selector', () => {
       ).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: 'Send…' })).toBeDisabled();
+  });
+});
+
+describe('ComposeView — attachments', () => {
+  it('uploads a picked file and shows it in the list with name + size', async () => {
+    const { uploads } = renderComposer();
+    const input = screen.getByLabelText(/attach files/i) as HTMLInputElement;
+    const file = new File(['hello world'], 'note.txt', { type: 'text/plain' });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => {
+      expect(screen.getByText('note.txt')).toBeInTheDocument();
+    });
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]?.name).toBe('note.txt');
+    expect(screen.getByText('11 B')).toBeInTheDocument();
+    // Attachment count badge in the section heading.
+    expect(screen.getByText('Attachments (1)')).toBeInTheDocument();
+  });
+
+  it('removes an attachment via the per-row Remove button', async () => {
+    renderComposer();
+    const input = screen.getByLabelText(/attach files/i) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: {
+        files: [new File(['x'], 'a.txt', { type: 'text/plain' })],
+      },
+    });
+    await waitFor(() => screen.getByText('a.txt'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a.txt' }));
+    await waitFor(() => {
+      expect(screen.queryByText('a.txt')).toBeNull();
+    });
+    expect(screen.getByText('Attachments (0)')).toBeInTheDocument();
+  });
+
+  it('threads attached blobs through to mail.send commit', async () => {
+    const { calls } = renderComposer();
+    fireEvent.change(screen.getByLabelText('To'), {
+      target: { value: 'alice@example.net' },
+    });
+    const input = screen.getByLabelText(/attach files/i) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: {
+        files: [new File(['pdf-bytes'], 'doc.pdf', { type: 'application/pdf' })],
+      },
+    });
+    await waitFor(() => screen.getByText('doc.pdf'));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Send…' })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    await waitFor(() =>
+      screen.getByRole('dialog', { name: /send this message/i }),
+    );
+    const previewDialog = screen.getByRole('dialog', {
+      name: /send this message/i,
+    });
+    fireEvent.click(
+      within(previewDialog).getAllByRole('button', { name: 'Send' })[0]!,
+    );
+    await waitFor(() => {
+      const commit = calls.find(
+        (c) => c.name === 'mail.send' && !c.dryRun,
+      );
+      expect(commit).toBeDefined();
+      const attachments = (commit!.input as {
+        attachments?: Array<{ blobId: string; name: string }>;
+      }).attachments;
+      expect(attachments).toBeDefined();
+      expect(attachments![0]).toMatchObject({ name: 'doc.pdf' });
+    });
   });
 });
 

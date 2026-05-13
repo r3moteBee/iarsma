@@ -37,7 +37,8 @@ import {
   type MailSendPreview,
 } from '../generated/capabilities/mail-send.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
-import type { Identity } from '../runtime/jmap-client.js';
+import { useInvoker } from '../runtime/invoker.js';
+import type { AttachmentRef, Identity } from '../runtime/jmap-client.js';
 import {
   formatRecipients,
   parseRecipients,
@@ -47,6 +48,13 @@ import { Composer } from './composer.js';
 
 /** Debounce window before save-on-blur fires mail.draft.commit. */
 const SAVE_DEBOUNCE_MS = 500;
+
+type UploadedAttachment = {
+  readonly blobId: string;
+  readonly name: string;
+  readonly type: string;
+  readonly size: number;
+};
 
 export function ComposeView() {
   const [state, setState] = useAtom(composeStateAtom);
@@ -65,10 +73,66 @@ function ComposeModal(props: {
 }) {
   const { prefill, onClose } = props;
   const tokens = useAtomValue(tokensAtom);
+  const invoker = useInvoker();
   const mailboxes = useMailboxList({});
   const identityList = useIdentityList({});
   const draftHook = useMailDraft();
   const sendHook = useMailSend();
+
+  // Attachments. Each `UploadedAttachment` is a successful upload; the
+  // user can remove them with the per-row button (no server-side
+  // cleanup — Stalwart sweeps orphan blobs on its own schedule).
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  // Per-file upload state surfaced inline below the picker.
+  const [uploadsInFlight, setUploadsInFlight] = useState<number>(0);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+
+  const onFilesChange = useCallback(
+    async (files: FileList | null) => {
+      if (files === null || files.length === 0) return;
+      if (invoker.uploadAttachment === undefined) {
+        setAttachmentError(
+          'This deployment does not support attachment uploads.',
+        );
+        return;
+      }
+      setAttachmentError(null);
+      // Snapshot the list now — `files` is consumed by the input
+      // reset below.
+      const list: File[] = Array.from(files);
+      setUploadsInFlight((n) => n + list.length);
+      const results: UploadedAttachment[] = [];
+      const errors: string[] = [];
+      for (const file of list) {
+        try {
+          const r = await invoker.uploadAttachment!(file, {
+            name: file.name,
+            type: file.type,
+          });
+          results.push({
+            blobId: r.blobId,
+            name: file.name,
+            type: r.type || file.type || 'application/octet-stream',
+            size: r.size,
+          });
+        } catch (e) {
+          errors.push(
+            `${file.name}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      setAttachments((prev) => [...prev, ...results]);
+      setUploadsInFlight((n) => n - list.length);
+      if (errors.length > 0) {
+        setAttachmentError(`Upload failed: ${errors.join('; ')}`);
+      }
+    },
+    [invoker],
+  );
+
+  const removeAttachment = useCallback((blobId: string) => {
+    setAttachments((prev) => prev.filter((a) => a.blobId !== blobId));
+  }, []);
 
   const draftsMailboxId = useMemo(
     () => findMailboxIdByRole(mailboxes.data, 'drafts'),
@@ -218,6 +282,9 @@ function ComposeModal(props: {
         ...(prefill.references !== undefined
           ? { references: prefill.references }
           : {}),
+        ...(attachments.length > 0
+          ? { attachments: attachments.map(toAttachmentRef) }
+          : {}),
       });
       lastDraftIdRef.current = result.emailId;
     } catch (e) {
@@ -236,6 +303,7 @@ function ComposeModal(props: {
     bodyHtml,
     prefill.inReplyTo,
     prefill.references,
+    attachments,
   ]);
 
   // Keep the latest doSaveDraft pinned in the ref the debounce reads.
@@ -284,6 +352,7 @@ function ComposeModal(props: {
           subject,
           bodyHtml,
           prefill,
+          attachments,
         });
         // Codegen-generated `useMailSend` is typed
         // `preview: (input) => Promise<DryRunPreview<MailSendOutput>>`
@@ -313,6 +382,7 @@ function ComposeModal(props: {
       subject,
       bodyHtml,
       prefill,
+      attachments,
       sendHook,
     ],
   );
@@ -333,6 +403,7 @@ function ComposeModal(props: {
         subject,
         bodyHtml,
         prefill,
+        attachments,
       });
       await sendHook.commit(input);
       setSendPreview(null);
@@ -352,6 +423,7 @@ function ComposeModal(props: {
     subject,
     bodyHtml,
     prefill,
+    attachments,
     sendHook,
     onClose,
   ]);
@@ -522,6 +594,13 @@ function ComposeModal(props: {
                 onChange={setBodyHtml}
               />
             </div>
+            <AttachmentsPanel
+              attachments={attachments}
+              uploadsInFlight={uploadsInFlight}
+              error={attachmentError}
+              onFilesChange={onFilesChange}
+              onRemove={removeAttachment}
+            />
             {draftError !== null ? (
               <p role="alert" style={errorStyle}>
                 Draft save failed: {draftError}
@@ -549,10 +628,11 @@ function ComposeModal(props: {
                   !hasAtLeastOneRecipient ||
                   hasRecipientErrors ||
                   sentMailboxId === null ||
-                  selectedIdentity === null
+                  selectedIdentity === null ||
+                  uploadsInFlight > 0
                 }
               >
-                Send…
+                {uploadsInFlight > 0 ? 'Uploading…' : 'Send…'}
               </button>
             </footer>
           </form>
@@ -689,6 +769,16 @@ function SendPreviewModal(props: {
               ? '(empty body)'
               : preview.bodyPreview}
           </dd>
+          {preview.attachmentCount > 0 ? (
+            <>
+              <dt style={{ fontWeight: 600 }}>Attachments</dt>
+              <dd style={{ margin: '0 0 0.5em' }}>
+                {preview.attachmentCount} file
+                {preview.attachmentCount === 1 ? '' : 's'} (
+                {preview.attachmentBlobIds.length} blob refs)
+              </dd>
+            </>
+          ) : null}
           <dt style={{ fontWeight: 600 }}>Estimated send time</dt>
           <dd style={{ margin: '0 0 0.5em' }}>{preview.estimatedSendTime}</dd>
           <dt style={{ fontWeight: 600 }}>Estimated size</dt>
@@ -712,6 +802,124 @@ function SendPreviewModal(props: {
       </div>
     </div>
   );
+}
+
+function AttachmentsPanel(props: {
+  readonly attachments: ReadonlyArray<UploadedAttachment>;
+  readonly uploadsInFlight: number;
+  readonly error: string | null;
+  readonly onFilesChange: (files: FileList | null) => void;
+  readonly onRemove: (blobId: string) => void;
+}) {
+  const { attachments, uploadsInFlight, error, onFilesChange, onRemove } =
+    props;
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <section
+      aria-label="Attachments"
+      style={{
+        marginTop: '0.75em',
+        paddingTop: '0.5em',
+        borderTop: '1px solid rgba(0,0,0,0.06)',
+      }}
+    >
+      <div style={{ display: 'flex', gap: '0.5em', alignItems: 'baseline' }}>
+        <h3
+          style={{
+            margin: 0,
+            fontSize: '0.95em',
+            fontWeight: 600,
+            flex: '0 0 auto',
+          }}
+        >
+          Attachments ({attachments.length})
+        </h3>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          aria-label="Attach files"
+          onChange={(e) => {
+            onFilesChange(e.target.files);
+            // Reset the input so re-picking the same file fires onChange.
+            if (inputRef.current !== null) inputRef.current.value = '';
+          }}
+          style={{ font: 'inherit' }}
+        />
+        {uploadsInFlight > 0 ? (
+          <output style={{ opacity: 0.75, fontSize: '0.9em' }}>
+            Uploading {uploadsInFlight} file{uploadsInFlight === 1 ? '' : 's'}…
+          </output>
+        ) : null}
+        {/* Reserved slot for the image-resize component (Phase 5).
+            Today's flow is "drop file → upload at full size" — that's
+            fine for 2-3 MB phone photos but punishing for 12+ MB
+            screenshots. The slot will land an inline resize affordance
+            (downscale to N px or X% quality) before the upload fires. */}
+      </div>
+      {error !== null ? (
+        <p role="alert" style={errorStyle}>
+          {error}
+        </p>
+      ) : null}
+      {attachments.length > 0 ? (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '0.5em 0 0' }}>
+          {attachments.map((a) => (
+            <li
+              key={a.blobId}
+              style={{
+                display: 'flex',
+                gap: '0.5em',
+                padding: '0.25em 0',
+                borderTop: '1px solid rgba(0,0,0,0.06)',
+                alignItems: 'baseline',
+              }}
+            >
+              <span style={{ flex: '1 1 auto' }}>{a.name}</span>
+              <span style={{ flex: '0 0 auto', opacity: 0.7 }}>{a.type}</span>
+              <span
+                style={{
+                  flex: '0 0 auto',
+                  opacity: 0.7,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {formatBytes(a.size)}
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemove(a.blobId)}
+                aria-label={`Remove ${a.name}`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function toAttachmentRef(a: UploadedAttachment): AttachmentRef {
+  // Default `disposition: attachment`. Inline-image rewriting is
+  // reserved for a future polish PR (cid: rewriting on `<img
+  // src="blob:...">` paste); when it lands, those entries carry
+  // `disposition: 'inline'` and a `cid` matching the body html.
+  return {
+    blobId: a.blobId,
+    name: a.name,
+    type: a.type,
+    size: a.size,
+    disposition: 'attachment',
+  };
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 function formatIdentityLabel(identity: Identity): string {
@@ -749,6 +957,7 @@ function buildSendInput(args: {
   subject: string;
   bodyHtml: string;
   prefill: ComposePrefill;
+  attachments: ReadonlyArray<UploadedAttachment>;
 }) {
   return {
     sentMailboxId: args.sentMailboxId,
@@ -771,6 +980,9 @@ function buildSendInput(args: {
       : {}),
     ...(args.prefill.references !== undefined
       ? { references: args.prefill.references }
+      : {}),
+    ...(args.attachments.length > 0
+      ? { attachments: args.attachments.map(toAttachmentRef) }
       : {}),
   };
 }

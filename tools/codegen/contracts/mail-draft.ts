@@ -29,6 +29,25 @@ const EmailAddress = z.object({
   email: z.string(),
 });
 
+const AttachmentRef = z.object({
+  blobId: z.string().describe('JMAP blob id from `attachment.upload`.'),
+  name: z.string().describe('Filename shown to the recipient.'),
+  type: z.string().describe('MIME type, e.g. `application/pdf`.'),
+  size: z.number().int().describe('Bytes — echoed back from the upload response.'),
+  disposition: z
+    .string()
+    .optional()
+    .describe(
+      "`attachment` (default) or `inline` for cid-referenced images. Phase 2 item 7 supports `attachment` only; inline rewriting is reserved.",
+    ),
+  cid: z
+    .string()
+    .optional()
+    .describe(
+      'Content-ID for inline references. Required when `disposition: inline`; the body html should contain `<img src="cid:...">` matching.',
+    ),
+});
+
 const ProposedEmail = z.object({
   mailboxId: z
     .string()
@@ -57,6 +76,13 @@ const ProposedEmail = z.object({
     .describe('Length of the proposed bodyHtml in characters; 0 if absent.'),
   inReplyTo: z.string().optional(),
   references: z.string().optional(),
+  attachmentCount: z
+    .number()
+    .int()
+    .describe('Number of attachments that would be filed with the draft.'),
+  attachmentBlobIds: z
+    .array(z.string())
+    .describe('Blob ids that would be referenced from the draft.'),
 });
 
 export const mailDraft = capability({
@@ -103,6 +129,12 @@ export const mailDraft = capability({
       .optional()
       .describe(
         'Space-separated `References` header value for thread linkage (RFC 5322 §3.6.4).',
+      ),
+    attachments: z
+      .array(AttachmentRef)
+      .optional()
+      .describe(
+        'Attachments by blob id. Each entry MUST come from a prior `attachment.upload` call against the same JMAP account.',
       ),
   }),
   output: z.object({

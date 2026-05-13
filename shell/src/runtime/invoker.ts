@@ -23,6 +23,7 @@ import { createContext, useContext } from 'react';
 import {
   buildMailDraftRequest,
   buildMailSendRequest,
+  fetchAttachmentUpload,
   fetchIdentityList,
   fetchMailDraftCommit,
   fetchMailSendCommit,
@@ -30,6 +31,7 @@ import {
   fetchSession,
   fetchThreadGet,
   fetchThreadList,
+  type AttachmentUpload,
   type IdentityList,
   type JmapClientOptions,
   type Mailbox,
@@ -58,6 +60,21 @@ export interface Invoker {
     input: I,
     options?: InvocationOptions,
   ): Promise<O | DryRunPreview<O>>;
+  /**
+   * Upload a binary blob (attachment, inline image) to the JMAP
+   * server's blob endpoint. Separate from `invoke` because the JSON
+   * channel can't carry binary bytes — RFC 8620 §6.1 defines a
+   * dedicated upload URL on each session resource.
+   *
+   * Optional on the Invoker interface so test mocks can skip it
+   * unless the test under exercise actually uploads. The JMAP
+   * invoker always implements it; the MCP invoker will proxy through
+   * to the server's upload endpoint when that lands.
+   */
+  uploadAttachment?(
+    blob: Blob,
+    options?: { readonly name?: string; readonly type?: string },
+  ): Promise<AttachmentUpload>;
 }
 
 const InvokerContext = createContext<Invoker | null>(null);
@@ -243,6 +260,15 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           );
       }
     },
+    async uploadAttachment(blob, uploadOpts = {}) {
+      const session = await getSession();
+      return fetchAttachmentUpload({
+        ...opts,
+        session,
+        blob,
+        ...(uploadOpts.type !== undefined ? { type: uploadOpts.type } : {}),
+      });
+    },
   };
 }
 
@@ -252,17 +278,38 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
 
 export type MockInvokerHandler = (input: unknown, dryRun: boolean) => unknown | Promise<unknown>;
 
-export function mockInvoker(handlers: Record<string, MockInvokerHandler>): Invoker {
+export type MockInvokerUploadHandler = (
+  blob: Blob,
+  options: { readonly name?: string; readonly type?: string },
+) => AttachmentUpload | Promise<AttachmentUpload>;
+
+export type MockInvokerOptions = {
+  /** Optional `uploadAttachment` handler. Tests that don't exercise
+   *  uploads can omit it; calls fall through to a not_implemented
+   *  error so test forgetfulness fails loud. */
+  readonly uploadAttachment?: MockInvokerUploadHandler;
+};
+
+export function mockInvoker(
+  handlers: Record<string, MockInvokerHandler>,
+  options: MockInvokerOptions = {},
+): Invoker {
   return {
-    async invoke(name, input, options = {}) {
+    async invoke(name, input, invokeOpts = {}) {
       const handler = handlers[name];
       if (handler === undefined) {
         throw makeToolError('tool_not_found', `mockInvoker has no handler for '${name}'.`);
       }
-      const result = await handler(input, options.dryRun ?? false);
+      const result = await handler(input, invokeOpts.dryRun ?? false);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return result as any;
     },
+    ...(options.uploadAttachment !== undefined
+      ? {
+          uploadAttachment: async (blob, uploadOpts = {}) =>
+            options.uploadAttachment!(blob, uploadOpts),
+        }
+      : {}),
   };
 }
 
@@ -302,11 +349,14 @@ function makeMailDraftPreview(params: MailDraftInput): {
     bodyHtmlSize: number;
     inReplyTo?: string;
     references?: string;
+    attachmentCount: number;
+    attachmentBlobIds: string[];
   };
   estimatedSize: number;
 } {
   const bodyTextSize = params.bodyText?.length ?? 0;
   const bodyHtmlSize = params.bodyHtml?.length ?? 0;
+  const attachments = params.attachments ?? [];
   const envelope = buildMailDraftRequest({
     accountId: 'preview-account',
     params,
@@ -326,6 +376,8 @@ function makeMailDraftPreview(params: MailDraftInput): {
       bodyHtmlSize,
       ...(params.inReplyTo !== undefined ? { inReplyTo: params.inReplyTo } : {}),
       ...(params.references !== undefined ? { references: params.references } : {}),
+      attachmentCount: attachments.length,
+      attachmentBlobIds: attachments.map((a) => a.blobId),
     },
     estimatedSize: envelope.length,
   };
@@ -379,10 +431,8 @@ function makeMailSendPreview(params: MailSendInput): {
     bodyPreview: preview,
     hasBodyText: params.bodyText !== undefined,
     hasBodyHtml: params.bodyHtml !== undefined,
-    // Phase 2 item 7 lands attachments; for now the preview reflects
-    // the empty wire shape.
-    attachmentCount: 0,
-    attachmentBlobIds: [],
+    attachmentCount: params.attachments?.length ?? 0,
+    attachmentBlobIds: (params.attachments ?? []).map((a) => a.blobId),
     estimatedSendTime: params.sendAt ?? new Date().toISOString(),
     estimatedSize: envelope.length,
     identityId: params.identityId,

@@ -112,6 +112,14 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
       inFlight.set(dedupKey, promise);
       return promise;
     },
+    // Attachment uploads bypass the cache (binary side-channel, no
+    // canonicalizable input, no value in caching). Pass-through.
+    ...(opts.inner.uploadAttachment !== undefined
+      ? {
+          uploadAttachment: (blob, uploadOpts) =>
+            opts.inner.uploadAttachment!(blob, uploadOpts),
+        }
+      : {}),
   };
 
   function scheduleRevalidate<I, O>(

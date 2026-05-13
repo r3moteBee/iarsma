@@ -575,6 +575,15 @@ export function parseThreadGet(body: string): ThreadGet {
 // grows a sender-influenced response shape (e.g., echoed body parts),
 // move the parser into `components/jmap-client/`.
 
+export type AttachmentRef = {
+  readonly blobId: string;
+  readonly name: string;
+  readonly type: string;
+  readonly size: number;
+  readonly disposition?: string;
+  readonly cid?: string;
+};
+
 export type MailDraftInput = {
   readonly mailboxId: string;
   readonly from: EmailAddress;
@@ -586,6 +595,7 @@ export type MailDraftInput = {
   readonly bodyHtml?: string;
   readonly inReplyTo?: string;
   readonly references?: string;
+  readonly attachments?: ReadonlyArray<AttachmentRef>;
 };
 
 export type MailDraftResult = {
@@ -661,6 +671,9 @@ export function buildMailDraftRequest(opts: {
   }
   if (params.references !== undefined) {
     email.references = params.references.split(/\s+/).filter((s) => s.length > 0);
+  }
+  if (params.attachments !== undefined && params.attachments.length > 0) {
+    email.attachments = params.attachments.map(toJmapAttachment);
   }
 
   return JSON.stringify({
@@ -796,6 +809,109 @@ export function parseEmailSetResponse(body: string): MailDraftResult {
     blobId: created.blobId,
     threadId: created.threadId,
     size: Number(created.size ?? 0),
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// JMAP Blob upload (attachments) — Phase 2 item 7
+// ──────────────────────────────────────────────────────────────────────
+//
+// Per RFC 8620 §6.1, blob upload is a side-channel: POST raw bytes
+// to the account's upload URL, get back `{accountId, blobId, type,
+// size}`. The blob lives on the server until referenced by an
+// `Email/set` create (or expired by the server's GC). The upload is
+// NOT a regular JMAP method-call — it doesn't ride the invoker JSON
+// channel because JSON can't carry binary bytes.
+
+export type AttachmentUpload = {
+  readonly accountId: string;
+  readonly blobId: string;
+  readonly type: string;
+  readonly size: number;
+};
+
+export type FetchAttachmentUploadOptions = JmapClientOptions & {
+  readonly session: Session;
+  /** The bytes to upload. Browser File / Blob both work — the host
+   *  reads through their stream API. Tests pass a Uint8Array wrapped
+   *  in a Blob. */
+  readonly blob: Blob;
+  /** MIME type. Overrides `blob.type` when supplied — the file picker
+   *  doesn't always set Blob.type reliably for non-image files. */
+  readonly type?: string;
+};
+
+/**
+ * Substitute the `{accountId}` token in the session's upload URL.
+ * RFC 8620 §6.1 lets the URL also carry `{type}` and `{name}` tokens;
+ * Stalwart's implementation only varies on `{accountId}` so we ignore
+ * the others (they're allowed but optional per spec).
+ */
+function buildUploadUrl(session: Session): string {
+  return session.uploadUrl.replace('{accountId}', session.primaryAccountIdMail);
+}
+
+export async function fetchAttachmentUpload(
+  opts: FetchAttachmentUploadOptions,
+): Promise<AttachmentUpload> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const url = buildUploadUrl(opts.session);
+  const contentType = opts.type ?? opts.blob.type ?? 'application/octet-stream';
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        // No `Content-Length` header — fetch fills it from the blob's
+        // size. Setting it manually trips Stalwart's strict-parse path.
+        'content-type': contentType,
+        authorization: `Bearer ${token}`,
+      },
+      body: opts.blob,
+    });
+  } catch (e) {
+    throw makeError('network_error', `Blob upload failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `Blob upload returned ${response.status} ${response.statusText}`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse blob-upload response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Blob-upload response is not an object.');
+  }
+  const r = parsed as Record<string, unknown>;
+  if (
+    typeof r.accountId !== 'string' ||
+    typeof r.blobId !== 'string' ||
+    typeof r.type !== 'string'
+  ) {
+    throw makeError(
+      'jmap_parse_error',
+      'Blob-upload response is missing required fields.',
+    );
+  }
+  return {
+    accountId: r.accountId,
+    blobId: r.blobId,
+    type: r.type,
+    size: typeof r.size === 'number' ? r.size : Number(r.size ?? 0),
   };
 }
 
@@ -999,6 +1115,7 @@ export type MailSendInput = {
   readonly inReplyTo?: string;
   readonly references?: string;
   readonly sendAt?: string;
+  readonly attachments?: ReadonlyArray<AttachmentRef>;
 };
 
 export type MailSendResult = {
@@ -1069,6 +1186,9 @@ export function buildMailSendRequest(opts: {
   }
   if (params.references !== undefined) {
     email.references = params.references.split(/\s+/).filter((s) => s.length > 0);
+  }
+  if (params.attachments !== undefined && params.attachments.length > 0) {
+    email.attachments = params.attachments.map(toJmapAttachment);
   }
 
   const submission: Record<string, unknown> = {
@@ -1252,6 +1372,23 @@ export function parseEmailSubmissionSetResponse(body: string): MailSendResult {
     size: Number(createdEmail.size ?? 0),
     submissionId: createdSub.id,
     ...(createdSub.sendAt !== undefined ? { sendAt: createdSub.sendAt } : {}),
+  };
+}
+
+/**
+ * Translate an `AttachmentRef` (the contract input shape) into the
+ * JMAP `Email/set` create attachment shape per RFC 8621 §4.1.4 /
+ * §1.6.1. `partId` is JMAP's identifier for body-tree positioning;
+ * `blobId` is what the server actually references the bytes by.
+ */
+function toJmapAttachment(a: AttachmentRef): Record<string, unknown> {
+  return {
+    blobId: a.blobId,
+    type: a.type,
+    name: a.name,
+    size: a.size,
+    ...(a.disposition !== undefined ? { disposition: a.disposition } : {}),
+    ...(a.cid !== undefined ? { cid: a.cid } : {}),
   };
 }
 

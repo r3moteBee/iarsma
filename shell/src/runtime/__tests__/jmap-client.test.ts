@@ -5,6 +5,7 @@ import {
   buildIdentityListRequest,
   buildMailDraftRequest,
   buildMailSendRequest,
+  fetchAttachmentUpload,
   fetchIdentityList,
   fetchMailDraftCommit,
   fetchMailSendCommit,
@@ -1237,5 +1238,167 @@ describe('fetchIdentityList', () => {
         session: SAMPLE_SESSION,
       }),
     ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Blob upload (attachment.upload) — Phase 2 item 7
+// ──────────────────────────────────────────────────────────────────────
+
+const UPLOAD_OK_BODY = JSON.stringify({
+  accountId: 'c',
+  blobId: 'B-up-1',
+  type: 'application/pdf',
+  size: 1234,
+});
+
+describe('fetchAttachmentUpload', () => {
+  it('POSTs the blob bytes to the substituted upload URL with the right content type', async () => {
+    const fetchSpy = makeFetchSpy(UPLOAD_OK_BODY);
+    const blob = new Blob([new Uint8Array([1, 2, 3])], {
+      type: 'application/pdf',
+    });
+    const r = await fetchAttachmentUpload({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      blob,
+    });
+    expect(r).toEqual({
+      accountId: 'c',
+      blobId: 'B-up-1',
+      type: 'application/pdf',
+      size: 1234,
+    });
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe('https://sw-mail.example.net/jmap/upload/c/');
+    expect(init?.method).toBe('POST');
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    expect(headers.authorization).toBe('Bearer tok');
+    expect(headers['content-type']).toBe('application/pdf');
+    expect(init?.body).toBe(blob);
+  });
+
+  it('honors a caller-supplied `type` override (file picker leaves Blob.type empty for some MIME types)', async () => {
+    const fetchSpy = makeFetchSpy(UPLOAD_OK_BODY);
+    const blob = new Blob([new Uint8Array([1])]); // no type
+    await fetchAttachmentUpload({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      blob,
+      type: 'application/x-custom',
+    });
+    const [, init] = fetchSpy.mock.calls[0]!;
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    expect(headers['content-type']).toBe('application/x-custom');
+  });
+
+  it('rejects with code=unauthorized when no token is available', async () => {
+    const blob = new Blob([new Uint8Array([1])]);
+    await expect(
+      fetchAttachmentUpload({
+        baseUrl: 'https://x',
+        getAuthToken: () => null,
+        fetch: makeFetchSpy(UPLOAD_OK_BODY),
+        session: SAMPLE_SESSION,
+        blob,
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('rejects with code=jmap_http_error on a non-2xx response', async () => {
+    const blob = new Blob([new Uint8Array([1])]);
+    await expect(
+      fetchAttachmentUpload({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy('rejected', { status: 413, statusText: 'Payload Too Large' }),
+        session: SAMPLE_SESSION,
+        blob,
+      }),
+    ).rejects.toMatchObject({ code: 'jmap_http_error' });
+  });
+
+  it('rejects with code=jmap_parse_error on a malformed response', async () => {
+    const blob = new Blob([new Uint8Array([1])]);
+    await expect(
+      fetchAttachmentUpload({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy(JSON.stringify({ blobId: 'b' /* missing fields */ })),
+        session: SAMPLE_SESSION,
+        blob,
+      }),
+    ).rejects.toMatchObject({ code: 'jmap_parse_error' });
+  });
+});
+
+describe('buildMailSendRequest — attachments', () => {
+  it('passes attachments through to Email/set when supplied', () => {
+    const body = buildMailSendRequest({
+      accountId: 'c',
+      params: {
+        sentMailboxId: 'Mb-sent',
+        identityId: 'I-1',
+        from: { email: 'b@b.b' },
+        to: [{ email: 'a@a.a' }],
+        subject: 's',
+        bodyText: 'hi',
+        attachments: [
+          {
+            blobId: 'B-1',
+            name: 'contract.pdf',
+            type: 'application/pdf',
+            size: 1234,
+            disposition: 'attachment',
+          },
+        ],
+      },
+    });
+    const email = (
+      (
+        JSON.parse(body) as {
+          methodCalls: Array<[string, Record<string, unknown>, string]>;
+        }
+      ).methodCalls[0]![1] as {
+        create: Record<string, Record<string, unknown>>;
+      }
+    ).create['c0']!;
+    expect(email.attachments).toEqual([
+      {
+        blobId: 'B-1',
+        type: 'application/pdf',
+        name: 'contract.pdf',
+        size: 1234,
+        disposition: 'attachment',
+      },
+    ]);
+  });
+
+  it('omits the attachments key when none are supplied', () => {
+    const body = buildMailSendRequest({
+      accountId: 'c',
+      params: {
+        sentMailboxId: 'Mb-sent',
+        identityId: 'I-1',
+        from: { email: 'b@b.b' },
+        to: [{ email: 'a@a.a' }],
+        subject: 's',
+        bodyText: 'hi',
+      },
+    });
+    const email = (
+      (
+        JSON.parse(body) as {
+          methodCalls: Array<[string, Record<string, unknown>, string]>;
+        }
+      ).methodCalls[0]![1] as {
+        create: Record<string, Record<string, unknown>>;
+      }
+    ).create['c0']!;
+    expect(email.attachments).toBeUndefined();
   });
 });
