@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
+import { createMailDraftHandler } from './handlers/mail-draft.js';
 import { createMailboxListHandler } from './handlers/mailbox-list.js';
 import {
   createSessionGetHandler,
@@ -19,6 +20,11 @@ import {
 } from './handlers/session-get.js';
 import { createThreadGetHandler } from './handlers/thread-get.js';
 import { createThreadListHandler } from './handlers/thread-list.js';
+import { createThreadSearchHandler } from './handlers/thread-search.js';
+import {
+  loadHttpTransportConfig,
+  startHttpTransport,
+} from './http-transport.js';
 import type { ToolHandler } from './invocation.js';
 import { createIarsmaMcpServer } from './server.js';
 import { loadTools } from './tool-loader.js';
@@ -68,28 +74,58 @@ async function main(): Promise<void> {
     );
   } else {
     handlers.set('session.get', createSessionGetHandler(sessionGetDeps));
-    // mailbox.list + thread.list + thread.get share the same JMAP-base-
-    // URL + bearer-token deps — resolve once and wire all four. Each
-    // handler does its own session fetch internally; in-process
-    // session caching arrives with the Phase 1 storage layer (item 8).
+    // All capabilities share the JMAP-base-URL + bearer-token deps,
+    // so we resolve once and wire each. Each handler does its own
+    // session fetch internally; in-process session caching arrives
+    // with the Phase 1 storage layer (already shipped for the
+    // browser; mcp-server is still fresh-per-call until Phase 3).
     handlers.set('mailbox.list', createMailboxListHandler(sessionGetDeps));
     handlers.set('thread.list', createThreadListHandler(sessionGetDeps));
     handlers.set('thread.get', createThreadGetHandler(sessionGetDeps));
+    handlers.set('thread.search', createThreadSearchHandler(sessionGetDeps));
+    handlers.set('mail.draft', createMailDraftHandler(sessionGetDeps));
     // eslint-disable-next-line no-console
     console.error(
-      `[iarsma-mcp] session.get + mailbox.list + thread.list + thread.get wired against ${sessionGetDeps.jmapBaseUrl}`,
+      `[iarsma-mcp] capabilities wired against ${sessionGetDeps.jmapBaseUrl}: ` +
+        'session.get, mailbox.list, thread.list, thread.get, thread.search, mail.draft',
     );
   }
 
-  const server = createIarsmaMcpServer({
+  const stdioServer = createIarsmaMcpServer({
     tools,
     handlers,
     ...(agentContext !== null ? { agentContext } : {}),
   });
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  await stdioServer.connect(transport);
   // eslint-disable-next-line no-console
   console.error('[iarsma-mcp] connected via stdio. Awaiting requests...');
+
+  // Optional Streamable HTTP transport (Phase 2 item 10a). Each
+  // transport needs its own Server instance — the SDK couples them
+  // 1:1 via the Protocol layer. The handlers map is shared so both
+  // surfaces expose the same tool list.
+  const httpConfig = loadHttpTransportConfig(process.env);
+  if (httpConfig !== null) {
+    const httpServer = createIarsmaMcpServer({
+      tools,
+      handlers,
+      ...(agentContext !== null ? { agentContext } : {}),
+    });
+    const { port } = await startHttpTransport({
+      config: httpConfig,
+      mcpServer: httpServer,
+    });
+    // eslint-disable-next-line no-console
+    console.error(
+      `[iarsma-mcp] Streamable HTTP transport listening on ${httpConfig.host ?? '0.0.0.0'}:${port}. POST /mcp with Authorization: Bearer <token>.`,
+    );
+  } else {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[iarsma-mcp] HTTP transport disabled — set IARSMA_MCP_HTTP_PORT + IARSMA_MCP_HTTP_TOKEN to enable.',
+    );
+  }
 }
 
 const isMain =
