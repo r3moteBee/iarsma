@@ -25,3 +25,16 @@ export const selectedMailboxIdAtom = atom<string | null>(null);
  * thread isn't valid in the new mailbox's list.
  */
 export const selectedThreadIdAtom = atom<string | null>(null);
+
+/**
+ * Search query atom (Phase 2 item 9). Empty string = inactive (the
+ * ThreadList renders the selected mailbox); non-empty = active (the
+ * ThreadList runs `thread.search` and renders results, ignoring
+ * `selectedMailboxIdAtom`).
+ *
+ * The atom holds plain text rather than a wrapped union because the
+ * shell's only search entry surface today is the header input — a
+ * single bound value. Reach for `{kind, query}` if a second surface
+ * (e.g., mailbox-scoped search) needs to coexist.
+ */
+export const searchQueryAtom = atom<string>('');

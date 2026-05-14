@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  buildEmailSearchRequest,
   buildIdentityListRequest,
   buildMailDraftRequest,
   buildMailSendRequest,
@@ -13,6 +14,7 @@ import {
   fetchSession,
   fetchThreadGet,
   fetchThreadList,
+  fetchThreadSearch,
   parseEmailSetResponse,
   parseEmailSubmissionSetResponse,
   parseIdentityListResponse,
@@ -1400,5 +1402,95 @@ describe('buildMailSendRequest — attachments', () => {
       }
     ).create['c0']!;
     expect(email.attachments).toBeUndefined();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// thread.search — Phase 2 item 9
+// ──────────────────────────────────────────────────────────────────────
+
+describe('buildEmailSearchRequest', () => {
+  it('uses a bare text filter when no mailbox scope is supplied', () => {
+    const body = buildEmailSearchRequest({
+      accountId: 'c',
+      query: 'project plan',
+    });
+    const parsed = JSON.parse(body) as {
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    const args = parsed.methodCalls[0]![1] as { filter: unknown };
+    expect(args.filter).toEqual({ text: 'project plan' });
+  });
+
+  it('wraps in AND with `inMailbox` when scoped to one mailbox', () => {
+    const body = buildEmailSearchRequest({
+      accountId: 'c',
+      query: 'project plan',
+      inMailboxId: 'Mb-inbox',
+    });
+    const args = (
+      JSON.parse(body) as {
+        methodCalls: Array<[string, Record<string, unknown>, string]>;
+      }
+    ).methodCalls[0]![1] as { filter: unknown };
+    expect(args.filter).toEqual({
+      operator: 'AND',
+      conditions: [{ text: 'project plan' }, { inMailbox: 'Mb-inbox' }],
+    });
+  });
+
+  it('chains Email/get via the standard back-reference', () => {
+    const body = buildEmailSearchRequest({ accountId: 'c', query: 'q' });
+    const parsed = JSON.parse(body) as {
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    expect(parsed.methodCalls).toHaveLength(2);
+    expect(parsed.methodCalls[1]![0]).toBe('Email/get');
+    expect((parsed.methodCalls[1]![1] as { '#ids'?: unknown })['#ids']).toEqual({
+      resultOf: '0',
+      name: 'Email/query',
+      path: '/ids',
+    });
+  });
+});
+
+describe('fetchThreadSearch', () => {
+  it('POSTs the chained request and returns a ThreadList', async () => {
+    const fetchSpy = makeFetchSpy(EMAIL_QUERY_FIXTURE);
+    const r = await fetchThreadSearch({
+      baseUrl: 'https://x',
+      getAuthToken: () => 'tok',
+      fetch: fetchSpy,
+      session: SAMPLE_SESSION,
+      query: 'project plan',
+    });
+    expect(r.threads.length).toBeGreaterThan(0);
+    const [url, init] = fetchSpy.mock.calls[0]!;
+    expect(url).toBe(SAMPLE_SESSION.apiUrl);
+    expect(init?.method).toBe('POST');
+  });
+
+  it('rejects code=invalid_argument when the query is empty / whitespace', async () => {
+    await expect(
+      fetchThreadSearch({
+        baseUrl: 'https://x',
+        getAuthToken: () => 'tok',
+        fetch: makeFetchSpy(EMAIL_QUERY_FIXTURE),
+        session: SAMPLE_SESSION,
+        query: '   ',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_argument' });
+  });
+
+  it('rejects with code=unauthorized when no token is available', async () => {
+    await expect(
+      fetchThreadSearch({
+        baseUrl: 'https://x',
+        getAuthToken: () => null,
+        fetch: makeFetchSpy(EMAIL_QUERY_FIXTURE),
+        session: SAMPLE_SESSION,
+        query: 'x',
+      }),
+    ).rejects.toMatchObject({ code: 'unauthorized' });
   });
 });

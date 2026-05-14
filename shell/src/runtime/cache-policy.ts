@@ -24,6 +24,9 @@ export const CACHEABLE_TOOLS: Readonly<Record<string, CachePurposeKey>> = {
   // dropdown instant while a background fetch picks up server-side
   // changes within the same session.
   'identity.list': 'identities',
+  // Search results cached SWR. Same encryption guarantees as the
+  // rest; cleared on sign-out alongside the other cache stores.
+  'thread.search': 'searchResults',
   // session.get is intentionally NOT cached — it's resolved once
   // per invoker instance via in-memory caching inside jmapInvoker
   // (see invoker.ts), and re-fetching on sign-in is correct.

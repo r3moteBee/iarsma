@@ -31,6 +31,7 @@ import {
   fetchSession,
   fetchThreadGet,
   fetchThreadList,
+  fetchThreadSearch,
   type AttachmentUpload,
   type IdentityList,
   type JmapClientOptions,
@@ -210,6 +211,26 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             ...opts,
             session,
             threadId: params.threadId,
+          });
+          return result as unknown as O;
+        }
+        case 'thread.search': {
+          const session = await getSession();
+          const params = _input as unknown as {
+            query: string;
+            inMailboxId?: string;
+            position?: number;
+            limit?: number;
+          };
+          const result: ThreadList = await fetchThreadSearch({
+            ...opts,
+            session,
+            query: params.query,
+            ...(params.inMailboxId !== undefined
+              ? { inMailboxId: params.inMailboxId }
+              : {}),
+            ...(params.position !== undefined ? { position: params.position } : {}),
+            ...(params.limit !== undefined ? { limit: params.limit } : {}),
           });
           return result as unknown as O;
         }

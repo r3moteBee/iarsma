@@ -18,7 +18,8 @@ The keyboard model is the primary navigation surface for power users and an acce
 |-----|--------|-------|
 | <kbd>?</kbd> | Open the keyboard help overlay | Suppressed while focus is inside a text input or contenteditable. |
 | <kbd>c</kbd> | Compose new message | Opens the empty compose modal. Suppressed while focus is inside a text input or contenteditable. |
-| <kbd>Escape</kbd> | Close any open overlay | Closes the keyboard help, the compose modal, or the send-confirmation modal — whichever is on top. |
+| <kbd>/</kbd> | Focus the search input | Selects existing text so the user can type a fresh query. Suppressed while focus is inside a text input or contenteditable. |
+| <kbd>Escape</kbd> | Close any open overlay | Closes the keyboard help, the compose modal, or the send-confirmation modal — whichever is on top. Pressing it while the search input is focused clears the query. |
 
 ## Mailbox sidebar (left column)
 
@@ -70,7 +71,6 @@ Documented here so they don't get accidentally bound to something else. Implemen
 | <kbd>x</kbd> | Toggle selection (multi-select for bulk operations) | Thread list |
 | <kbd>!</kbd> | Report as spam / move to junk | Thread list, thread view |
 | <kbd>#</kbd> | Delete | Thread list, thread view |
-| <kbd>/</kbd> | Focus the search input | Global |
 
 ## Out of scope (post-v1)
 

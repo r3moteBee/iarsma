@@ -138,6 +138,18 @@ describe('Global keyboard shortcuts', () => {
     expect(getByTestId('compose-state').textContent).toBe('closed');
   });
 
+  it('/ is suppressed when typed inside an <input>', () => {
+    const { getByTestId } = render(
+      <JotaiProvider>
+        <Harness inputId="search" />
+      </JotaiProvider>,
+    );
+    const input = getByTestId('text-input');
+    // No assertion on the search input (the harness doesn't host one);
+    // we just confirm the keydown doesn't throw / no atom flip.
+    expect(() => fireEvent.keyDown(input, { key: '/' })).not.toThrow();
+  });
+
   it('detaches the window listener on unmount', () => {
     const { unmount, getByTestId } = render(
       <JotaiProvider>

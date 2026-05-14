@@ -150,10 +150,10 @@ describe('run (integration with the project contracts)', () => {
     const r = await run({ distDir: tmp, shellGenDir: null });
     expect(r.capabilities).toBeGreaterThanOrEqual(1);
     // session.get + mailbox.list + thread.list + thread.get +
-    // mail.draft + mail.send + identity.list. Bump explicitly when
-    // adding contracts so a missing or duplicate contract surfaces
-    // in code review.
-    expect(r.capabilities).toBe(7);
+    // mail.draft + mail.send + identity.list + thread.search. Bump
+    // explicitly when adding contracts so a missing or duplicate
+    // contract surfaces in code review.
+    expect(r.capabilities).toBe(8);
   });
 
   it('produces openapi.json at the dist root', async () => {

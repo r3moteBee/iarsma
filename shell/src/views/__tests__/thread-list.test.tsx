@@ -470,3 +470,98 @@ describe('ThreadList — drafts click path', () => {
     });
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Search mode — Phase 2 item 9
+// ──────────────────────────────────────────────────────────────────────
+
+import { searchQueryAtom } from '../../mail-state.js';
+
+describe('ThreadList — search mode', () => {
+  function WithSearch({
+    query,
+    children,
+  }: {
+    query: string;
+    children: React.ReactNode;
+  }) {
+    const setQuery = useSetAtom(searchQueryAtom);
+    useEffect(() => {
+      setQuery(query);
+      return () => {
+        setQuery('');
+      };
+    }, [query, setQuery]);
+    return <>{children}</>;
+  }
+
+  it('switches to thread.search when the searchQueryAtom is non-empty', async () => {
+    const invokerCalls: Array<{ name: string; input: unknown }> = [];
+    const invoker = mockInvoker({
+      'thread.list': async (input) => {
+        invokerCalls.push({ name: 'thread.list', input });
+        return FIXTURES;
+      },
+      'thread.search': async (input) => {
+        invokerCalls.push({ name: 'thread.search', input });
+        return {
+          threads: [FIXTURES.threads[0]],
+          position: 0,
+          total: 1,
+        };
+      },
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <WithSearch query="project">
+              <ThreadList />
+            </WithSearch>
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitFor(() => {
+      expect(
+        invokerCalls.find((c) => c.name === 'thread.search'),
+      ).toBeDefined();
+    });
+    // thread.list MUST NOT be called once search mode is active.
+    expect(
+      invokerCalls.find((c) => c.name === 'thread.list'),
+    ).toBeUndefined();
+    await waitFor(() => {
+      expect(
+        screen.getByRole('listbox', { name: 'Threads' }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('shows a search-specific empty message when no results', async () => {
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'thread.search': async () => ({ threads: [], position: 0, total: 0 }),
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <WithSearch query="nonexistent">
+              <ThreadList />
+            </WithSearch>
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByText(/no results for "nonexistent"/i),
+      ).toBeInTheDocument();
+    });
+  });
+});

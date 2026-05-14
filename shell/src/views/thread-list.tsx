@@ -41,19 +41,47 @@ import {
 import { composeStateAtom } from '../compose-state.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useThreadList } from '../generated/capabilities/thread-list.js';
-import { selectedMailboxIdAtom, selectedThreadIdAtom } from '../mail-state.js';
+import { useThreadSearch } from '../generated/capabilities/thread-search.js';
+import {
+  searchQueryAtom,
+  selectedMailboxIdAtom,
+  selectedThreadIdAtom,
+} from '../mail-state.js';
 import { useInvoker } from '../runtime/invoker.js';
 import type { EmailFull, ThreadGet } from '../runtime/jmap-client.js';
+import type { ToolError } from '../runtime/types.js';
 import { buildDraftPrefill } from './draft-prefill.js';
+
+type ThreadListData = {
+  readonly threads: ReadonlyArray<{
+    readonly id: string;
+    readonly latestEmail: {
+      readonly id: string;
+      readonly threadId: string;
+      readonly from?: ReadonlyArray<{ name?: string; email: string }>;
+      readonly to?: ReadonlyArray<{ name?: string; email: string }>;
+      readonly subject?: string;
+      readonly preview?: string;
+      readonly receivedAt: string;
+      readonly keywords: ReadonlyArray<{ name: string; value: boolean }>;
+      readonly size: number;
+    };
+  }>;
+  readonly position: number;
+  readonly total?: number;
+};
 
 const ROW_HEIGHT_PX = 64;
 
 export function ThreadList() {
   const mailboxId = useAtomValue(selectedMailboxIdAtom);
-  // Render placeholder when no mailbox is selected — without an id we
-  // can't ask `useThreadList` for anything (the contract requires
-  // mailboxId). The hook is called below only when `mailboxId` is set,
-  // via the `enabled` flag.
+  const searchQuery = useAtomValue(searchQueryAtom);
+  // Search mode wins over mailbox selection — when the user types in
+  // the header search, results stream into ThreadList regardless of
+  // which mailbox they had open.
+  if (searchQuery.trim() !== '') {
+    return <ThreadListSearchMode query={searchQuery.trim()} />;
+  }
   if (mailboxId === null) {
     return (
       <section aria-label="Threads">
@@ -64,18 +92,28 @@ export function ThreadList() {
   return <ThreadListWithMailbox mailboxId={mailboxId} />;
 }
 
+function ThreadListSearchMode({ query }: { readonly query: string }) {
+  const { data, error, isLoading } = useThreadSearch({ query });
+  // Search mode doesn't carry a mailboxId — `isDrafts` is forced
+  // false. Future "search within Drafts only" could pass `inMailboxId`
+  // and recompute, but item 9 ships search-everywhere.
+  return (
+    <ThreadListBody
+      data={data as ThreadListData | undefined}
+      error={error}
+      isLoading={isLoading}
+      isDrafts={false}
+      emptyMessage={`No results for "${query}".`}
+      mailboxId={null}
+    />
+  );
+}
+
 function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
   const { data, error, isLoading } = useThreadList({ mailboxId });
-  const selectedThreadId = useAtomValue(selectedThreadIdAtom);
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
-  const setComposeState = useSetAtom(composeStateAtom);
-  const invoker = useInvoker();
   const mailboxes = useMailboxList({});
 
-  // Detect "this is the Drafts mailbox" by the JMAP role on the
-  // selected mailbox. Phase 2 item 8: clicking a thread in Drafts
-  // opens the composer with the draft prefilled instead of routing
-  // to the (read-only) ThreadView.
   const isDrafts = useMemo(() => {
     const list = (mailboxes.data ?? []) as ReadonlyArray<{
       id: string;
@@ -84,11 +122,36 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
     return list.some((m) => m.id === mailboxId && m.role === 'drafts');
   }, [mailboxes.data, mailboxId]);
 
-  // Reset selection when the mailbox changes — the previous-mailbox
-  // thread id isn't meaningful in this list.
+  // Reset thread selection when the mailbox changes.
   useEffect(() => {
     setSelectedThreadId(null);
   }, [mailboxId, setSelectedThreadId]);
+
+  return (
+    <ThreadListBody
+      data={data}
+      error={error}
+      isLoading={isLoading}
+      isDrafts={isDrafts}
+      emptyMessage="No threads in this mailbox."
+      mailboxId={mailboxId}
+    />
+  );
+}
+
+function ThreadListBody(props: {
+  readonly data: ThreadListData | undefined;
+  readonly error: ToolError | undefined;
+  readonly isLoading: boolean;
+  readonly isDrafts: boolean;
+  readonly emptyMessage: string;
+  readonly mailboxId: string | null;
+}) {
+  const { data, error, isLoading, isDrafts, emptyMessage } = props;
+  const selectedThreadId = useAtomValue(selectedThreadIdAtom);
+  const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
+  const setComposeState = useSetAtom(composeStateAtom);
+  const invoker = useInvoker();
 
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
   const total = data?.total;
@@ -239,7 +302,7 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
   if (threads.length === 0) {
     return (
       <section aria-label="Threads">
-        <p>No threads in this mailbox.</p>
+        <p>{emptyMessage}</p>
       </section>
     );
   }

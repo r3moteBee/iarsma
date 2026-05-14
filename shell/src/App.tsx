@@ -1,6 +1,6 @@
 // Phase 0 work items 6 + 7 — OAuth 2.1 + PKCE flow + login UI.
 
-import { Provider as JotaiProvider, useAtomValue, useSetAtom } from 'jotai';
+import { Provider as JotaiProvider, useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   actionLog,
@@ -15,6 +15,7 @@ import { composeStateAtom } from './compose-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
+import { searchQueryAtom } from './mail-state.js';
 import {
   IarsmaProvider,
   cachedInvoker,
@@ -182,6 +183,16 @@ function Shell({ config }: { readonly config: ShellConfig }) {
  * triggered from anywhere — including states with no rendered children
  * (e.g. the loading splash).
  */
+/**
+ * Cross-component handle to the search input. `SignedInView` mounts
+ * it and the `/` global keybinding focuses it. The shell is a single-
+ * surface app (no nested searches), so a module-level ref is fine —
+ * no risk of two SignedInView instances mounting concurrently.
+ */
+const searchInputRefHandle: { current: HTMLInputElement | null } = {
+  current: null,
+};
+
 function useGlobalKeyboardShortcuts(): void {
   const setOpen = useSetAtom(keyboardHelpOpenAtom);
   const setComposeState = useSetAtom(composeStateAtom);
@@ -199,6 +210,18 @@ function useGlobalKeyboardShortcuts(): void {
         if (isEditableElement(event.target)) return;
         event.preventDefault();
         setComposeState({ kind: 'open', prefill: {} });
+        return;
+      }
+      if (event.key === '/') {
+        // `/` focuses the search input. Suppressed when focus is in
+        // an editable surface (so typing "/" in the composer stays
+        // a literal slash).
+        if (isEditableElement(event.target)) return;
+        const el = searchInputRefHandle.current;
+        if (el === null) return;
+        event.preventDefault();
+        el.focus();
+        el.select();
         return;
       }
       if (event.key === 'Escape') {
@@ -227,6 +250,17 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   const tokens = useAtomValue(tokensAtom);
   const setCompose = useSetAtom(composeStateAtom);
   const openCompose = () => setCompose({ kind: 'open', prefill: {} });
+  const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Expose the search input ref globally so the `/` keybinding (wired
+  // at App-level via useGlobalKeyboardShortcuts) can focus it without
+  // crossing the render tree.
+  useEffect(() => {
+    searchInputRefHandle.current = searchInputRef.current;
+    return () => {
+      searchInputRefHandle.current = null;
+    };
+  }, []);
 
   const onSignOut = () => {
     void (async () => {
@@ -266,8 +300,46 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
         alignItems: 'start',
       }}
     >
-      <header style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <h2 id="signedin-heading">Signed in</h2>
+      <header style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75em' }}>
+        <h2 id="signedin-heading" style={{ margin: 0 }}>Signed in</h2>
+        <span style={{ flex: '1 1 auto', display: 'flex', gap: '0.5em', alignItems: 'baseline' }}>
+          <label htmlFor="thread-search-input" style={{ flex: '0 0 auto' }}>
+            Search:
+          </label>
+          <input
+            id="thread-search-input"
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setSearchQuery('');
+                e.currentTarget.blur();
+              }
+            }}
+            placeholder="Search every mailbox…"
+            aria-label="Search threads"
+            style={{
+              flex: '1 1 auto',
+              maxWidth: '30em',
+              padding: '0.3em 0.5em',
+              font: 'inherit',
+              border: '1px solid rgba(0,0,0,0.2)',
+              borderRadius: 4,
+            }}
+          />
+          {searchQuery !== '' ? (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="Clear search"
+            >
+              Clear
+            </button>
+          ) : null}
+        </span>
         <span style={{ display: 'flex', gap: '0.75em', alignItems: 'baseline' }}>
           <button type="button" onClick={openCompose} aria-label="Compose new message">
             Compose
