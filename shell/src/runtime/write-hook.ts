@@ -46,11 +46,20 @@ function reducer(_state: WriteState, action: WriteAction): WriteState {
 
 export type UseWriteHookOptions = ToolConfig;
 
+export type CommitOptions = {
+  /** Hex SHA-384 of the canonical-form preview the user approved
+   *  (D-047). Forwarded to the action-log via InvocationOptions so
+   *  the entry binds to exactly the preview that was shown. */
+  readonly previewHashHex?: string;
+};
+
 export type UseWriteHookResult<I, O> = {
   /** Run the capability as a dry-run; returns a structured preview. */
   readonly preview: (input: I) => Promise<DryRunPreview<O>>;
-  /** Commit the capability for real. Returns the committed output. */
-  readonly commit: (input: I) => Promise<O>;
+  /** Commit the capability for real. Returns the committed output.
+   *  Optional `previewHashHex` binds the action-log entry to the
+   *  preview the user approved (D-047). */
+  readonly commit: (input: I, options?: CommitOptions) => Promise<O>;
   readonly isLoading: boolean;
   readonly error: ToolError | undefined;
   /** Reset the in-flight state (typically after the user dismisses an error). */
@@ -62,10 +71,20 @@ export function useWriteHook<I, O>(opts: UseWriteHookOptions): UseWriteHookResul
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
 
   const run = useCallback(
-    async <R>(input: I, dryRun: boolean): Promise<R> => {
+    async <R>(input: I, dryRun: boolean, commitOpts: CommitOptions = {}): Promise<R> => {
       dispatch({ type: 'start' });
       try {
-        const result = await invoker.invoke<I, R>(opts.name, input, { dryRun });
+        const invocationOpts: { dryRun: boolean; previewHashHex?: string } = {
+          dryRun,
+        };
+        if (commitOpts.previewHashHex !== undefined) {
+          invocationOpts.previewHashHex = commitOpts.previewHashHex;
+        }
+        const result = await invoker.invoke<I, R>(
+          opts.name,
+          input,
+          invocationOpts,
+        );
         dispatch({ type: 'success' });
         return result as R;
       } catch (e) {
@@ -78,7 +97,11 @@ export function useWriteHook<I, O>(opts: UseWriteHookOptions): UseWriteHookResul
   );
 
   const preview = useCallback((input: I) => run<DryRunPreview<O>>(input, true), [run]);
-  const commit = useCallback((input: I) => run<O>(input, false), [run]);
+  const commit = useCallback(
+    (input: I, commitOpts: CommitOptions = {}) =>
+      run<O>(input, false, commitOpts),
+    [run],
+  );
   const reset = useCallback(() => dispatch({ type: 'success' }), []);
 
   return {

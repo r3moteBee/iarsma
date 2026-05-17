@@ -24,9 +24,16 @@
  *     skipped silently. Identity is required on every entry per D-047.
  */
 
-import type { ActionLog, CallerClass, Identity } from './action-log.js';
+import type {
+  ActionLog,
+  AppendInput,
+  CallerClass,
+  Identity,
+  Provenance,
+} from './action-log.js';
 import type { InvocationOptions, Invoker } from './invoker.js';
 import { isLoggable } from './loggable-tools.js';
+import { affectedJsonFor, isDestructive } from './provenance-policy.js';
 import type { DryRunPreview } from './types.js';
 
 export type LoggingInvokerOptions = {
@@ -68,14 +75,44 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
       const identity = opts.getIdentity();
       if (identity === null) return result;
 
+      // D-047 mode + provenance for destructive tools. Reads:
+      //   - dryRun=true       → mode='preview'. No provenance.
+      //   - destructive+commit → mode='commit'. Provenance carries
+      //     `previewHashHex` from the caller (binding the entry to
+      //     the preview the user approved) and `affectedJson` built
+      //     from the commit output (per-tool builder in
+      //     provenance-policy.ts).
+      const mode: 'preview' | 'commit' | undefined =
+        options.dryRun === true
+          ? 'preview'
+          : isDestructive(name)
+            ? 'commit'
+            : undefined;
+      let provenance: Provenance | undefined;
+      if (mode === 'commit') {
+        const affectedJson = affectedJsonFor(name, result);
+        if (affectedJson !== undefined) {
+          provenance = {
+            affectedJson,
+            // Empty string means "no preview hash supplied" — D-047
+            // allows it for commits that didn't go through a preview
+            // gate (programmatic / scripted callers). The UI path
+            // always supplies one.
+            previewHashHex: options.previewHashHex ?? '',
+          };
+        }
+      }
+
       try {
-        await opts.log.append({
+        const append: AppendInput = {
           identity,
           callerClass,
           action: name,
           params: input,
-          ...(options.dryRun === true ? { mode: 'preview' as const } : {}),
-        });
+          ...(mode !== undefined ? { mode } : {}),
+          ...(provenance !== undefined ? { provenance } : {}),
+        };
+        await opts.log.append(append);
       } catch (e) {
         onAppendError(name, e);
       }
