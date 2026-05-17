@@ -172,10 +172,20 @@ function makeInvoker(
   } = {},
 ): {
   invoker: Invoker;
-  calls: Array<{ name: string; dryRun: boolean; input?: unknown }>;
+  calls: Array<{
+    name: string;
+    dryRun: boolean;
+    input?: unknown;
+    previewHashHex?: string;
+  }>;
   uploads: Array<{ name: string; type: string; size: number }>;
 } {
-  const calls: Array<{ name: string; dryRun: boolean; input?: unknown }> = [];
+  const calls: Array<{
+    name: string;
+    dryRun: boolean;
+    input?: unknown;
+    previewHashHex?: string;
+  }> = [];
   const uploads: Array<{ name: string; type: string; size: number }> = [];
   const identities = overrides.identities ?? [
     { id: 'I-1', name: 'Brent', email: 'brent@example.net', mayDelete: false },
@@ -185,12 +195,26 @@ function makeInvoker(
     {
       'mailbox.list': async () => MAILBOXES,
       'identity.list': async () => ({ identities }),
-      'mail.draft': async (input, dryRun) => {
-        calls.push({ name: 'mail.draft', dryRun, input });
+      'mail.draft': async (input, dryRun, options) => {
+        calls.push({
+          name: 'mail.draft',
+          dryRun,
+          input,
+          ...(options?.previewHashHex !== undefined
+            ? { previewHashHex: options.previewHashHex }
+            : {}),
+        });
         return overrides.draft !== undefined ? overrides.draft(input) : DRAFT_OK;
       },
-      'mail.send': async (input, dryRun) => {
-        calls.push({ name: 'mail.send', dryRun, input });
+      'mail.send': async (input, dryRun, options) => {
+        calls.push({
+          name: 'mail.send',
+          dryRun,
+          input,
+          ...(options?.previewHashHex !== undefined
+            ? { previewHashHex: options.previewHashHex }
+            : {}),
+        });
         if (dryRun) {
           return overrides.sendPreview !== undefined
             ? overrides.sendPreview()
@@ -375,6 +399,27 @@ describe('ComposeView — send flow', () => {
       expect(
         screen.queryByRole('dialog', { name: /new message/i }),
       ).toBeNull();
+    });
+  });
+
+  it('threads a SHA-384 previewHashHex from preview to commit (D-047 provenance)', async () => {
+    const { calls } = renderComposer();
+    await fillRecipientAndWaitForSendEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    await waitFor(() => screen.getByRole('dialog', { name: /send this message/i }));
+    const previewDialog = screen.getByRole('dialog', {
+      name: /send this message/i,
+    });
+    fireEvent.click(
+      within(previewDialog).getAllByRole('button', { name: 'Send' })[0]!,
+    );
+    await waitFor(() => {
+      const commit = calls.find(
+        (c) => c.name === 'mail.send' && !c.dryRun,
+      );
+      expect(commit).toBeDefined();
+      // 96-hex-char SHA-384 (the helper returns lowercase hex).
+      expect(commit!.previewHashHex).toMatch(/^[0-9a-f]{96}$/);
     });
   });
 

@@ -204,6 +204,127 @@ describe('loggingInvoker — error semantics', () => {
   });
 });
 
+describe('loggingInvoker — mode + provenance (D-047)', () => {
+  it('records mode=commit for destructive tools', async () => {
+    const { log, store } = newLog();
+    const wrapped = loggingInvoker({
+      inner: inner({
+        'mail.draft': () => ({
+          emailId: 'E-1',
+          blobId: 'B-1',
+          threadId: 'T-1',
+          size: 256,
+        }),
+      }),
+      log,
+      getIdentity: () => ALICE,
+    });
+    await wrapped.invoke('mail.draft', { mailboxId: 'Mb-drafts' });
+    const last = await store.last();
+    expect(last?.data.mode).toBe('commit');
+  });
+
+  it('builds provenance.affectedJson from the commit output (mail.draft)', async () => {
+    const { log, store } = newLog();
+    const wrapped = loggingInvoker({
+      inner: inner({
+        'mail.draft': () => ({
+          emailId: 'E-1',
+          blobId: 'B-1',
+          threadId: 'T-1',
+          size: 256,
+        }),
+      }),
+      log,
+      getIdentity: () => ALICE,
+    });
+    await wrapped.invoke('mail.draft', { mailboxId: 'Mb-drafts' });
+    const last = await store.last();
+    expect(last?.data.provenance).toBeDefined();
+    expect(JSON.parse(last!.data.provenance!.affectedJson)).toEqual([
+      { kind: 'mail', id: 'E-1', op: 'create' },
+    ]);
+  });
+
+  it('threads previewHashHex through to provenance.previewHashHex on commit', async () => {
+    const { log, store } = newLog();
+    const wrapped = loggingInvoker({
+      inner: inner({
+        'mail.send': () => ({
+          emailId: 'E-1',
+          blobId: 'B-1',
+          threadId: 'T-1',
+          size: 256,
+          submissionId: 'S-1',
+        }),
+      }),
+      log,
+      getIdentity: () => ALICE,
+    });
+    await wrapped.invoke(
+      'mail.send',
+      { sentMailboxId: 'Mb-sent' },
+      { previewHashHex: 'abc123hash' },
+    );
+    const last = await store.last();
+    expect(last?.data.provenance?.previewHashHex).toBe('abc123hash');
+    // Both artifacts surface (email + submission).
+    expect(JSON.parse(last!.data.provenance!.affectedJson)).toEqual([
+      { kind: 'mail', id: 'E-1', op: 'create' },
+      { kind: 'mail-submission', id: 'S-1', op: 'create' },
+    ]);
+  });
+
+  it('defaults previewHashHex to empty string when caller omits it', async () => {
+    const { log, store } = newLog();
+    const wrapped = loggingInvoker({
+      inner: inner({
+        'mail.draft': () => ({
+          emailId: 'E-1',
+          blobId: 'B-1',
+          threadId: 'T-1',
+          size: 256,
+        }),
+      }),
+      log,
+      getIdentity: () => ALICE,
+    });
+    await wrapped.invoke('mail.draft', { mailboxId: 'Mb-drafts' });
+    const last = await store.last();
+    expect(last?.data.provenance?.previewHashHex).toBe('');
+  });
+
+  it('records mode=preview without provenance on a dry-run', async () => {
+    const { log, store } = newLog();
+    const wrapped = loggingInvoker({
+      inner: inner({
+        'mail.draft': () => ({ proposedEmail: {}, estimatedSize: 1 }),
+      }),
+      log,
+      getIdentity: () => ALICE,
+    });
+    await wrapped.invoke('mail.draft', {}, { dryRun: true });
+    const last = await store.last();
+    expect(last?.data.mode).toBe('preview');
+    expect(last?.data.provenance).toBeUndefined();
+  });
+
+  it('does NOT set mode or provenance on non-destructive commits', async () => {
+    const { log, store } = newLog();
+    const wrapped = loggingInvoker({
+      inner: inner({
+        'thread.list': () => ({ threads: [], position: 0, total: 0 }),
+      }),
+      log,
+      getIdentity: () => ALICE,
+    });
+    await wrapped.invoke('thread.list', { mailboxId: 'Mb1' });
+    const last = await store.last();
+    expect(last?.data.mode).toBeUndefined();
+    expect(last?.data.provenance).toBeUndefined();
+  });
+});
+
 describe('loggingInvoker — chain integrity', () => {
   it('multiple invocations produce a verifiable chain', async () => {
     const { log, store } = newLog();

@@ -49,6 +49,14 @@ import type { DryRunPreview, ToolError } from './types.js';
 export type InvocationOptions = {
   /** True if the caller wants a dry-run preview, not a commit. */
   readonly dryRun?: boolean;
+  /**
+   * Hex SHA-384 of the canonicalized dry-run preview the user
+   * approved (D-047, Phase 2 item 12). Forwarded to the action-log
+   * `provenance.previewHashHex` on commit so the entry binds to
+   * exactly the preview the user saw. Omit for non-destructive
+   * tools or commits that didn't go through a preview gate.
+   */
+  readonly previewHashHex?: string;
 };
 
 export interface Invoker {
@@ -297,7 +305,11 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
 // Mock invoker — for tests
 // ──────────────────────────────────────────────────────────────────────────
 
-export type MockInvokerHandler = (input: unknown, dryRun: boolean) => unknown | Promise<unknown>;
+export type MockInvokerHandler = (
+  input: unknown,
+  dryRun: boolean,
+  options?: InvocationOptions,
+) => unknown | Promise<unknown>;
 
 export type MockInvokerUploadHandler = (
   blob: Blob,
@@ -321,7 +333,7 @@ export function mockInvoker(
       if (handler === undefined) {
         throw makeToolError('tool_not_found', `mockInvoker has no handler for '${name}'.`);
       }
-      const result = await handler(input, invokeOpts.dryRun ?? false);
+      const result = await handler(input, invokeOpts.dryRun ?? false, invokeOpts);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return result as any;
     },

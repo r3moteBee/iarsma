@@ -39,6 +39,7 @@ import {
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useInvoker } from '../runtime/invoker.js';
 import type { AttachmentRef, Identity } from '../runtime/jmap-client.js';
+import { previewHashHex } from '../runtime/preview-hash.js';
 import {
   formatRecipients,
   parseRecipients,
@@ -188,6 +189,13 @@ function ComposeModal(props: {
   // either way (it's a contenteditable surface).
   const [draftError, setDraftError] = useState<string | null>(null);
   const [sendPreview, setSendPreview] = useState<MailSendPreview | null>(null);
+  // SHA-384 of the canonical-form preview the user is about to
+  // approve (D-047). Computed alongside setSendPreview so the
+  // confirmation path can pass it to commit() and the action-log
+  // entry binds to the exact preview shown.
+  const [sendPreviewHash, setSendPreviewHash] = useState<string | null>(
+    null,
+  );
   const [sendError, setSendError] = useState<string | null>(null);
 
   const parsedTo = useMemo(() => parseRecipients(toText), [toText]);
@@ -362,7 +370,12 @@ function ComposeModal(props: {
         // teach the codegen to thread the preview type through the
         // hook return type (`useWriteHook<I, O, P>`).
         const preview = (await sendHook.preview(input)) as unknown as MailSendPreview;
+        // Compute the SHA-384 of the canonical-form preview now, so
+        // the action-log entry on commit binds to exactly the
+        // preview the user is about to see (D-047 provenance).
+        const hash = await previewHashHex(preview);
         setSendPreview(preview);
+        setSendPreviewHash(hash);
       } catch (err) {
         setSendError(
           err instanceof Error ? err.message : 'Failed to preview send.',
@@ -405,12 +418,19 @@ function ComposeModal(props: {
         prefill,
         attachments,
       });
-      await sendHook.commit(input);
+      // Pass the preview hash so the action-log entry binds to
+      // exactly the preview the user approved (D-047 provenance).
+      await sendHook.commit(
+        input,
+        sendPreviewHash !== null ? { previewHashHex: sendPreviewHash } : {},
+      );
       setSendPreview(null);
+      setSendPreviewHash(null);
       onClose();
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Failed to send.');
       setSendPreview(null);
+      setSendPreviewHash(null);
     }
   }, [
     sentMailboxId,
@@ -424,6 +444,7 @@ function ComposeModal(props: {
     bodyHtml,
     prefill,
     attachments,
+    sendPreviewHash,
     sendHook,
     onClose,
   ]);
@@ -641,7 +662,10 @@ function ComposeModal(props: {
       {sendPreview !== null ? (
         <SendPreviewModal
           preview={sendPreview}
-          onCancel={() => setSendPreview(null)}
+          onCancel={() => {
+            setSendPreview(null);
+            setSendPreviewHash(null);
+          }}
           onConfirm={onPreviewConfirm}
         />
       ) : null}
