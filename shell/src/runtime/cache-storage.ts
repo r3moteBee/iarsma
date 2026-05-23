@@ -128,6 +128,13 @@ export type IndexedDbCacheStorageOptions = {
   readonly idbFactory?: IDBFactory;
 };
 
+class IdbBlockedError extends Error {
+  constructor() {
+    super('iarsma-cache IDB upgrade blocked by another connection');
+    this.name = 'IdbBlockedError';
+  }
+}
+
 export function indexedDbCacheStorage(
   opts: IndexedDbCacheStorageOptions,
 ): CacheStorage {
@@ -135,14 +142,13 @@ export function indexedDbCacheStorage(
     opts.idbFactory ??
     (typeof indexedDB !== 'undefined' ? indexedDB : null);
   if (factory === null) {
-    // Environments without IDB get the in-memory cache. Cache contents
-    // won't survive page reload but reads still serve correctly during
-    // a session.
     return inMemoryCacheStorage();
   }
   const idb: IDBFactory = factory;
 
   let dbPromise: Promise<IDBDatabase> | null = null;
+  let degraded = false;
+
   function openDb(): Promise<IDBDatabase> {
     if (dbPromise !== null) return dbPromise;
     dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
@@ -157,23 +163,51 @@ export function indexedDbCacheStorage(
       };
       req.onerror = () =>
         reject(req.error ?? new Error('iarsma-cache idb open failed'));
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // When a future schema upgrade opens at a higher version,
+        // close this connection so the upgrade isn't blocked.
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
+      req.onblocked = () => {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[iarsma] cache IDB upgrade blocked — another tab may hold an older connection. Falling back to in-memory cache.',
+        );
+        reject(new IdbBlockedError());
+      };
     });
     return dbPromise;
   }
 
+  async function tryOpenDb(): Promise<IDBDatabase | null> {
+    if (degraded) return null;
+    try {
+      return await openDb();
+    } catch (e) {
+      if (e instanceof IdbBlockedError) {
+        degraded = true;
+        return null;
+      }
+      throw e;
+    }
+  }
+
   return {
     ready: async () => {
-      await openDb();
+      await tryOpenDb();
     },
     get: async <T>(purposeKey: CachePurposeKey, key: string) => {
+      const db = await tryOpenDb();
+      if (db === null) return null;
       const cfg = CACHE_PURPOSES[purposeKey];
-      const db = await openDb();
       const env = await idbGet<CryptoEnvelope>(db, cfg.store, key);
       if (env === null) return null;
       const wk = await opts.auth.getWrapKey();
-      // Wrap-key kid changed under us (e.g., post-rotation). Treat as a
-      // miss; the next put() re-encrypts under the current key.
       if (env.kid !== wk.kid) return null;
       try {
         return await decryptEnvelope<T>({
@@ -183,8 +217,6 @@ export function indexedDbCacheStorage(
         });
       } catch (e) {
         if (e instanceof CryptoEnvelopeError) {
-          // Corrupt or AAD mismatch — drop the row so we don't keep
-          // tripping on it, then return miss.
           await idbDelete(db, cfg.store, key);
           return null;
         }
@@ -192,6 +224,8 @@ export function indexedDbCacheStorage(
       }
     },
     put: async <T>(purposeKey: CachePurposeKey, key: string, value: T) => {
+      const db = await tryOpenDb();
+      if (db === null) return;
       const cfg = CACHE_PURPOSES[purposeKey];
       const wk = await opts.auth.getWrapKey();
       const env = await encryptEnvelope({
@@ -200,16 +234,17 @@ export function indexedDbCacheStorage(
         purpose: cfg.purpose,
         value,
       });
-      const db = await openDb();
       await idbPut(db, cfg.store, key, env);
     },
     delete: async (purposeKey, key) => {
+      const db = await tryOpenDb();
+      if (db === null) return;
       const cfg = CACHE_PURPOSES[purposeKey];
-      const db = await openDb();
       await idbDelete(db, cfg.store, key);
     },
     clearAll: async () => {
-      const db = await openDb();
+      const db = await tryOpenDb();
+      if (db === null) return;
       for (const { store } of Object.values(CACHE_PURPOSES)) {
         await idbClear(db, store);
       }
