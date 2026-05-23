@@ -17,9 +17,10 @@
  * tracked alongside the auth-storage IDB integration tests in D-050.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CACHE_PURPOSES,
+  indexedDbCacheStorage,
   inMemoryCacheStorage,
   type CachePurposeKey,
 } from '../cache-storage.js';
@@ -69,6 +70,85 @@ describe('inMemoryCacheStorage', () => {
     const cache = inMemoryCacheStorage();
     await cache.ready();
     expect(await cache.get('mailboxes', 'x')).toBeNull();
+  });
+});
+
+describe('indexedDbCacheStorage — IDB blocked fallback', () => {
+  function makeBlockingFactory(): IDBFactory {
+    return {
+      open(_name: string, _version?: number): IDBOpenDBRequest {
+        const req = {} as IDBOpenDBRequest;
+        let onblocked: ((ev: Event) => void) | null = null;
+        Object.defineProperty(req, 'onblocked', {
+          get: () => onblocked,
+          set: (fn: ((ev: Event) => void) | null) => {
+            onblocked = fn;
+            if (fn) queueMicrotask(() => fn(new Event('blocked')));
+          },
+        });
+        Object.defineProperty(req, 'onupgradeneeded', {
+          get: () => null,
+          set: () => {},
+        });
+        Object.defineProperty(req, 'onerror', {
+          get: () => null,
+          set: () => {},
+        });
+        Object.defineProperty(req, 'onsuccess', {
+          get: () => null,
+          set: () => {},
+        });
+        return req;
+      },
+      deleteDatabase: () => ({}) as IDBOpenDBRequest,
+      databases: () => Promise.resolve([]),
+      cmp: () => 0,
+    };
+  }
+
+  const fakeAuth = {
+    ready: async () => {},
+    loadTokens: () => null,
+    saveTokens: async () => {},
+    clearTokens: async () => {},
+    savePkce: async () => {},
+    takePkce: async () => null,
+    clearAllPkce: async () => {},
+    getWrapKey: async () => ({ key: {} as CryptoKey, kid: 'k1' }),
+  };
+
+  it('degrades to cache-miss on blocked IDB open', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cache = indexedDbCacheStorage({
+      auth: fakeAuth,
+      idbFactory: makeBlockingFactory(),
+    });
+    const result = await cache.get('mailboxes', '{}');
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('blocked'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('put is a no-op on blocked IDB', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cache = indexedDbCacheStorage({
+      auth: fakeAuth,
+      idbFactory: makeBlockingFactory(),
+    });
+    await expect(cache.put('mailboxes', '{}', { data: 1 })).resolves.toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it('ready resolves on blocked IDB', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const cache = indexedDbCacheStorage({
+      auth: fakeAuth,
+      idbFactory: makeBlockingFactory(),
+    });
+    await expect(cache.ready()).resolves.toBeUndefined();
+    vi.restoreAllMocks();
   });
 });
 
