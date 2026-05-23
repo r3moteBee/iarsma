@@ -25,7 +25,9 @@ import {
   buildMailSendRequest,
   fetchAttachmentUpload,
   fetchIdentityList,
+  fetchMailDeleteCommit,
   fetchMailDraftCommit,
+  fetchMailModifyCommit,
   fetchMailSendCommit,
   fetchMailboxList,
   fetchSession,
@@ -36,8 +38,11 @@ import {
   type IdentityList,
   type JmapClientOptions,
   type Mailbox,
+  type MailDeleteResult,
   type MailDraftInput,
   type MailDraftResult,
+  type MailModifyInput,
+  type MailModifyResult,
   type MailSendInput,
   type MailSendResult,
   type Session,
@@ -282,6 +287,38 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           });
           return result as unknown as O;
         }
+        case 'mail.modify': {
+          const params = _input as unknown as MailModifyInput;
+          if (_options.dryRun === true) {
+            return makeMailModifyPreview(params) as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: MailModifyResult = await fetchMailModifyCommit({
+            ...opts,
+            session,
+            params,
+          });
+          return result as unknown as O;
+        }
+        case 'mail.delete': {
+          // Task 4. Destructive contract — dry-run returns the affected
+          // count (minimal preview; the MCP handler enriches this later
+          // with Email/get metadata). Commit issues Email/set destroy.
+          const params = _input as unknown as { emailIds: string[] };
+          if (_options.dryRun === true) {
+            return {
+              affectedCount: params.emailIds.length,
+              emails: [],
+            } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: MailDeleteResult = await fetchMailDeleteCommit({
+            ...opts,
+            session,
+            emailIds: params.emailIds,
+          });
+          return result as unknown as O;
+        }
         default:
           throw makeToolError(
             'tool_not_found',
@@ -469,6 +506,28 @@ function makeMailSendPreview(params: MailSendInput): {
     estimatedSendTime: params.sendAt ?? new Date().toISOString(),
     estimatedSize: envelope.length,
     identityId: params.identityId,
+  };
+}
+
+/**
+ * Build the dry-run preview for `mail.modify` locally (no JMAP call).
+ * Returns the affected email count and the patch that would be applied.
+ * Since modify is a bulk operation, the preview surfaces the number of
+ * affected emails and the per-email patch for confirmation.
+ */
+function makeMailModifyPreview(params: MailModifyInput): {
+  affectedCount: number;
+  changes: ReadonlyArray<{
+    emailId: string;
+    patchApplied: MailModifyInput['patch'];
+  }>;
+} {
+  return {
+    affectedCount: params.emailIds.length,
+    changes: params.emailIds.map((id) => ({
+      emailId: id,
+      patchApplied: params.patch,
+    })),
   };
 }
 

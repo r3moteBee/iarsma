@@ -27,7 +27,9 @@
  */
 
 export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
+  'mail.delete',
   'mail.draft',
+  'mail.modify',
   'mail.send',
 ]);
 
@@ -52,6 +54,13 @@ export type AffectedJsonBuilder = (output: unknown) => string;
 export const AFFECTED_JSON_BUILDERS: Readonly<
   Record<string, AffectedJsonBuilder>
 > = {
+  'mail.delete': (_output) => {
+    // mail.delete's output only has `deletedCount` — the destroyed ids
+    // are not echoed back (the caller already knows them from the input).
+    // We still register the builder so the provenance entry records the
+    // tool as destructive; the affected-json is an empty array.
+    return JSON.stringify([] as AffectedArtifact[]);
+  },
   'mail.draft': (output) => {
     const o = output as { emailId?: unknown } | undefined;
     if (o === undefined || typeof o.emailId !== 'string') {
@@ -60,6 +69,13 @@ export const AFFECTED_JSON_BUILDERS: Readonly<
     return JSON.stringify([
       { kind: 'mail', id: o.emailId, op: 'create' } as AffectedArtifact,
     ]);
+  },
+  'mail.modify': (_output) => {
+    // mail.modify's output only has `modifiedCount` — no individual
+    // artifact ids are returned by the JMAP Email/set update response.
+    // We still register the builder so the provenance entry records the
+    // tool as destructive; the affected-json is an empty array.
+    return JSON.stringify([] as AffectedArtifact[]);
   },
   'mail.send': (output) => {
     const o = output as { emailId?: unknown; submissionId?: unknown } | undefined;

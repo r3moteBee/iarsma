@@ -1505,6 +1505,285 @@ function toJmapAttachment(a: AttachmentRef): Record<string, unknown> {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Email/set update (mail.modify)
+// ──────────────────────────────────────────────────────────────────────
+//
+// Same D-038 carve-out as mail.draft/mail.send: the `Email/set` update
+// response is a flat `updated` map of `{id: null}` pairs (no
+// sender-controlled content), and we parse it with the same
+// hand-written host-side logic. The patch uses JMAP's path-based
+// update syntax (RFC 8620 §5.3): `mailboxIds/inbox-id: false`,
+// `keywords/$seen: true`.
+
+export type MailModifyInput = {
+  readonly emailIds: readonly string[];
+  readonly patch: {
+    readonly mailboxIds?: Readonly<Record<string, boolean>>;
+    readonly keywords?: Readonly<Record<string, boolean>>;
+  };
+};
+
+export type MailModifyResult = { readonly modifiedCount: number };
+
+export type FetchMailModifyOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly params: MailModifyInput;
+};
+
+/**
+ * Build the JMAP `Email/set` update payload for a modify. Pure function —
+ * no I/O. The patch uses JMAP's path-based update syntax so individual
+ * mailbox membership or keyword flags can be toggled without replacing
+ * the entire map.
+ */
+export function buildMailModifyRequest(opts: {
+  readonly accountId: string;
+  readonly params: MailModifyInput;
+}): string {
+  const { accountId, params } = opts;
+  const patchObj: Record<string, boolean> = {};
+  if (params.patch.mailboxIds !== undefined) {
+    for (const [id, value] of Object.entries(params.patch.mailboxIds)) {
+      patchObj[`mailboxIds/${id}`] = value;
+    }
+  }
+  if (params.patch.keywords !== undefined) {
+    for (const [keyword, value] of Object.entries(params.patch.keywords)) {
+      patchObj[`keywords/${keyword}`] = value;
+    }
+  }
+  const update: Record<string, Record<string, boolean>> = {};
+  for (const emailId of params.emailIds) {
+    update[emailId] = { ...patchObj };
+  }
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Email/set',
+        {
+          accountId,
+          update,
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+/**
+ * Parse a JMAP `Email/set` response for an update operation. Extracts
+ * the count of `updated` entries. Throws on `notUpdated` entries.
+ */
+export function parseMailModifyResponse(body: string): MailModifyResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/set update response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Email/set update response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/set update response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'Email/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Email/set.',
+    );
+  }
+  const result = first[1] as {
+    updated?: Record<string, unknown>;
+    notUpdated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notUpdated !== undefined) {
+    const entries = Object.entries(result.notUpdated);
+    if (entries.length > 0) {
+      const [id, err] = entries[0]!;
+      throw makeError(
+        'jmap_set_error',
+        `Email/set update rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
+        result.notUpdated,
+      );
+    }
+  }
+  const updated = result.updated ?? {};
+  return { modifiedCount: Object.keys(updated).length };
+}
+
+/**
+ * POST a JMAP `Email/set` update and parse the response into a
+ * `MailModifyResult`. Use in the `mail.modify` commit branch of the
+ * invoker; the dry-run branch should NOT call this.
+ */
+export async function fetchMailModifyCommit(
+  opts: FetchMailModifyOptions,
+): Promise<MailModifyResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildMailModifyRequest({ accountId, params: opts.params });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Email/set update returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseMailModifyResponse(text);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Email/set destroy (mail.delete)
+// ──────────────────────────────────────────────────────────────────────
+//
+// Same D-038 carve-out as mail.draft/mail.send: the `Email/set` destroy
+// response is a flat `destroyed` string array + optional `notDestroyed`
+// map. No sender-controlled content, no nested parsing.
+
+export type MailDeleteResult = { readonly deletedCount: number };
+
+export type FetchMailDeleteOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly emailIds: readonly string[];
+};
+
+/**
+ * Build the JMAP `Email/set` destroy payload. Pure function — no I/O.
+ */
+export function buildMailDeleteRequest(opts: {
+  readonly accountId: string;
+  readonly emailIds: readonly string[];
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [['Email/set', { accountId: opts.accountId, destroy: opts.emailIds }, '0']],
+  });
+}
+
+/**
+ * Parse a JMAP `Email/set` destroy response. Extracts the `destroyed`
+ * array length into `deletedCount`. Throws on `notDestroyed` with
+ * error details so callers surface per-id failures.
+ */
+export function parseMailDeleteResponse(body: string): MailDeleteResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/set destroy response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Email/set destroy response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/set destroy response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'Email/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Email/set.',
+    );
+  }
+  const result = first[1] as {
+    destroyed?: unknown[];
+    notDestroyed?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notDestroyed !== undefined && Object.keys(result.notDestroyed).length > 0) {
+    const ids = Object.keys(result.notDestroyed);
+    const details = ids
+      .map((id) => {
+        const entry = result.notDestroyed![id]!;
+        return `${id}: ${entry.type ?? 'unknown'}${entry.description !== undefined ? ` — ${entry.description}` : ''}`;
+      })
+      .join('; ');
+    throw makeError(
+      'jmap_set_error',
+      `Email/set notDestroyed: ${details}`,
+      result.notDestroyed,
+    );
+  }
+  const destroyed = Array.isArray(result.destroyed) ? result.destroyed : [];
+  return { deletedCount: destroyed.length };
+}
+
+/**
+ * POST a JMAP `Email/set` destroy and parse the response into a
+ * `MailDeleteResult`. Same auth-check -> POST -> parse pattern as
+ * `fetchMailDraftCommit`.
+ */
+export async function fetchMailDeleteCommit(
+  opts: FetchMailDeleteOptions,
+): Promise<MailDeleteResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildMailDeleteRequest({ accountId, emailIds: opts.emailIds });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Email/set destroy returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseMailDeleteResponse(text);
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }

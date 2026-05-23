@@ -11,7 +11,7 @@ import type { ToolRegistration } from '../tool-loader.js';
 const sessionGet: ToolRegistration = {
   name: 'session.get',
   description: 'Get the session.',
-  requiredScopes: ['session:read'],
+  requiredScopes: ['mail:read'],
   inputSchema: { type: 'object' },
   outputSchema: { type: 'object' },
   isDestructive: false,
@@ -40,15 +40,15 @@ describe('dispatcher', () => {
     expect(r).toMatchObject({ kind: 'denied', code: 'not_found' });
   });
 
-  it('returns forbidden when caller scopes are insufficient', async () => {
+  it('returns scope_denied when caller scopes are insufficient', async () => {
     const d = createDispatcher({ tools });
     const r = await d.invoke('session.get', {}, makeScopeSet([]));
-    expect(r).toMatchObject({ kind: 'denied', code: 'forbidden' });
+    expect(r).toMatchObject({ kind: 'denied', code: 'scope_denied' });
   });
 
   it('returns not_implemented when a tool has no handler', async () => {
     const d = createDispatcher({ tools });
-    const r = await d.invoke('session.get', {}, makeScopeSet(['session:read']));
+    const r = await d.invoke('session.get', {}, makeScopeSet(['mail:read']));
     expect(r).toMatchObject({ kind: 'error', code: 'not_implemented' });
   });
 
@@ -63,7 +63,7 @@ describe('dispatcher', () => {
     const r = await d.invoke(
       'session.get',
       { hello: 'world' },
-      makeScopeSet(['session:read']),
+      makeScopeSet(['mail:read']),
     );
     expect(r).toEqual({ kind: 'ok', output: { echo: { hello: 'world' } } });
   });
@@ -102,7 +102,7 @@ describe('dispatcher', () => {
       tools,
       handlers: new Map([['session.get', handler]]),
     });
-    await d.invoke('session.get', { x: 1 }, makeScopeSet(['session:read']));
+    await d.invoke('session.get', { x: 1 }, makeScopeSet(['mail:read']));
     expect(calls).toEqual([{ input: { x: 1 }, dryRun: false, scopeCount: 1 }]);
   });
 
@@ -114,7 +114,7 @@ describe('dispatcher', () => {
       tools,
       handlers: new Map([['session.get', handler]]),
     });
-    const r = await d.invoke('session.get', {}, makeScopeSet(['session:read']));
+    const r = await d.invoke('session.get', {}, makeScopeSet(['mail:read']));
     expect(r).toMatchObject({ kind: 'error', code: 'tool_error', message: 'boom' });
   });
 });

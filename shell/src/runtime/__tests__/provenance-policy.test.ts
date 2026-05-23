@@ -15,15 +15,30 @@ import {
 } from '../provenance-policy.js';
 
 describe('DESTRUCTIVE_TOOLS', () => {
-  it('lists exactly the Phase 2 destructive tools', () => {
-    expect([...DESTRUCTIVE_TOOLS].sort()).toEqual(['mail.draft', 'mail.send']);
+  it('lists exactly the destructive tools', () => {
+    expect([...DESTRUCTIVE_TOOLS].sort()).toEqual(['mail.delete', 'mail.draft', 'mail.modify', 'mail.send']);
   });
 
   it('isDestructive recognizes the destructive set', () => {
+    expect(isDestructive('mail.delete')).toBe(true);
     expect(isDestructive('mail.draft')).toBe(true);
+    expect(isDestructive('mail.modify')).toBe(true);
     expect(isDestructive('mail.send')).toBe(true);
     expect(isDestructive('mailbox.list')).toBe(false);
     expect(isDestructive('thread.search')).toBe(false);
+  });
+});
+
+describe('affectedJsonFor — mail.delete', () => {
+  it('returns an empty artifacts array (output only has deletedCount)', () => {
+    const result = JSON.parse(
+      affectedJsonFor('mail.delete', { deletedCount: 2 })!,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('returns an empty artifacts array even when output is undefined', () => {
+    expect(JSON.parse(affectedJsonFor('mail.delete', undefined)!)).toEqual([]);
   });
 });
 
@@ -43,6 +58,19 @@ describe('affectedJsonFor — mail.draft', () => {
   it('returns an empty array when the output lacks emailId', () => {
     expect(JSON.parse(affectedJsonFor('mail.draft', {})!)).toEqual([]);
     expect(JSON.parse(affectedJsonFor('mail.draft', undefined)!)).toEqual([]);
+  });
+});
+
+describe('affectedJsonFor — mail.modify', () => {
+  it('returns an empty artifacts array (output only has modifiedCount)', () => {
+    const result = JSON.parse(
+      affectedJsonFor('mail.modify', { modifiedCount: 3 })!,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('returns an empty artifacts array even when output is undefined', () => {
+    expect(JSON.parse(affectedJsonFor('mail.modify', undefined)!)).toEqual([]);
   });
 });
 
