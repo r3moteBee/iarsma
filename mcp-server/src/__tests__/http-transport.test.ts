@@ -18,8 +18,12 @@ import { createIarsmaMcpServer } from '../server.js';
 import {
   loadHttpTransportConfig,
   startHttpTransport,
+  readApproval,
 } from '../http-transport.js';
 import path from 'node:path';
+import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -128,5 +132,54 @@ describe('startHttpTransport — gating + routing', () => {
       body: '{"not": "a valid JSON-RPC request"}',
     });
     expect(r.status).not.toBe(401);
+  });
+});
+
+describe('readApproval', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(path.join(tmpdir(), 'iarsma-approvals-'));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns pending status for a pending approval', () => {
+    const filePath = path.join(tmpDir, 'approvals.json');
+    writeFileSync(filePath, JSON.stringify([{ id: 'a-1', status: 'pending' }]));
+    const result = readApproval('a-1', filePath);
+    expect(result).toEqual({ status: 'pending' });
+  });
+
+  it('returns approved status with result', () => {
+    const filePath = path.join(tmpDir, 'approvals.json');
+    writeFileSync(filePath, JSON.stringify([
+      { id: 'a-1', status: 'approved', result: { emailId: 'E-42' } },
+    ]));
+    const result = readApproval('a-1', filePath);
+    expect(result).toEqual({ status: 'approved', result: { emailId: 'E-42' } });
+  });
+
+  it('returns denied status with reason', () => {
+    const filePath = path.join(tmpDir, 'approvals.json');
+    writeFileSync(filePath, JSON.stringify([
+      { id: 'a-1', status: 'denied', reason: 'User declined.' },
+    ]));
+    const result = readApproval('a-1', filePath);
+    expect(result).toEqual({ status: 'denied', reason: 'User declined.' });
+  });
+
+  it('returns null when approval ID is not found', () => {
+    const filePath = path.join(tmpDir, 'approvals.json');
+    writeFileSync(filePath, JSON.stringify([{ id: 'a-1', status: 'pending' }]));
+    const result = readApproval('a-nonexistent', filePath);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when file does not exist', () => {
+    const result = readApproval('a-1', path.join(tmpDir, 'nonexistent.json'));
+    expect(result).toBeNull();
   });
 });

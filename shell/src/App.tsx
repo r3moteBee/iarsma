@@ -30,6 +30,7 @@ import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { ComposeView } from './views/compose-view.js';
 import { AgentSettingsView } from './views/agent-settings-view.js';
+import { ApprovalsView } from './views/approvals-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
@@ -409,9 +410,9 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
         </button>
         <button
           type="button"
-          disabled
-          title="Coming in v0.6.0"
-          style={navButtonStyle(false, true)}
+          onClick={() => setActiveView('approvals')}
+          aria-current={activeView === 'approvals' ? 'page' : undefined}
+          style={navButtonStyle(activeView === 'approvals')}
         >
           Approvals
         </button>
@@ -457,6 +458,12 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
             <ThreadView />
           </section>
         </div>
+      ) : activeView === 'approvals' ? (
+        <ApprovalsView
+          approvals={[]}
+          onApprove={async () => {}}
+          onDeny={async () => {}}
+        />
       ) : activeView === 'settings' ? (
         <AgentSettingsView
           tokens={agentTokens}

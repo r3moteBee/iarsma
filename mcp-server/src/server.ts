@@ -160,6 +160,20 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
           ],
           isError: true,
         };
+      case 'require_approval':
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                status: 'pending_approval',
+                approvalId: result.approvalId,
+                message: result.reason,
+                pollUrl: `/agents/approvals/${encodeURIComponent(result.approvalId)}`,
+              }),
+            },
+          ],
+        };
     }
   });
 
