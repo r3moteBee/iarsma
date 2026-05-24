@@ -13,7 +13,7 @@ import { chain as actionLogChain } from '@iarsma/wasm-bindings/action-log';
 /** Origin of the call (D-047). UI = human web/native session; MCP = an
  *  agent connecting via the MCP server; LIBRARY = a native-app or other
  *  embedder using the Library API path. */
-export type CallerClass = 'ui' | 'mcp' | 'library';
+export type CallerClass = 'ui' | 'mcp' | 'agent' | 'library';
 
 /** Mode of a call against a destructive capability (D-046). Absent on
  *  non-destructive reads. */
@@ -48,6 +48,10 @@ export type EntryInput = {
   /** Commit-only metadata. Set iff `mode === 'commit'` AND artifacts
    *  were created / modified / deleted. */
   readonly provenance?: Provenance;
+  /** Token ID of the agent that made this call. Set when
+   *  `callerClass === 'agent'` to link the entry to the specific
+   *  token in `iarsma-agents`. */
+  readonly agentTokenId?: string;
 };
 
 /** Current entry-data schema version. Bumped per `docs/versioning.md`
@@ -226,10 +230,12 @@ export function createActionLog(opts: ActionLogOptions): ActionLog {
 // Helpers
 // ───────────────────────────────────────────────────────────────────────
 
+type WitCallerClass = 'ui' | 'mcp' | 'library';
+
 type WitEntryData = {
   schemaVersion: number;
   timestampMs: bigint;
-  callerClass: CallerClass;
+  callerClass: WitCallerClass;
   identity: string;
   action: string;
   mode?: CallMode;
@@ -237,11 +243,15 @@ type WitEntryData = {
   provenance?: Provenance;
 };
 
+function toWitCallerClass(c: CallerClass): WitCallerClass {
+  return c === 'agent' ? 'mcp' : c;
+}
+
 function toWit(data: EntryInput): WitEntryData {
   return {
     schemaVersion: data.schemaVersion,
     timestampMs: BigInt(data.timestampMs),
-    callerClass: data.callerClass,
+    callerClass: toWitCallerClass(data.callerClass),
     identity: data.identity,
     action: data.action,
     ...(data.mode !== undefined ? { mode: data.mode } : {}),

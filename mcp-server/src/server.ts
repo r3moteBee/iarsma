@@ -10,13 +10,11 @@
  *  Tool listing (ListToolsRequest)
  * ─────────────────────────────────────────────────────────────────────────
  *
- * The SDK's MCP protocol does not, today, surface request-level
- * authentication on `listTools`. For Phase 0 we expose ALL tools to any
- * connected client — the dispatch layer enforces scopes on actual calls.
- *
- * Phase 1+: when the SDK exposes per-request auth context, filter the tool
- * list by the connecting agent's scope set so agents only see what they can
- * call. Until then, listing is informational and dispatch is authoritative.
+ * When a `getAgentScopes` resolver is provided (HTTP/SSE transport), the
+ * ListTools handler filters the tool list by the agent's scope set using
+ * the centralized TOOL_SCOPES constant. Agents only see tools they can
+ * call. When no resolver is provided (stdio transport / dev mode), all
+ * tools are returned — the dispatch layer still enforces scopes on calls.
  *
  * ─────────────────────────────────────────────────────────────────────────
  *  Tool calls (CallToolRequest)
@@ -40,7 +38,8 @@ import {
   type AgentContextUrn,
 } from './agent-context.js';
 import { createDispatcher, type DispatcherDeps } from './invocation.js';
-import { makeScopeSet } from './scope-filter.js';
+import { hasAllScopes, makeScopeSet, type ScopeSet } from './scope-filter.js';
+import { requiredScope } from './tool-scopes.js';
 import type { ToolRegistration } from './tool-loader.js';
 
 export type IarsmaServerOptions = {
@@ -58,6 +57,15 @@ export type IarsmaServerOptions = {
    * MCP capability map. Omit to skip advertisement (dev/test default).
    */
   readonly agentContext?: AgentContextUrn;
+  /**
+   * Agent scope resolver. When provided, the ListTools handler filters the
+   * tool list to only tools the agent's scope set permits. When absent (dev
+   * mode / stdio transport), all tools are returned unfiltered.
+   *
+   * The HTTP/SSE transport sets this from the Authorization header; the
+   * stdio transport leaves it undefined for backward compatibility.
+   */
+  readonly getAgentScopes?: () => ScopeSet | undefined;
 };
 
 export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
@@ -83,8 +91,17 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const allTools = [...opts.tools.values()];
+
+    // List-time scope filtering: when an identity is available, only return
+    // tools the agent's scopes permit. In dev mode (no identity), return all.
+    const agentScopes = opts.getAgentScopes?.();
+    const filtered = agentScopes !== undefined
+      ? filterToolsByScope(allTools, agentScopes)
+      : allTools;
+
     return {
-      tools: [...opts.tools.values()].map((t) => ({
+      tools: filtered.map((t) => ({
         name: t.name,
         description: t.description,
         inputSchema: t.inputSchema,
@@ -152,4 +169,20 @@ function stripIarsmaArgs(args: Record<string, unknown>): Record<string, unknown>
     out[k] = v;
   }
   return out;
+}
+
+/**
+ * Filter tool registrations by scope using the centralized TOOL_SCOPES map.
+ * Falls back to the tool's own `requiredScopes` when the tool is not in
+ * TOOL_SCOPES (future/third-party tools).
+ */
+function filterToolsByScope(
+  tools: readonly ToolRegistration[],
+  agentScopes: ScopeSet,
+): ToolRegistration[] {
+  return tools.filter((t) => {
+    const scope = requiredScope(t.name);
+    const scopesToCheck = scope !== undefined ? [scope] : t.requiredScopes;
+    return hasAllScopes(agentScopes, scopesToCheck);
+  });
 }

@@ -16,6 +16,7 @@ import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
 import { searchQueryAtom } from './mail-state.js';
+import { activeViewAtom } from './nav-state.js';
 import {
   IarsmaProvider,
   cachedInvoker,
@@ -23,8 +24,12 @@ import {
   loggingInvoker,
   type Invoker,
 } from './runtime/index.js';
+import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
+import { stalwartTokenIssuer } from './runtime/stalwart-token-issuer.js';
+import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { ComposeView } from './views/compose-view.js';
+import { AgentSettingsView } from './views/agent-settings-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
@@ -251,6 +256,7 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   const setCompose = useSetAtom(composeStateAtom);
   const openCompose = () => setCompose({ kind: 'open', prefill: {} });
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
+  const [activeView, setActiveView] = useAtom(activeViewAtom);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   // Expose the search input ref globally so the `/` keybinding (wired
   // at App-level via useGlobalKeyboardShortcuts) can focus it without
@@ -285,22 +291,54 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
     })();
   };
 
+  const metadataStore = useMemo(
+    () =>
+      typeof indexedDB !== 'undefined'
+        ? indexedDbAgentMetadataStore()
+        : inMemoryAgentMetadataStore(),
+    [],
+  );
+  const issuer = useMemo(() => {
+    const tok = tokens;
+    if (tok === null) return null;
+    return stalwartTokenIssuer({
+      issuerUrl: config.oidcIssuer,
+      adminToken: tok.accessToken,
+      metadataStore,
+    });
+  }, [config.oidcIssuer, tokens, metadataStore]);
+
+  const [agentTokens, setAgentTokens] = useState<readonly AgentTokenInfo[]>([]);
+  const [agentTokensLoading, setAgentTokensLoading] = useState(false);
+
+  useEffect(() => {
+    if (issuer === null) return;
+    let cancelled = false;
+    setAgentTokensLoading(true);
+    issuer.listTokens().then(
+      (list) => { if (!cancelled) { setAgentTokens(list); setAgentTokensLoading(false); } },
+      () => { if (!cancelled) setAgentTokensLoading(false); },
+    );
+    return () => { cancelled = true; };
+  }, [issuer]);
+
+  const handleIssue = async (name: string, scopes: string[], lifetimeSec: number) => {
+    if (issuer === null) throw new Error('Not signed in');
+    const result = await issuer.issueToken({ name, scopes, lifetimeSec });
+    const refreshed = await issuer.listTokens();
+    setAgentTokens(refreshed);
+    return result;
+  };
+  const handleRevoke = async (tokenId: string) => {
+    if (issuer === null) throw new Error('Not signed in');
+    await issuer.revokeToken(tokenId);
+    const refreshed = await issuer.listTokens();
+    setAgentTokens(refreshed);
+  };
+
   return (
-    <section
-      aria-labelledby="signedin-heading"
-      style={{
-        display: 'grid',
-        // 3-column reading layout: mailboxes | threads | thread body.
-        // The thread column is wider than the thread-list because long
-        // sender names + subjects are common; min-width:0 on the thread
-        // body column lets the inner content scroll without forcing
-        // grid overflow.
-        gridTemplateColumns: '16em 22em minmax(0, 1fr)',
-        gap: '1em',
-        alignItems: 'start',
-      }}
-    >
-      <header style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75em' }}>
+    <section aria-labelledby="signedin-heading">
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75em' }}>
         <h2 id="signedin-heading" style={{ margin: 0 }}>Signed in</h2>
         <span style={{ flex: '1 1 auto', display: 'flex', gap: '0.5em', alignItems: 'baseline' }}>
           <label htmlFor="thread-search-input" style={{ flex: '0 0 auto' }}>
@@ -367,21 +405,93 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
           )}
         </span>
       </header>
-      <aside aria-label="Mailbox sidebar">
-        <MailboxList />
-      </aside>
-      <section aria-label="Selected mailbox">
-        {session.isLoading ? <p>Loading session…</p> : null}
-        {session.error !== undefined ? (
-          <p role="alert">Session error: {session.error.message}</p>
-        ) : null}
-        <ThreadList />
-      </section>
-      <section aria-label="Selected thread">
-        <ThreadView />
-      </section>
+
+      <nav aria-label="Main navigation" style={{ display: 'flex', gap: '0.25em', margin: '0.75em 0' }}>
+        <button
+          type="button"
+          onClick={() => setActiveView('mail')}
+          aria-current={activeView === 'mail' ? 'page' : undefined}
+          style={navButtonStyle(activeView === 'mail')}
+        >
+          Mail
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Coming in v0.6.0"
+          style={navButtonStyle(false, true)}
+        >
+          Approvals
+        </button>
+        <button
+          type="button"
+          disabled
+          title="Coming in v0.7.0"
+          style={navButtonStyle(false, true)}
+        >
+          Activity
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveView('settings')}
+          aria-current={activeView === 'settings' ? 'page' : undefined}
+          style={navButtonStyle(activeView === 'settings')}
+        >
+          Settings
+        </button>
+      </nav>
+
+      {activeView === 'mail' ? (
+        <div
+          style={{
+            display: 'grid',
+            // 3-column reading layout: mailboxes | threads | thread body.
+            gridTemplateColumns: '16em 22em minmax(0, 1fr)',
+            gap: '1em',
+            alignItems: 'start',
+          }}
+        >
+          <aside aria-label="Mailbox sidebar">
+            <MailboxList />
+          </aside>
+          <section aria-label="Selected mailbox">
+            {session.isLoading ? <p>Loading session…</p> : null}
+            {session.error !== undefined ? (
+              <p role="alert">Session error: {session.error.message}</p>
+            ) : null}
+            <ThreadList />
+          </section>
+          <section aria-label="Selected thread">
+            <ThreadView />
+          </section>
+        </div>
+      ) : activeView === 'settings' ? (
+        <AgentSettingsView
+          tokens={agentTokens}
+          onIssue={handleIssue}
+          onRevoke={handleRevoke}
+          isLoading={agentTokensLoading}
+        />
+      ) : (
+        <div style={{ padding: '2em', color: 'rgba(0,0,0,0.5)' }}>
+          Coming soon
+        </div>
+      )}
     </section>
   );
+}
+
+function navButtonStyle(active: boolean, disabled?: boolean): React.CSSProperties {
+  return {
+    padding: '0.3em 0.8em',
+    font: 'inherit',
+    border: 'none',
+    borderBottom: active ? '2px solid currentColor' : '2px solid transparent',
+    background: 'none',
+    cursor: disabled === true ? 'default' : 'pointer',
+    fontWeight: active ? 600 : 400,
+    opacity: disabled === true ? 0.45 : 1,
+  };
 }
 
 function CallbackView({

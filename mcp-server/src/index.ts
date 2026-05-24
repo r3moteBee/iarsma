@@ -12,7 +12,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
+import { createMailDeleteHandler } from './handlers/mail-delete.js';
 import { createMailDraftHandler } from './handlers/mail-draft.js';
+import { createMailModifyHandler } from './handlers/mail-modify.js';
+import { createMailSendHandler } from './handlers/mail-send.js';
 import { createMailboxListHandler } from './handlers/mailbox-list.js';
 import {
   createSessionGetHandler,
@@ -84,10 +87,13 @@ async function main(): Promise<void> {
     handlers.set('thread.get', createThreadGetHandler(sessionGetDeps));
     handlers.set('thread.search', createThreadSearchHandler(sessionGetDeps));
     handlers.set('mail.draft', createMailDraftHandler(sessionGetDeps));
+    handlers.set('mail.send', createMailSendHandler(sessionGetDeps));
+    handlers.set('mail.modify', createMailModifyHandler(sessionGetDeps));
+    handlers.set('mail.delete', createMailDeleteHandler(sessionGetDeps));
     // eslint-disable-next-line no-console
     console.error(
       `[iarsma-mcp] capabilities wired against ${sessionGetDeps.jmapBaseUrl}: ` +
-        'session.get, mailbox.list, thread.list, thread.get, thread.search, mail.draft',
+        'session.get, mailbox.list, thread.list, thread.get, thread.search, mail.draft, mail.send, mail.modify, mail.delete',
     );
   }
 
@@ -184,6 +190,38 @@ export type {
   ThreadGet,
   ThreadGetDeps,
 } from './handlers/thread-get.js';
+export {
+  createMailSendHandler,
+  loadMailSendDeps,
+  MailSendConfigError,
+} from './handlers/mail-send.js';
+export type {
+  MailSendDeps,
+  MailSendInput,
+  MailSendResult,
+} from './handlers/mail-send.js';
+export {
+  createMailModifyHandler,
+  loadMailModifyDeps,
+  MailModifyConfigError,
+} from './handlers/mail-modify.js';
+export type {
+  MailModifyDeps,
+  MailModifyInput,
+  MailModifyPatch,
+  MailModifyResult,
+} from './handlers/mail-modify.js';
+export {
+  createMailDeleteHandler,
+  loadMailDeleteDeps,
+  MailDeleteConfigError,
+} from './handlers/mail-delete.js';
+export type {
+  MailDeleteDeps,
+  MailDeleteInput,
+  MailDeletePreview,
+  MailDeleteResult,
+} from './handlers/mail-delete.js';
 export { loadTools, ToolLoadError } from './tool-loader.js';
 export type { ToolRegistration } from './tool-loader.js';
 export { extractIdentity, AuthError, headersFromObject } from './auth.js';

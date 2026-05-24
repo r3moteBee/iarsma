@@ -22,6 +22,7 @@
 
 import { hasAllScopes, type ScopeSet } from './scope-filter.js';
 import type { ToolRegistration } from './tool-loader.js';
+import { requiredScope } from './tool-scopes.js';
 
 export type InvocationOptions = {
   /** True for dry-run; false (default) for commit. */
@@ -31,7 +32,7 @@ export type InvocationOptions = {
 export type InvocationResult =
   | { kind: 'ok'; output: unknown }
   | { kind: 'preview'; preview: unknown }
-  | { kind: 'denied'; code: 'unauthorized' | 'forbidden' | 'not_found'; message: string }
+  | { kind: 'denied'; code: 'unauthorized' | 'forbidden' | 'scope_denied' | 'not_found'; message: string }
   | { kind: 'error'; code: string; message: string };
 
 export type Dispatcher = {
@@ -71,11 +72,16 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
           message: `Unknown tool: ${name}`,
         };
       }
-      if (!hasAllScopes(callerScopes, tool.requiredScopes)) {
+      // Scope check: use the centralized TOOL_SCOPES constant when available,
+      // falling back to the tool registration's requiredScopes array.
+      const scope = requiredScope(name);
+      const scopesToCheck = scope !== undefined ? [scope] : tool.requiredScopes;
+      if (!hasAllScopes(callerScopes, scopesToCheck)) {
+        const missing = scope ?? tool.requiredScopes.join(', ');
         return {
           kind: 'denied',
-          code: 'forbidden',
-          message: `Missing required scopes for ${name}: ${tool.requiredScopes.join(', ')}`,
+          code: 'scope_denied',
+          message: `Tool '${name}' requires scope '${missing}' which is not granted.`,
         };
       }
 
