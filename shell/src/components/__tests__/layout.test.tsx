@@ -9,7 +9,7 @@
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { Provider as JotaiProvider, useAtomValue } from 'jotai';
+import { Provider as JotaiProvider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock WASM bindings (same approach as mailbox-list.test.tsx)
@@ -27,8 +27,8 @@ vi.mock('@iarsma/wasm-bindings/action-log', () => ({
 
 import { Sidebar, type SidebarProps } from '../sidebar.js';
 import { BottomNav, type BottomNavProps } from '../bottom-nav.js';
-import { TopBar, type TopBarProps } from '../top-bar.js';
-import { themePreferenceAtom, resolveTheme } from '../../runtime/theme.js';
+import { TopBar } from '../top-bar.js';
+import { resolveTheme } from '../../runtime/theme.js';
 
 // ── Helpers ─────────────────────────────────────────────────────
 

@@ -14,8 +14,6 @@ import {
   fetchContactGet,
   parseContactListResponse,
   parseContactGetResponse,
-  type Contact,
-  type ContactList,
   type Session,
 } from '../jmap-client.js';
 import type { ToolError } from '../types.js';
