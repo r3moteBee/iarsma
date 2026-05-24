@@ -44,8 +44,11 @@ export type LoggingInvokerOptions = {
   readonly getIdentity: () => Identity | null;
   /** Caller class for entries written by this wrapper. The shell uses
    *  `'ui'`; the MCP server constructs its own logging invoker with
-   *  `'mcp'` when those handlers wire up. Defaults to `'ui'`. */
+   *  `'mcp'` (unauthenticated) or `'agent'` (scoped token) when
+   *  those handlers wire up. Defaults to `'ui'`. */
   readonly callerClass?: CallerClass;
+  /** Token ID of the agent. Set when `callerClass === 'agent'`. */
+  readonly agentTokenId?: string;
   /** Surfaces append failures (tests + diagnostics). Default warns to
    *  console; pass `() => {}` to silence. */
   readonly onAppendError?: (toolName: string, error: unknown) => void;
@@ -111,6 +114,7 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
           params: input,
           ...(mode !== undefined ? { mode } : {}),
           ...(provenance !== undefined ? { provenance } : {}),
+          ...(opts.agentTokenId !== undefined ? { agentTokenId: opts.agentTokenId } : {}),
         };
         await opts.log.append(append);
       } catch (e) {
