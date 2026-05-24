@@ -79,6 +79,7 @@ const BODY_PREVIEW_MAX = 256;
 
 export function createMailSendHandler(deps: MailSendDeps): ToolHandler {
   return async (input, ctx) => {
+    const token = ctx?.bearerToken ?? deps.bearerToken;
     const params = parseInput(input);
 
     // Dry-run is local — no JMAP roundtrip. Return a preview that lets
@@ -117,7 +118,7 @@ export function createMailSendHandler(deps: MailSendDeps): ToolHandler {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
     });
     requireOk(sessionResponse, 'JMAP /.well-known/jmap');
@@ -139,7 +140,7 @@ export function createMailSendHandler(deps: MailSendDeps): ToolHandler {
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
       body,
     });

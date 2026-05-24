@@ -27,7 +27,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import type { TokenStore, ResolvedIdentity } from './token-store.js';
+import type { TokenStore, ResolvedIdentity, TokenEntry } from './token-store.js';
+import { createStalwartApiKey, destroyStalwartApiKey } from './stalwart-permissions.js';
 
 export type HttpTransportConfig = {
   /** Port to bind. Required when HTTP transport is enabled. */
@@ -99,20 +100,17 @@ export async function startHttpTransport(opts: {
 }): Promise<StartHttpTransportResult> {
   const { config, mcpServer } = opts;
 
-  // Stateless transport — each request handled independently.
-  // `sessionIdGenerator: undefined` disables session-table tracking.
-  // The SDK's types reject the literal `undefined` under
-  // exactOptionalPropertyTypes; the cast keeps the runtime behavior
-  // we want (the SDK explicitly checks for the property's presence).
-  const transport = new StreamableHTTPServerTransport(
-    { sessionIdGenerator: undefined } as unknown as ConstructorParameters<
-      typeof StreamableHTTPServerTransport
-    >[0],
-  );
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => crypto.randomUUID(),
+  });
   // Cast: the SDK's `Transport` interface declares `onclose` as a
   // required function, but the transport's runtime shape sets it
   // lazily. exactOptionalPropertyTypes flags the mismatch; the
   // McpServer.connect call is the right operation regardless.
+  transport.onerror = (err: Error) => {
+    // eslint-disable-next-line no-console
+    console.error('[iarsma-mcp-http] transport error:', err);
+  };
   await mcpServer.connect(transport as unknown as Parameters<typeof mcpServer.connect>[0]);
 
   const server = createServer(async (req, res) => {
@@ -170,11 +168,28 @@ async function handleRequest(args: {
     return;
   }
 
+  // CORS — needed for webmail UI to call /agents/* endpoints.
+  res.setHeader('access-control-allow-origin', req.headers.origin ?? '*');
+  res.setHeader('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('access-control-allow-headers', 'content-type, authorization');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  // Agent management REST endpoints — authenticated with the user's
+  // Stalwart bearer token (not an agent token).
+  if (req.url?.startsWith('/agents')) {
+    await handleAgentEndpoint({ req, res, tokenStore, expectedToken });
+    return;
+  }
+
   // MCP endpoints all live at /mcp.
   if (!req.url?.startsWith('/mcp')) {
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(
-      JSON.stringify({ error: 'not_found', message: 'Unknown path. Use /mcp.' }),
+      JSON.stringify({ error: 'not_found', message: 'Use /mcp or /agents/*.' }),
     );
     return;
   }
@@ -201,6 +216,12 @@ async function handleRequest(args: {
     return;
   }
 
+  // Attach resolved identity to req.auth so the SDK passes it
+  // through to CallTool/ListTools handlers via request context.
+  if (resolvedAgent !== null) {
+    (req as unknown as Record<string, unknown>).auth = resolvedAgent;
+  }
+
   // Pre-parse the JSON body for POST so the transport can dispatch
   // synchronously. The SDK's `handleRequest` accepts the parsed body
   // as a third argument, which we pass here.
@@ -221,6 +242,144 @@ async function handleRequest(args: {
   }
 
   await transport.handleRequest(req, res, body);
+}
+
+async function handleAgentEndpoint(args: {
+  readonly req: IncomingMessage;
+  readonly res: ServerResponse;
+  readonly tokenStore?: TokenStore | undefined;
+  readonly expectedToken: string;
+}): Promise<void> {
+  const { req, res, tokenStore } = args;
+
+  // All agent endpoints require auth — the user's Stalwart token.
+  const bearer = extractBearer(req.headers.authorization);
+  if (bearer === null) {
+    res.writeHead(401, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'unauthorized', message: 'Bearer token required.' }));
+    return;
+  }
+
+  if (tokenStore === undefined) {
+    res.writeHead(503, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_configured', message: 'Token store not configured (set IARSMA_TOKENS_FILE).' }));
+    return;
+  }
+
+  // POST /agents/register — create agent token + Stalwart API key
+  if (req.method === 'POST' && req.url === '/agents/register') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readJson(req)) as Record<string, unknown>;
+    } catch {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'invalid_request', message: 'Invalid JSON body.' }));
+      return;
+    }
+
+    const name = body.name as string | undefined;
+    const scopes = body.scopes as string[] | undefined;
+    const jmapUrl = body.jmapUrl as string | undefined;
+    if (typeof name !== 'string' || !Array.isArray(scopes) || typeof jmapUrl !== 'string') {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'invalid_request', message: 'Required: name (string), scopes (string[]), jmapUrl (string).' }));
+      return;
+    }
+
+    try {
+      // Create scoped Stalwart API key using the user's token
+      const stalwartKey = await createStalwartApiKey({
+        jmapUrl,
+        userToken: bearer,
+        description: `iarsma-agent: ${name}`,
+        scopes,
+      });
+
+      // Generate agent secret
+      const secretBytes = new Uint8Array(32);
+      crypto.getRandomValues(secretBytes);
+      const agentSecret = Array.from(secretBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      const tokenId = crypto.randomUUID();
+
+      // Register in token store
+      const entry: TokenEntry = {
+        secret: agentSecret,
+        name,
+        scopes,
+        tokenId,
+        stalwartApiKey: stalwartKey.secret,
+        stalwartKeyId: stalwartKey.id,
+      };
+      tokenStore.register(entry);
+
+      // eslint-disable-next-line no-console
+      console.error(`[iarsma-mcp] registered agent '${name}' (${tokenId}) with scopes: ${scopes.join(', ')}`);
+
+      res.writeHead(201, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        tokenId,
+        secret: agentSecret,
+        name,
+        scopes,
+      }));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[iarsma-mcp] agent registration failed:', e);
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'registration_failed',
+        message: e instanceof Error ? e.message : String(e),
+      }));
+    }
+    return;
+  }
+
+  // DELETE /agents/{tokenId} — revoke agent + destroy Stalwart key
+  const deleteMatch = req.method === 'DELETE' && req.url?.match(/^\/agents\/([^/]+)$/);
+  if (deleteMatch) {
+    const tokenId = deleteMatch[1]!;
+    const removed = tokenStore.remove(tokenId);
+    if (removed === null) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found', message: `Token ${tokenId} not found.` }));
+      return;
+    }
+
+    // Destroy the Stalwart API key
+    if (removed.stalwartKeyId !== undefined) {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const jmap = url.searchParams.get('jmapUrl');
+      if (jmap !== null) {
+        try {
+          await destroyStalwartApiKey({ jmapUrl: jmap, userToken: bearer, keyId: removed.stalwartKeyId });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[iarsma-mcp] Stalwart key cleanup failed (agent removed anyway):', e);
+        }
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.error(`[iarsma-mcp] revoked agent '${removed.name}' (${tokenId})`);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ revoked: tokenId }));
+    return;
+  }
+
+  // GET /agents — list all agents (no secrets)
+  if (req.method === 'GET' && req.url === '/agents') {
+    const list = tokenStore.list().map((e) => ({
+      tokenId: e.tokenId,
+      name: e.name,
+      scopes: e.scopes,
+    }));
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(list));
+    return;
+  }
+
+  res.writeHead(404, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ error: 'not_found', message: 'Unknown agent endpoint.' }));
 }
 
 function extractBearer(header: string | undefined): string | null {

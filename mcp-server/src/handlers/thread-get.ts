@@ -108,7 +108,8 @@ const EMAIL_FULL_PROPERTIES = [
 ];
 
 export function createThreadGetHandler(deps: ThreadGetDeps): ToolHandler {
-  return async (input) => {
+  return async (input, ctx) => {
+    const token = ctx?.bearerToken ?? deps.bearerToken;
     const params = parseInput(input);
     const fetchImpl = deps.fetch ?? fetch;
 
@@ -117,7 +118,7 @@ export function createThreadGetHandler(deps: ThreadGetDeps): ToolHandler {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
     });
     requireOk(sessionResponse, 'JMAP /.well-known/jmap');
@@ -155,7 +156,7 @@ export function createThreadGetHandler(deps: ThreadGetDeps): ToolHandler {
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
       body: requestBody,
     });

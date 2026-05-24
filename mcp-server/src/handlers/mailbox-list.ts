@@ -69,7 +69,8 @@ const JMAP_USING_MAIL = [
  * tree on `parentId` if they need a hierarchy.
  */
 export function createMailboxListHandler(deps: MailboxListDeps): ToolHandler {
-  return async (_input) => {
+  return async (_input, ctx) => {
+    const token = ctx?.bearerToken ?? deps.bearerToken;
     const fetchImpl = deps.fetch ?? fetch;
 
     // Step 1: resolve the session.
@@ -78,7 +79,7 @@ export function createMailboxListHandler(deps: MailboxListDeps): ToolHandler {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
     });
     requireOk(sessionResponse, 'JMAP /.well-known/jmap');
@@ -102,7 +103,7 @@ export function createMailboxListHandler(deps: MailboxListDeps): ToolHandler {
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
       body: requestBody,
     });
