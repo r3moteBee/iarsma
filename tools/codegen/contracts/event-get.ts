@@ -14,25 +14,12 @@
 import { z } from 'zod';
 import { capability } from '../src/index.js';
 
-const Participant = z.object({
-  name: z.string().optional().describe('Display name of the participant.'),
-  email: z.string().describe('Email address of the participant.'),
-  kind: z.string().optional().describe('Role kind — e.g., "individual", "group".'),
-  participationStatus: z
-    .string()
-    .optional()
-    .describe('Participation status — "accepted", "declined", "tentative", "needs-action".'),
-});
-
-const Location = z.object({
-  name: z.string().optional().describe('Human-readable location name.'),
-});
 
 const CalendarEvent = z.object({
   id: z.string().describe('Server-issued stable event identifier.'),
   calendarIds: z
-    .record(z.boolean())
-    .describe('Map of calendarId → true for calendars this event belongs to.'),
+    .string()
+    .describe('JSON-serialized map of calendarId → true. Parsed as Record<string, boolean> at runtime.'),
   title: z.string().describe('Event title / summary.'),
   description: z.string().optional().describe('Full event description or notes.'),
   start: z
@@ -48,13 +35,13 @@ const CalendarEvent = z.object({
     .optional()
     .describe('Event status.'),
   participants: z
-    .record(Participant)
+    .string()
     .optional()
-    .describe('Map of participantId → participant record.'),
+    .describe('JSON-serialized map of participantId → participant. Parsed at runtime.'),
   locations: z
-    .record(Location)
+    .string()
     .optional()
-    .describe('Map of locationId → location record.'),
+    .describe('JSON-serialized map of locationId → location. Parsed at runtime.'),
 });
 
 export const eventGet = capability({

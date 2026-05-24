@@ -17,8 +17,8 @@ import { z } from 'zod';
 export const MailModifyInputSchema = z.object({
   emailIds: z.array(z.string()).min(1),
   patch: z.object({
-    mailboxIds: z.record(z.string(), z.boolean()).optional(),
-    keywords: z.record(z.string(), z.boolean()).optional(),
+    mailboxIds: z.string().optional().describe('JSON-serialized map of mailboxId → boolean. Parsed at runtime.'),
+    keywords: z.string().optional().describe('JSON-serialized map of keyword → boolean. Parsed at runtime.'),
   }),
 });
 
