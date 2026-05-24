@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
+import { fileTokenStore } from './token-store.js';
 import { createMailDeleteHandler } from './handlers/mail-delete.js';
 import { createMailDraftHandler } from './handlers/mail-draft.js';
 import { createMailModifyHandler } from './handlers/mail-modify.js';
@@ -113,18 +114,33 @@ async function main(): Promise<void> {
   // surfaces expose the same tool list.
   const httpConfig = loadHttpTransportConfig(process.env);
   if (httpConfig !== null) {
+    // Per-agent token store (Phase 3a). When IARSMA_TOKENS_FILE is set,
+    // the MCP server validates bearer tokens against the file store
+    // (with per-agent scopes). Falls back to the static IARSMA_MCP_HTTP_TOKEN.
+    const tokensFile = process.env['IARSMA_TOKENS_FILE'];
+    const tokenStore = tokensFile !== undefined && tokensFile !== ''
+      ? fileTokenStore(tokensFile)
+      : undefined;
+    if (tokenStore !== undefined) {
+      process.on('SIGHUP', () => {
+        // eslint-disable-next-line no-console
+        console.error('[iarsma-mcp] SIGHUP received — reloading token store');
+        tokenStore.reload();
+      });
+    }
     const httpServer = createIarsmaMcpServer({
       tools,
       handlers,
       ...(agentContext !== null ? { agentContext } : {}),
     });
     const { port } = await startHttpTransport({
-      config: httpConfig,
+      config: { ...httpConfig, tokenStore },
       mcpServer: httpServer,
     });
     // eslint-disable-next-line no-console
     console.error(
-      `[iarsma-mcp] Streamable HTTP transport listening on ${httpConfig.host ?? '0.0.0.0'}:${port}. POST /mcp with Authorization: Bearer <token>.`,
+      `[iarsma-mcp] Streamable HTTP transport listening on ${httpConfig.host ?? '0.0.0.0'}:${port}. POST /mcp with Authorization: Bearer <token>.` +
+        (tokenStore !== undefined ? ` Token store: ${tokensFile}` : ''),
     );
   } else {
     // eslint-disable-next-line no-console
