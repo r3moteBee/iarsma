@@ -1,0 +1,278 @@
+/* ── Sidebar ───────────────────────────────────────────────────
+ * Desktop: fixed 240px left rail. Tablet: slide-over drawer.
+ * Mobile: not rendered (bottom-nav takes over).
+ * ────────────────────────────────────────────────────────────── */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border-right: 1px solid var(--surface-3);
+  z-index: 100;
+  overflow-y: auto;
+  transition: transform var(--transition-normal);
+}
+
+/* Desktop: always visible */
+@media (min-width: 1024px) {
+  .sidebar {
+    transform: translateX(0);
+  }
+}
+
+/* Tablet: hidden by default, slide in when open */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .sidebar {
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-md);
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+}
+
+/* ── Backdrop (tablet drawer) ──────────────────────────────── */
+
+.backdrop {
+  display: none;
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 99;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-normal);
+  }
+
+  .backdropVisible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ── Header ────────────────────────────────────────────────── */
+
+.header {
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.logo {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: -0.02em;
+}
+
+.composeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--accent);
+  color: white;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: var(--text-md);
+  transition: background var(--transition-fast);
+}
+
+.composeButton:hover {
+  filter: brightness(1.1);
+}
+
+/* ── Navigation ────────────────────────────────────────────── */
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-sm) var(--space-sm);
+  gap: 2px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-sm);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--text-md);
+  transition: background var(--transition-fast), color var(--transition-fast);
+  position: relative;
+}
+
+.navItem:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.navItemActive {
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.navIcon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.navIcon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.badge {
+  margin-left: auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--danger);
+  color: white;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* ── Mailbox tree ──────────────────────────────────────────── */
+
+.mailboxSection {
+  padding: var(--space-sm) var(--space-sm);
+  border-top: 1px solid var(--surface-3);
+  flex: 1;
+  overflow-y: auto;
+}
+
+.mailboxSectionLabel {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--space-xs) var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.mailboxItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 4px var(--space-sm);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.mailboxItem:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.mailboxItemSelected {
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.mailboxName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailboxUnread {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* ── Footer ────────────────────────────────────────────────── */
+
+.footer {
+  padding: var(--space-md);
+  border-top: 1px solid var(--surface-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.userRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.userName {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.signOutButton {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  transition: color var(--transition-fast);
+}
+
+.signOutButton:hover {
+  color: var(--danger);
+}
+
+.themeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.themeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.themeButton:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.themeButtonActive {
+  background: var(--surface-3);
+  color: var(--text-1);
+}

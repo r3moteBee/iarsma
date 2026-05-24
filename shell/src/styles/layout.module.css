@@ -1,0 +1,48 @@
+/* ── Shell layout ──────────────────────────────────────────────
+ * Phase 4 responsive shell. Desktop = sidebar + content side-by-side.
+ * Tablet = collapsible sidebar drawer + content. Mobile = stacked
+ * with bottom nav.
+ * ────────────────────────────────────────────────────────────── */
+
+.app {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--surface-1);
+  color: var(--text-1);
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Desktop: content shifts right to make room for the fixed sidebar */
+@media (min-width: 1024px) {
+  .content {
+    margin-left: 240px;
+  }
+}
+
+/* Tablet: content fills full width (sidebar is a drawer overlay) */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .content {
+    margin-left: 0;
+    /* top-bar height */
+    padding-top: 48px;
+  }
+}
+
+/* Mobile: stack vertically, leave room for bottom nav */
+@media (max-width: 639px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .content {
+    /* top-bar + bottom nav */
+    padding-top: 48px;
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+}
