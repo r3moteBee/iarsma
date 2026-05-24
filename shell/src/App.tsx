@@ -36,9 +36,11 @@ import { BottomNav } from './components/bottom-nav.js';
 import { Sidebar } from './components/sidebar.js';
 import { TopBar } from './components/top-bar.js';
 import { ComposeView } from './views/compose-view.js';
+import { ContactsView } from './views/contacts-view.js';
 import { AgentSettingsView } from './views/agent-settings-view.js';
 import { ActivityView } from './views/activity-view.js';
 import { ApprovalsView } from './views/approvals-view.js';
+import { CalendarView } from './views/calendar-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
@@ -227,6 +229,10 @@ function SignedInShell({
   const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
+  // Calendar view state
+  const [calendarView, setCalendarView] = useState<'month' | 'week' | 'day'>('month');
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+
   // Expose search input ref globally for `/` keybinding.
   useEffect(() => {
     searchInputRefHandle.current = searchInputRef.current;
@@ -381,9 +387,21 @@ function SignedInShell({
         {activeView === 'mail' ? (
           <MailLayout isLoading={session.isLoading} error={session.error} />
         ) : activeView === 'calendar' ? (
-          <PlaceholderView name="Calendar" />
+          <CalendarView
+            events={[]}
+            view={calendarView}
+            onViewChange={setCalendarView}
+            currentDate={calendarDate}
+            onDateChange={setCalendarDate}
+          />
         ) : activeView === 'contacts' ? (
-          <PlaceholderView name="Contacts" />
+          <ContactsView
+            contacts={[]}
+            selectedContact={null}
+            onSelect={() => {}}
+            onSearch={() => {}}
+            searchQuery=""
+          />
         ) : activeView === 'approvals' ? (
           <ApprovalsView
             approvals={[]}
