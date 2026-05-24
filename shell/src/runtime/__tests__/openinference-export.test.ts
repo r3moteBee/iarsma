@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exportToOpenInference, type OISpan } from '../openinference-export.js';
+import { exportToOpenInference } from '../openinference-export.js';
 import type { StoredEntry } from '../action-log.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────

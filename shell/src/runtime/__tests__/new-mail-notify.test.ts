@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { updateTabTitle, announceNewMail } from '../new-mail-notify.js';
 
 describe('updateTabTitle', () => {

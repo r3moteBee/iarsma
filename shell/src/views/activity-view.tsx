@@ -293,9 +293,9 @@ function IntegrityBadge({
   error,
   onVerify,
 }: {
-  readonly status?: 'verified' | 'failed' | 'checking' | 'unchecked';
-  readonly error?: string;
-  readonly onVerify?: () => void;
+  readonly status?: 'verified' | 'failed' | 'checking' | 'unchecked' | undefined;
+  readonly error?: string | undefined;
+  readonly onVerify?: (() => void) | undefined;
 }) {
   if (status === 'verified') {
     return (
