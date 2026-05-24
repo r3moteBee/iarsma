@@ -25,7 +25,7 @@ import {
   type Invoker,
 } from './runtime/index.js';
 import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
-import { stalwartTokenIssuer } from './runtime/stalwart-token-issuer.js';
+import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { ComposeView } from './views/compose-view.js';
@@ -298,21 +298,15 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
         : inMemoryAgentMetadataStore(),
     [],
   );
-  const issuer = useMemo(() => {
-    const tok = tokens;
-    if (tok === null) return null;
-    return stalwartTokenIssuer({
-      issuerUrl: config.oidcIssuer,
-      adminToken: tok.accessToken,
-      metadataStore,
-    });
-  }, [config.oidcIssuer, tokens, metadataStore]);
+  const issuer = useMemo(
+    () => localTokenIssuer({ metadataStore }),
+    [metadataStore],
+  );
 
   const [agentTokens, setAgentTokens] = useState<readonly AgentTokenInfo[]>([]);
   const [agentTokensLoading, setAgentTokensLoading] = useState(false);
 
   useEffect(() => {
-    if (issuer === null) return;
     let cancelled = false;
     setAgentTokensLoading(true);
     issuer.listTokens().then(
@@ -323,14 +317,12 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
   }, [issuer]);
 
   const handleIssue = async (name: string, scopes: string[], lifetimeSec: number) => {
-    if (issuer === null) throw new Error('Not signed in');
     const result = await issuer.issueToken({ name, scopes, lifetimeSec });
     const refreshed = await issuer.listTokens();
     setAgentTokens(refreshed);
     return result;
   };
   const handleRevoke = async (tokenId: string) => {
-    if (issuer === null) throw new Error('Not signed in');
     await issuer.revokeToken(tokenId);
     const refreshed = await issuer.listTokens();
     setAgentTokens(refreshed);

@@ -28,6 +28,10 @@ export type AgentMetadata = {
   readonly expiresAt: string;
   readonly revoked: boolean;
   readonly issuanceLogEntryHash: string;
+  /** The bearer token secret. Stored so introspection and revocation
+   *  work across page reloads (unlike the StalwartTokenIssuer which
+   *  only kept secrets in-memory). */
+  readonly secret?: string;
 };
 
 // ── Interface ───────────────────────────────────────────────────────
