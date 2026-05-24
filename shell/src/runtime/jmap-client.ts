@@ -1784,6 +1784,871 @@ export async function fetchMailDeleteCommit(
   return parseMailDeleteResponse(text);
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Calendar/get (calendar.list) — Phase 4b
+// ──────────────────────────────────────────────────────────────────────
+
+export type Calendar = {
+  readonly id: string;
+  readonly name: string;
+  readonly color?: string;
+  readonly isVisible: boolean;
+};
+
+export type FetchCalendarListOptions = JmapClientOptions & {
+  readonly session: Session;
+};
+
+const JMAP_USING_CALENDARS = [
+  'urn:ietf:params:jmap:core',
+  'urn:ietf:params:jmap:calendars',
+];
+
+/**
+ * Build the JMAP `Calendar/get` request. `ids: null` fetches every
+ * calendar the authenticated account is permitted to see.
+ */
+export function buildCalendarListRequest(opts: {
+  readonly accountId: string;
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [
+      [
+        'Calendar/get',
+        {
+          accountId: opts.accountId,
+          ids: null,
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+export async function fetchCalendarList(
+  opts: FetchCalendarListOptions,
+): Promise<Calendar[]> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildCalendarListRequest({
+    accountId: opts.session.primaryAccountIdMail,
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Calendar/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseCalendarListResponse(text);
+}
+
+export function parseCalendarListResponse(body: string): Calendar[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Calendar/get response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Calendar/get response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Calendar/get response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first[0] !== 'Calendar/get') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Calendar/get.',
+    );
+  }
+  const list = (first[1] as { list?: unknown }).list;
+  if (!Array.isArray(list)) {
+    throw makeError('jmap_parse_error', 'Calendar/get response is missing list.');
+  }
+  return list.map((raw, i) => parseCalendar(raw, i));
+}
+
+function parseCalendar(raw: unknown, index: number): Calendar {
+  if (raw === null || typeof raw !== 'object') {
+    throw makeError(
+      'jmap_parse_error',
+      `Calendar at index ${index} is not an object.`,
+    );
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || typeof r.name !== 'string') {
+    throw makeError(
+      'jmap_parse_error',
+      `Calendar at index ${index} is missing required fields.`,
+    );
+  }
+  return {
+    id: r.id,
+    name: r.name,
+    ...(typeof r.color === 'string' ? { color: r.color } : {}),
+    isVisible: typeof r.isVisible === 'boolean' ? r.isVisible : true,
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// CalendarEvent/query + CalendarEvent/get (event.list) — Phase 4b
+// ──────────────────────────────────────────────────────────────────────
+
+export type CalendarEvent = {
+  readonly id: string;
+  readonly calendarIds: Readonly<Record<string, boolean>>;
+  readonly title: string;
+  readonly description?: string;
+  readonly start: string;
+  readonly duration?: string;
+  readonly timeZone?: string;
+  readonly status?: 'confirmed' | 'tentative' | 'cancelled';
+  readonly participants?: Readonly<Record<string, {
+    name?: string;
+    email: string;
+    kind?: string;
+    participationStatus?: string;
+  }>>;
+  readonly locations?: Readonly<Record<string, { name?: string }>>;
+};
+
+export type EventList = {
+  readonly events: readonly CalendarEvent[];
+  readonly position: number;
+  readonly total?: number;
+};
+
+export type FetchEventListOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly after: string;
+  readonly before: string;
+  readonly calendarId?: string;
+  readonly position?: number;
+  readonly limit?: number;
+};
+
+const CALENDAR_EVENT_DEFAULT_LIMIT = 50;
+const CALENDAR_EVENT_MAX_LIMIT = 200;
+
+const CALENDAR_EVENT_PROPERTIES = [
+  'id',
+  'calendarIds',
+  'title',
+  'description',
+  'start',
+  'duration',
+  'timeZone',
+  'recurrenceRules',
+  'participants',
+  'locations',
+  'status',
+];
+
+/**
+ * Build the JMAP `CalendarEvent/query` + `CalendarEvent/get` chained
+ * request for listing events in a date range.
+ */
+export function buildEventListRequest(opts: {
+  readonly accountId: string;
+  readonly after: string;
+  readonly before: string;
+  readonly calendarId?: string;
+  readonly position?: number;
+  readonly limit?: number;
+}): string {
+  const position = opts.position ?? 0;
+  const limit = Math.min(opts.limit ?? CALENDAR_EVENT_DEFAULT_LIMIT, CALENDAR_EVENT_MAX_LIMIT);
+  const filter: Record<string, unknown> = {
+    after: opts.after,
+    before: opts.before,
+  };
+  if (opts.calendarId !== undefined) {
+    filter.inCalendars = [opts.calendarId];
+  }
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [
+      [
+        'CalendarEvent/query',
+        {
+          accountId: opts.accountId,
+          filter,
+          sort: [{ property: 'start', isAscending: true }],
+          position,
+          limit,
+          calculateTotal: true,
+        },
+        '0',
+      ],
+      [
+        'CalendarEvent/get',
+        {
+          accountId: opts.accountId,
+          '#ids': { resultOf: '0', name: 'CalendarEvent/query', path: '/ids' },
+          properties: CALENDAR_EVENT_PROPERTIES,
+        },
+        '1',
+      ],
+    ],
+  });
+}
+
+export async function fetchEventList(
+  opts: FetchEventListOptions,
+): Promise<EventList> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildEventListRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    after: opts.after,
+    before: opts.before,
+    ...(opts.calendarId !== undefined ? { calendarId: opts.calendarId } : {}),
+    ...(opts.position !== undefined ? { position: opts.position } : {}),
+    ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP CalendarEvent/query+CalendarEvent/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseEventListResponse(text);
+}
+
+export function parseEventListResponse(body: string): EventList {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse CalendarEvent/query response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'CalendarEvent/query response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length < 2) {
+    throw makeError(
+      'jmap_parse_error',
+      'CalendarEvent response needs at least two methodResponses.',
+    );
+  }
+  const queryResp = methodResponses[0];
+  const getResp = methodResponses[1];
+  if (!Array.isArray(queryResp) || queryResp[0] !== 'CalendarEvent/query') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not CalendarEvent/query.',
+    );
+  }
+  if (!Array.isArray(getResp) || getResp[0] !== 'CalendarEvent/get') {
+    throw makeError(
+      'jmap_parse_error',
+      'Second methodResponse is not CalendarEvent/get.',
+    );
+  }
+  const queryResult = queryResp[1] as { position?: number; total?: number };
+  const getResult = getResp[1] as { list?: unknown[] };
+  const list = Array.isArray(getResult.list) ? getResult.list : [];
+  return {
+    events: list.map((raw, i) => parseCalendarEvent(raw, i)),
+    position: typeof queryResult.position === 'number' ? queryResult.position : 0,
+    ...(typeof queryResult.total === 'number' ? { total: queryResult.total } : {}),
+  };
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// CalendarEvent/get (event.get — single event) — Phase 4b
+// ──────────────────────────────────────────────────────────────────────
+
+export type FetchEventGetOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly eventId: string;
+};
+
+/**
+ * Build a JMAP `CalendarEvent/get` request for a single event by id.
+ */
+export function buildEventGetRequest(opts: {
+  readonly accountId: string;
+  readonly eventId: string;
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [
+      [
+        'CalendarEvent/get',
+        {
+          accountId: opts.accountId,
+          ids: [opts.eventId],
+          properties: CALENDAR_EVENT_PROPERTIES,
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+export async function fetchEventGet(
+  opts: FetchEventGetOptions,
+): Promise<CalendarEvent> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildEventGetRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    eventId: opts.eventId,
+  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP CalendarEvent/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseEventGetResponse(text);
+}
+
+export function parseEventGetResponse(body: string): CalendarEvent {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse CalendarEvent/get response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'CalendarEvent/get response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'CalendarEvent/get response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first[0] !== 'CalendarEvent/get') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not CalendarEvent/get.',
+    );
+  }
+  const result = first[1] as { list?: unknown[]; notFound?: string[] };
+  if (Array.isArray(result.notFound) && result.notFound.length > 0) {
+    throw makeError(
+      'not_found',
+      `CalendarEvent not found: ${result.notFound.join(', ')}`,
+    );
+  }
+  const list = Array.isArray(result.list) ? result.list : [];
+  if (list.length === 0) {
+    throw makeError('not_found', 'CalendarEvent/get returned empty list.');
+  }
+  return parseCalendarEvent(list[0], 0);
+}
+
+function parseCalendarEvent(raw: unknown, index: number): CalendarEvent {
+  if (raw === null || typeof raw !== 'object') {
+    throw makeError(
+      'jmap_parse_error',
+      `CalendarEvent at index ${index} is not an object.`,
+    );
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string' || typeof r.title !== 'string' || typeof r.start !== 'string') {
+    throw makeError(
+      'jmap_parse_error',
+      `CalendarEvent at index ${index} is missing required fields.`,
+    );
+  }
+  const calendarIds = (r.calendarIds !== null && typeof r.calendarIds === 'object')
+    ? r.calendarIds as Record<string, boolean>
+    : {};
+  return {
+    id: r.id,
+    calendarIds,
+    title: r.title,
+    ...(typeof r.description === 'string' ? { description: r.description } : {}),
+    start: r.start,
+    ...(typeof r.duration === 'string' ? { duration: r.duration } : {}),
+    ...(typeof r.timeZone === 'string' ? { timeZone: r.timeZone } : {}),
+    ...(typeof r.status === 'string' &&
+      (r.status === 'confirmed' || r.status === 'tentative' || r.status === 'cancelled')
+      ? { status: r.status }
+      : {}),
+    ...(r.participants !== null && typeof r.participants === 'object'
+      ? { participants: parseParticipants(r.participants as Record<string, unknown>) }
+      : {}),
+    ...(r.locations !== null && typeof r.locations === 'object'
+      ? { locations: parseLocations(r.locations as Record<string, unknown>) }
+      : {}),
+  };
+}
+
+function parseParticipants(
+  raw: Record<string, unknown>,
+): Record<string, { name?: string; email: string; kind?: string; participationStatus?: string }> {
+  const result: Record<string, { name?: string; email: string; kind?: string; participationStatus?: string }> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value !== null && typeof value === 'object') {
+      const p = value as Record<string, unknown>;
+      if (typeof p.email === 'string') {
+        result[key] = {
+          ...(typeof p.name === 'string' ? { name: p.name } : {}),
+          email: p.email,
+          ...(typeof p.kind === 'string' ? { kind: p.kind } : {}),
+          ...(typeof p.participationStatus === 'string'
+            ? { participationStatus: p.participationStatus }
+            : {}),
+        };
+      }
+    }
+  }
+  return result;
+}
+
+function parseLocations(
+  raw: Record<string, unknown>,
+): Record<string, { name?: string }> {
+  const result: Record<string, { name?: string }> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value !== null && typeof value === 'object') {
+      const l = value as Record<string, unknown>;
+      result[key] = {
+        ...(typeof l.name === 'string' ? { name: l.name } : {}),
+      };
+    }
+  }
+  return result;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// ContactCard/query + ContactCard/get (contact.list) — Phase 4c
+// ──────────────────────────────────────────────────────────────────────
+
+export type Contact = {
+  readonly id: string;
+  readonly name?: { readonly full?: string; readonly given?: string; readonly surname?: string };
+  readonly emails?: readonly { readonly address: string; readonly label?: string }[];
+  readonly phones?: readonly { readonly number: string; readonly label?: string }[];
+  readonly organizations?: readonly { readonly name?: string; readonly title?: string }[];
+};
+
+export type ContactList = {
+  readonly contacts: readonly Contact[];
+  readonly total?: number;
+};
+
+export type FetchContactListOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly query?: string;
+};
+
+export type FetchContactGetOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly contactId: string;
+};
+
+const JMAP_USING_CONTACTS = [
+  'urn:ietf:params:jmap:core',
+  'urn:ietf:params:jmap:contacts',
+];
+
+const CONTACT_CARD_PROPERTIES = [
+  'id',
+  'name',
+  'emails',
+  'phones',
+  'organizations',
+];
+
+/**
+ * Build the JMAP `AddressBook/get` → `ContactCard/query` → `ContactCard/get`
+ * chained request. The query step discovers all contact IDs in the first
+ * address book; the get step materializes the records.
+ */
+export function buildContactListRequest(opts: {
+  readonly accountId: string;
+  readonly query?: string;
+}): string {
+  const queryFilter: Record<string, unknown> = {};
+  if (opts.query !== undefined && opts.query.trim() !== '') {
+    queryFilter.text = opts.query;
+  }
+  return JSON.stringify({
+    using: JMAP_USING_CONTACTS,
+    methodCalls: [
+      [
+        'AddressBook/get',
+        { accountId: opts.accountId },
+        '0',
+      ],
+      [
+        'ContactCard/query',
+        {
+          accountId: opts.accountId,
+          ...(Object.keys(queryFilter).length > 0 ? { filter: queryFilter } : {}),
+        },
+        '1',
+      ],
+      [
+        'ContactCard/get',
+        {
+          accountId: opts.accountId,
+          '#ids': { resultOf: '1', name: 'ContactCard/query', path: '/ids' },
+          properties: CONTACT_CARD_PROPERTIES,
+        },
+        '2',
+      ],
+    ],
+  });
+}
+
+/**
+ * Build the JMAP `ContactCard/get` request for a single contact by id.
+ */
+export function buildContactGetRequest(opts: {
+  readonly accountId: string;
+  readonly contactId: string;
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_CONTACTS,
+    methodCalls: [
+      [
+        'ContactCard/get',
+        {
+          accountId: opts.accountId,
+          ids: [opts.contactId],
+          properties: CONTACT_CARD_PROPERTIES,
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+export async function fetchContactList(
+  opts: FetchContactListOptions,
+): Promise<ContactList> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildContactListRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    ...(opts.query !== undefined ? { query: opts.query } : {}),
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP ContactCard/query+ContactCard/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseContactListResponse(text);
+}
+
+export function parseContactListResponse(body: string): ContactList {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse ContactCard response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'ContactCard response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length < 3) {
+    throw makeError(
+      'jmap_parse_error',
+      'ContactCard response needs at least three methodResponses.',
+    );
+  }
+  const queryResp = methodResponses[1];
+  const getResp = methodResponses[2];
+  if (!Array.isArray(queryResp) || queryResp[0] !== 'ContactCard/query') {
+    throw makeError(
+      'jmap_parse_error',
+      'Second methodResponse is not ContactCard/query.',
+    );
+  }
+  if (!Array.isArray(getResp) || getResp[0] !== 'ContactCard/get') {
+    throw makeError(
+      'jmap_parse_error',
+      'Third methodResponse is not ContactCard/get.',
+    );
+  }
+  const queryResult = queryResp[1] as { total?: number };
+  const getResult = getResp[1] as { list?: unknown[] };
+  const list = Array.isArray(getResult.list) ? getResult.list : [];
+  return {
+    contacts: list.map((raw, i) => parseContact(raw, i)),
+    ...(typeof queryResult.total === 'number' ? { total: queryResult.total } : {}),
+  };
+}
+
+export async function fetchContactGet(
+  opts: FetchContactGetOptions,
+): Promise<Contact> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildContactGetRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    contactId: opts.contactId,
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP ContactCard/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseContactGetResponse(text);
+}
+
+export function parseContactGetResponse(body: string): Contact {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse ContactCard/get response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'ContactCard/get response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'ContactCard/get response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first[0] !== 'ContactCard/get') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not ContactCard/get.',
+    );
+  }
+  const result = first[1] as { list?: unknown[]; notFound?: string[] };
+  if (Array.isArray(result.notFound) && result.notFound.length > 0) {
+    throw makeError(
+      'not_found',
+      `ContactCard not found: ${result.notFound.join(', ')}`,
+    );
+  }
+  const list = Array.isArray(result.list) ? result.list : [];
+  if (list.length === 0) {
+    throw makeError('not_found', 'ContactCard/get returned empty list.');
+  }
+  return parseContact(list[0], 0);
+}
+
+/**
+ * Parse a single contact card from the JMAP response. JSContact (RFC 9553)
+ * represents emails/phones/organizations as maps keyed by arbitrary IDs;
+ * we flatten them to arrays for the contract output.
+ */
+function parseContact(raw: unknown, index: number): Contact {
+  if (raw === null || typeof raw !== 'object') {
+    throw makeError(
+      'jmap_parse_error',
+      `ContactCard at index ${index} is not an object.`,
+    );
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== 'string') {
+    throw makeError(
+      'jmap_parse_error',
+      `ContactCard at index ${index} is missing required id field.`,
+    );
+  }
+  const contact: {
+    id: string;
+    name?: { full?: string; given?: string; surname?: string };
+    emails?: { address: string; label?: string }[];
+    phones?: { number: string; label?: string }[];
+    organizations?: { name?: string; title?: string }[];
+  } = { id: r.id };
+
+  // Name
+  if (r.name !== null && typeof r.name === 'object') {
+    const n = r.name as Record<string, unknown>;
+    contact.name = {
+      ...(typeof n.full === 'string' ? { full: n.full } : {}),
+      ...(typeof n.given === 'string' ? { given: n.given } : {}),
+      ...(typeof n.surname === 'string' ? { surname: n.surname } : {}),
+    };
+  }
+
+  // Emails — JSContact stores as a map { "key": { address, label?, ... } }
+  if (r.emails !== null && typeof r.emails === 'object') {
+    const emailMap = r.emails as Record<string, unknown>;
+    const emails: { address: string; label?: string }[] = [];
+    for (const value of Object.values(emailMap)) {
+      if (value !== null && typeof value === 'object') {
+        const e = value as Record<string, unknown>;
+        if (typeof e.address === 'string') {
+          emails.push({
+            address: e.address,
+            ...(typeof e.label === 'string' ? { label: e.label } : {}),
+          });
+        }
+      }
+    }
+    if (emails.length > 0) {
+      contact.emails = emails;
+    }
+  }
+
+  // Phones — same map structure
+  if (r.phones !== null && typeof r.phones === 'object') {
+    const phoneMap = r.phones as Record<string, unknown>;
+    const phones: { number: string; label?: string }[] = [];
+    for (const value of Object.values(phoneMap)) {
+      if (value !== null && typeof value === 'object') {
+        const p = value as Record<string, unknown>;
+        if (typeof p.number === 'string') {
+          phones.push({
+            number: p.number,
+            ...(typeof p.label === 'string' ? { label: p.label } : {}),
+          });
+        }
+      }
+    }
+    if (phones.length > 0) {
+      contact.phones = phones;
+    }
+  }
+
+  // Organizations — same map structure
+  if (r.organizations !== null && typeof r.organizations === 'object') {
+    const orgMap = r.organizations as Record<string, unknown>;
+    const orgs: { name?: string; title?: string }[] = [];
+    for (const value of Object.values(orgMap)) {
+      if (value !== null && typeof value === 'object') {
+        const o = value as Record<string, unknown>;
+        orgs.push({
+          ...(typeof o.name === 'string' ? { name: o.name } : {}),
+          ...(typeof o.title === 'string' ? { title: o.title } : {}),
+        });
+      }
+    }
+    if (orgs.length > 0) {
+      contact.organizations = orgs;
+    }
+  }
+
+  return contact;
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }

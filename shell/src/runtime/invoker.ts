@@ -24,6 +24,11 @@ import {
   buildMailDraftRequest,
   buildMailSendRequest,
   fetchAttachmentUpload,
+  fetchCalendarList,
+  fetchContactGet,
+  fetchContactList,
+  fetchEventGet,
+  fetchEventList,
   fetchIdentityList,
   fetchMailDeleteCommit,
   fetchMailDraftCommit,
@@ -35,6 +40,11 @@ import {
   fetchThreadList,
   fetchThreadSearch,
   type AttachmentUpload,
+  type Calendar,
+  type CalendarEvent,
+  type Contact,
+  type ContactList,
+  type EventList,
   type IdentityList,
   type JmapClientOptions,
   type Mailbox,
@@ -318,6 +328,61 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             emailIds: params.emailIds,
           });
           return result as unknown as O;
+        }
+        case 'calendar.list': {
+          const session = await getSession();
+          const calendars: Calendar[] = await fetchCalendarList({ ...opts, session });
+          return calendars as unknown as O;
+        }
+        case 'event.list': {
+          const session = await getSession();
+          const evParams = _input as unknown as {
+            calendarId?: string;
+            after: string;
+            before: string;
+            position?: number;
+            limit?: number;
+          };
+          const evResult: EventList = await fetchEventList({
+            ...opts,
+            session,
+            after: evParams.after,
+            before: evParams.before,
+            ...(evParams.calendarId !== undefined ? { calendarId: evParams.calendarId } : {}),
+            ...(evParams.position !== undefined ? { position: evParams.position } : {}),
+            ...(evParams.limit !== undefined ? { limit: evParams.limit } : {}),
+          });
+          return evResult as unknown as O;
+        }
+        case 'event.get': {
+          const session = await getSession();
+          const egParams = _input as unknown as { eventId: string };
+          const event: CalendarEvent = await fetchEventGet({
+            ...opts,
+            session,
+            eventId: egParams.eventId,
+          });
+          return event as unknown as O;
+        }
+        case 'contact.list': {
+          const session = await getSession();
+          const clParams = _input as unknown as { query?: string };
+          const result: ContactList = await fetchContactList({
+            ...opts,
+            session,
+            ...(clParams.query !== undefined ? { query: clParams.query } : {}),
+          });
+          return result as unknown as O;
+        }
+        case 'contact.get': {
+          const session = await getSession();
+          const cgParams = _input as unknown as { contactId: string };
+          const contact: Contact = await fetchContactGet({
+            ...opts,
+            session,
+            contactId: cgParams.contactId,
+          });
+          return contact as unknown as O;
         }
         default:
           throw makeToolError(
