@@ -24,6 +24,9 @@ import {
   loggingInvoker,
   type Invoker,
 } from './runtime/index.js';
+import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
+import { stalwartTokenIssuer } from './runtime/stalwart-token-issuer.js';
+import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { ComposeView } from './views/compose-view.js';
 import { AgentSettingsView } from './views/agent-settings-view.js';
@@ -288,14 +291,49 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
     })();
   };
 
-  // Placeholder onIssue / onRevoke callbacks — the real implementation
-  // will be wired to StalwartTokenIssuer once the settings view has
-  // access to the issuer instance (Task 12+).
-  const handleIssue = async (_name: string, _scopes: string[], _lifetimeSec: number) => {
-    throw new Error('Token issuance not yet connected');
+  const metadataStore = useMemo(
+    () =>
+      typeof indexedDB !== 'undefined'
+        ? indexedDbAgentMetadataStore()
+        : inMemoryAgentMetadataStore(),
+    [],
+  );
+  const issuer = useMemo(() => {
+    const tok = tokens;
+    if (tok === null) return null;
+    return stalwartTokenIssuer({
+      issuerUrl: config.oidcIssuer,
+      adminToken: tok.accessToken,
+      metadataStore,
+    });
+  }, [config.oidcIssuer, tokens, metadataStore]);
+
+  const [agentTokens, setAgentTokens] = useState<readonly AgentTokenInfo[]>([]);
+  const [agentTokensLoading, setAgentTokensLoading] = useState(false);
+
+  useEffect(() => {
+    if (issuer === null) return;
+    let cancelled = false;
+    setAgentTokensLoading(true);
+    issuer.listTokens().then(
+      (list) => { if (!cancelled) { setAgentTokens(list); setAgentTokensLoading(false); } },
+      () => { if (!cancelled) setAgentTokensLoading(false); },
+    );
+    return () => { cancelled = true; };
+  }, [issuer]);
+
+  const handleIssue = async (name: string, scopes: string[], lifetimeSec: number) => {
+    if (issuer === null) throw new Error('Not signed in');
+    const result = await issuer.issueToken({ name, scopes, lifetimeSec });
+    const refreshed = await issuer.listTokens();
+    setAgentTokens(refreshed);
+    return result;
   };
-  const handleRevoke = async (_tokenId: string) => {
-    throw new Error('Token revocation not yet connected');
+  const handleRevoke = async (tokenId: string) => {
+    if (issuer === null) throw new Error('Not signed in');
+    await issuer.revokeToken(tokenId);
+    const refreshed = await issuer.listTokens();
+    setAgentTokens(refreshed);
   };
 
   return (
@@ -429,9 +467,10 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
         </div>
       ) : activeView === 'settings' ? (
         <AgentSettingsView
-          tokens={[]}
+          tokens={agentTokens}
           onIssue={handleIssue}
           onRevoke={handleRevoke}
+          isLoading={agentTokensLoading}
         />
       ) : (
         <div style={{ padding: '2em', color: 'rgba(0,0,0,0.5)' }}>
