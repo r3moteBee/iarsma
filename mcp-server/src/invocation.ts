@@ -36,7 +36,8 @@ export type InvocationResult =
   | { kind: 'ok'; output: unknown }
   | { kind: 'preview'; preview: unknown }
   | { kind: 'denied'; code: 'unauthorized' | 'forbidden' | 'scope_denied' | 'not_found'; message: string }
-  | { kind: 'error'; code: string; message: string };
+  | { kind: 'error'; code: string; message: string }
+  | { kind: 'require_approval'; approvalId: string; reason: string };
 
 export type Dispatcher = {
   invoke(

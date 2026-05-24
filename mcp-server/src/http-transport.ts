@@ -25,10 +25,44 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { TokenStore, ResolvedIdentity, TokenEntry } from './token-store.js';
 import { createStalwartApiKey, destroyStalwartApiKey } from './stalwart-permissions.js';
+
+// ─────────────────────────────────────────────────────────────────────────
+//  Approval store types (Phase 3b)
+// ─────────────────────────────────────────────────────────────────────────
+
+export type ApprovalStatus =
+  | { status: 'pending' }
+  | { status: 'approved'; result: unknown }
+  | { status: 'denied'; reason: string };
+
+export type ApprovalRecord = {
+  readonly id: string;
+} & ApprovalStatus;
+
+/**
+ * Read the approvals file and look up a specific approval by ID.
+ * Returns `null` when the file doesn't exist or the ID isn't found.
+ */
+export function readApproval(approvalId: string, filePath?: string): ApprovalStatus | null {
+  const path = filePath ?? process.env['IARSMA_APPROVALS_FILE'] ?? './run/approvals.json';
+  try {
+    const raw = readFileSync(path, 'utf-8');
+    const records = JSON.parse(raw) as ApprovalRecord[];
+    const record = records.find((r) => r.id === approvalId);
+    if (record === undefined) return null;
+    // Strip the `id` field — callers only need the status envelope.
+    if (record.status === 'approved') return { status: 'approved', result: record.result };
+    if (record.status === 'denied') return { status: 'denied', reason: record.reason };
+    return { status: 'pending' };
+  } catch {
+    return null;
+  }
+}
 
 export type HttpTransportConfig = {
   /** Port to bind. Required when HTTP transport is enabled. */
@@ -411,6 +445,21 @@ async function handleAgentEndpoint(args: {
     }));
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(list));
+    return;
+  }
+
+  // GET /agents/approvals/{id} — poll approval status (Phase 3b)
+  const approvalMatch = req.method === 'GET' && req.url?.match(/^\/agents\/approvals\/([^?]+)/);
+  if (approvalMatch) {
+    const approvalId = decodeURIComponent(approvalMatch[1]!);
+    const approval = readApproval(approvalId);
+    if (approval === null) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found', message: `Approval ${approvalId} not found.` }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(approval));
     return;
   }
 

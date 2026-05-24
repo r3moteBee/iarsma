@@ -30,6 +30,8 @@ import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { ComposeView } from './views/compose-view.js';
 import { AgentSettingsView } from './views/agent-settings-view.js';
+import { ActivityView } from './views/activity-view.js';
+import { ApprovalsView } from './views/approvals-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
@@ -409,17 +411,17 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
         </button>
         <button
           type="button"
-          disabled
-          title="Coming in v0.6.0"
-          style={navButtonStyle(false, true)}
+          onClick={() => setActiveView('approvals')}
+          aria-current={activeView === 'approvals' ? 'page' : undefined}
+          style={navButtonStyle(activeView === 'approvals')}
         >
           Approvals
         </button>
         <button
           type="button"
-          disabled
-          title="Coming in v0.7.0"
-          style={navButtonStyle(false, true)}
+          onClick={() => setActiveView('activity')}
+          aria-current={activeView === 'activity' ? 'page' : undefined}
+          style={navButtonStyle(activeView === 'activity')}
         >
           Activity
         </button>
@@ -457,6 +459,23 @@ function SignedInView({ config }: { readonly config: ShellConfig }) {
             <ThreadView />
           </section>
         </div>
+      ) : activeView === 'approvals' ? (
+        <ApprovalsView
+          approvals={[]}
+          onApprove={async () => {}}
+          onDeny={async () => {}}
+        />
+      ) : activeView === 'activity' ? (
+        <ActivityView
+          entries={[]}
+          integrityStatus="unchecked"
+          filters={{ actor: 'all', action: 'all', mode: 'all', timeRange: 'all' }}
+          onFilterChange={() => {}}
+          page={1}
+          pageSize={25}
+          totalEntries={0}
+          onPageChange={() => {}}
+        />
       ) : activeView === 'settings' ? (
         <AgentSettingsView
           tokens={agentTokens}
