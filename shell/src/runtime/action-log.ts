@@ -230,10 +230,12 @@ export function createActionLog(opts: ActionLogOptions): ActionLog {
 // Helpers
 // ───────────────────────────────────────────────────────────────────────
 
+type WitCallerClass = 'ui' | 'mcp' | 'library';
+
 type WitEntryData = {
   schemaVersion: number;
   timestampMs: bigint;
-  callerClass: CallerClass;
+  callerClass: WitCallerClass;
   identity: string;
   action: string;
   mode?: CallMode;
@@ -241,11 +243,15 @@ type WitEntryData = {
   provenance?: Provenance;
 };
 
+function toWitCallerClass(c: CallerClass): WitCallerClass {
+  return c === 'agent' ? 'mcp' : c;
+}
+
 function toWit(data: EntryInput): WitEntryData {
   return {
     schemaVersion: data.schemaVersion,
     timestampMs: BigInt(data.timestampMs),
-    callerClass: data.callerClass,
+    callerClass: toWitCallerClass(data.callerClass),
     identity: data.identity,
     action: data.action,
     ...(data.mode !== undefined ? { mode: data.mode } : {}),
