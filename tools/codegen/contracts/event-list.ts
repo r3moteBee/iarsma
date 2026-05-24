@@ -16,19 +16,6 @@
 import { z } from 'zod';
 import { capability } from '../src/index.js';
 
-const Participant = z.object({
-  name: z.string().optional().describe('Display name of the participant.'),
-  email: z.string().describe('Email address of the participant.'),
-  kind: z.string().optional().describe('Role kind — e.g., "individual", "group".'),
-  participationStatus: z
-    .string()
-    .optional()
-    .describe('Participation status — "accepted", "declined", "tentative", "needs-action".'),
-});
-
-const Location = z.object({
-  name: z.string().optional().describe('Human-readable location name.'),
-});
 
 const CalendarEvent = z.object({
   id: z.string().describe('Server-issued stable event identifier.'),
