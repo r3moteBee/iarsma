@@ -1,0 +1,302 @@
+/* ── CalendarView ─────────────────────────────────────────────
+ * Phase 4b responsive calendar UI. Month/week/day views with
+ * grid-based layout and design tokens.
+ * ──────────────────────────────────────────────────────────── */
+
+.calendar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm, 0.5rem);
+  padding: var(--space-md, 1rem);
+  max-width: 72em;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 0.5rem);
+  flex-wrap: wrap;
+}
+
+.viewToggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+}
+
+.viewToggleBtn {
+  padding: 0.3em 0.7em;
+  font: inherit;
+  font-size: 0.85em;
+  border: none;
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #000);
+  cursor: pointer;
+  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+}
+
+.viewToggleBtn:last-child {
+  border-right: none;
+}
+
+.viewToggleBtnActive {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  font-weight: 600;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs, 0.25rem);
+  margin-left: auto;
+}
+
+.navBtn {
+  padding: 0.3em 0.6em;
+  font: inherit;
+  font-size: 0.85em;
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #000);
+  cursor: pointer;
+}
+
+.navBtn:hover {
+  background: var(--surface-2, #f5f5f5);
+}
+
+.monthLabel {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 0 var(--space-sm, 0.5rem);
+  white-space: nowrap;
+}
+
+/* ── Month view ─────────────────────────────────────────────── */
+
+.monthGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+}
+
+.dayHeader {
+  padding: 0.4em 0.3em;
+  text-align: center;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--text-2, rgba(0, 0, 0, 0.6));
+  background: var(--surface-2, #f5f5f5);
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+}
+
+.dayCell {
+  min-height: 5em;
+  padding: 0.3em;
+  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.dayCell:hover {
+  background: var(--surface-2, #f5f5f5);
+}
+
+.dayCell:nth-child(7n) {
+  border-right: none;
+}
+
+.dayCellOffMonth {
+  color: var(--text-2, rgba(0, 0, 0, 0.4));
+  background: var(--surface-2, #fafafa);
+}
+
+.dayCellToday {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
+}
+
+.dayNumber {
+  display: inline-block;
+  font-size: 0.85em;
+  font-weight: 500;
+  margin-bottom: 0.2em;
+}
+
+.dayNumberToday {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border-radius: 50%;
+  width: 1.6em;
+  height: 1.6em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.eventDots {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.eventDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #3b82f6);
+}
+
+.eventDotMore {
+  font-size: 0.7em;
+  color: var(--text-2, rgba(0, 0, 0, 0.5));
+  line-height: 1;
+}
+
+/* ── Week view ──────────────────────────────────────────────── */
+
+.weekGrid {
+  display: grid;
+  grid-template-columns: 4em repeat(7, 1fr);
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  overflow-x: auto;
+}
+
+.weekDayHeader {
+  padding: 0.4em 0.3em;
+  text-align: center;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--text-2, rgba(0, 0, 0, 0.6));
+  background: var(--surface-2, #f5f5f5);
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+}
+
+.weekDayHeader:last-child {
+  border-right: none;
+}
+
+.weekTimeLabel {
+  padding: 0.2em 0.3em;
+  font-size: 0.75em;
+  color: var(--text-2, rgba(0, 0, 0, 0.5));
+  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.08));
+  text-align: right;
+  height: 3em;
+}
+
+.weekSlot {
+  position: relative;
+  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.08));
+  height: 3em;
+}
+
+.weekSlot:last-child {
+  border-right: none;
+}
+
+/* ── Day view ───────────────────────────────────────────────── */
+
+.dayGrid {
+  display: grid;
+  grid-template-columns: 4em 1fr;
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+}
+
+.dayTimeLabel {
+  padding: 0.2em 0.3em;
+  font-size: 0.75em;
+  color: var(--text-2, rgba(0, 0, 0, 0.5));
+  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.08));
+  text-align: right;
+  height: 3em;
+}
+
+.daySlot {
+  position: relative;
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.08));
+  height: 3em;
+}
+
+.dayHeader {
+  grid-column: 1 / -1;
+  padding: 0.5em;
+  font-weight: 600;
+  background: var(--surface-2, #f5f5f5);
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+}
+
+/* ── Event block (week + day views) ─────────────────────────── */
+
+.eventBlock {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 3px;
+  padding: 0.15em 0.3em;
+  font-size: 0.75em;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--surface-1, #fff);
+  border-left: 3px solid var(--accent, #3b82f6);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  z-index: 1;
+}
+
+.eventBlock:hover {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* ── Responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 639px) {
+  .calendar {
+    padding: var(--space-sm, 0.5rem);
+  }
+
+  .header {
+    gap: var(--space-xs, 0.25rem);
+  }
+
+  .monthLabel {
+    font-size: 0.95em;
+  }
+
+  .dayCell {
+    min-height: 3.5em;
+    padding: 0.2em;
+  }
+
+  .dayHeader {
+    font-size: 0.7em;
+  }
+
+  .weekGrid {
+    grid-template-columns: 3em repeat(7, minmax(4em, 1fr));
+  }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  .dayCell {
+    min-height: 4em;
+  }
+}
