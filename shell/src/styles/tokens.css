@@ -14,9 +14,11 @@
   --text-2: #6b6b6b;
   --text-3: #a0a0a0;
 
-  /* Accent colors */
-  --accent: var(--indigo-6);
-  --danger: var(--red-6);
+  /* Accent colors — warm orange palette */
+  --accent: #ff6b35;
+  --accent-hover: #ff9d23;
+  --accent-subtle: rgba(255, 107, 53, 0.1);
+  --destructive: var(--red-6);
   --success: var(--green-6);
   --warning: var(--yellow-5);
 
