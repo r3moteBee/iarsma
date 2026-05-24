@@ -153,7 +153,7 @@ describe('run (integration with the project contracts)', () => {
     // mail.draft + mail.send + identity.list + thread.search. Bump
     // explicitly when adding contracts so a missing or duplicate
     // contract surfaces in code review.
-    expect(r.capabilities).toBe(8);
+    expect(r.capabilities).toBe(13);
   });
 
   it('produces openapi.json at the dist root', async () => {
