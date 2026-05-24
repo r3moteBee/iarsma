@@ -1,0 +1,95 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 20vh;
+  animation: fadeIn var(--transition-fast, 150ms ease) both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.panel {
+  width: min(560px, 90vw);
+  background: var(--surface-1, #fff);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.1));
+  overflow: hidden;
+  animation: slideUp var(--transition-fast, 150ms ease) both;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.inputWrapper {
+  padding: var(--space-md, 16px);
+  border-bottom: 1px solid var(--surface-3, #ebebeb);
+}
+
+.input {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-size: var(--text-lg, 1.286rem);
+  color: var(--text-1, #1a1a1a);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--text-3, #a0a0a0);
+}
+
+.results {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+  padding: var(--space-sm, 8px) var(--space-md, 16px);
+  cursor: pointer;
+  color: var(--text-1, #1a1a1a);
+  transition: background var(--transition-fast, 150ms ease);
+}
+
+.item:hover,
+.item[data-selected="true"] {
+  background: var(--surface-3, #ebebeb);
+}
+
+.itemIcon {
+  flex: 0 0 20px;
+  color: var(--text-3, #a0a0a0);
+  font-size: var(--text-base, 14px);
+}
+
+.itemLabel {
+  flex: 1;
+}
+
+.itemHint {
+  color: var(--text-3, #a0a0a0);
+  font-size: var(--text-sm, 0.857rem);
+}
+
+.empty {
+  padding: var(--space-lg, 24px) var(--space-md, 16px);
+  text-align: center;
+  color: var(--text-3, #a0a0a0);
+  font-size: var(--text-sm, 0.857rem);
+}
+
+/* Hide on mobile — not useful without a keyboard */
+@media (max-width: 639px) {
+  .backdrop { display: none; }
+}
