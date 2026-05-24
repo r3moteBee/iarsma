@@ -27,15 +27,20 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { TokenStore, ResolvedIdentity } from './token-store.js';
 
 export type HttpTransportConfig = {
   /** Port to bind. Required when HTTP transport is enabled. */
   readonly port: number;
-  /** Shared Bearer secret. Required when HTTP transport is enabled. */
+  /** Shared Bearer secret. Legacy single-token mode — used when no
+   *  TokenStore is provided. */
   readonly bearerToken: string;
   /** Hostname to bind. Defaults to '0.0.0.0' (all interfaces) — operators
    *  put this behind a reverse proxy + TLS terminator. */
   readonly host?: string;
+  /** Per-agent token store. When provided, replaces the static
+   *  bearerToken check with a lookup that returns identity + scopes. */
+  readonly tokenStore?: TokenStore | undefined;
 };
 
 /**
@@ -112,7 +117,7 @@ export async function startHttpTransport(opts: {
 
   const server = createServer(async (req, res) => {
     try {
-      await handleRequest({ req, res, transport, expectedToken: config.bearerToken });
+      await handleRequest({ req, res, transport, expectedToken: config.bearerToken, tokenStore: config.tokenStore });
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('[iarsma-mcp-http] unhandled error:', e);
@@ -154,8 +159,9 @@ async function handleRequest(args: {
   readonly res: ServerResponse;
   readonly transport: StreamableHTTPServerTransport;
   readonly expectedToken: string;
+  readonly tokenStore?: TokenStore | undefined;
 }): Promise<void> {
-  const { req, res, transport, expectedToken } = args;
+  const { req, res, transport, expectedToken, tokenStore } = args;
 
   // Health check — useful for ops without exposing the MCP surface.
   if (req.method === 'GET' && req.url === '/healthz') {
@@ -173,7 +179,14 @@ async function handleRequest(args: {
     return;
   }
 
-  if (!verifyBearer(req.headers.authorization, expectedToken)) {
+  // Auth: try token store first (per-agent tokens), fall back to
+  // static bearer (legacy single-token mode).
+  const bearer = extractBearer(req.headers.authorization);
+  let resolvedAgent: ResolvedIdentity | null = null;
+  if (bearer !== null && tokenStore !== undefined) {
+    resolvedAgent = tokenStore.resolve(bearer);
+  }
+  if (resolvedAgent === null && !verifyBearer(req.headers.authorization, expectedToken)) {
     res.writeHead(401, {
       'content-type': 'application/json',
       'www-authenticate': 'Bearer realm="iarsma-mcp"',
@@ -208,6 +221,13 @@ async function handleRequest(args: {
   }
 
   await transport.handleRequest(req, res, body);
+}
+
+function extractBearer(header: string | undefined): string | null {
+  if (header === undefined) return null;
+  const match = /^Bearer (.+)$/.exec(header.trim());
+  if (match === null) return null;
+  return match[1]!.trim();
 }
 
 function verifyBearer(
