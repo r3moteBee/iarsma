@@ -128,14 +128,15 @@ async function main(): Promise<void> {
         tokenStore.reload();
       });
     }
-    const httpServer = createIarsmaMcpServer({
+    const makeServer = () => createIarsmaMcpServer({
       tools,
       handlers,
       ...(agentContext !== null ? { agentContext } : {}),
     });
     const { port } = await startHttpTransport({
       config: { ...httpConfig, tokenStore },
-      mcpServer: httpServer,
+      mcpServer: makeServer(),
+      createServer: makeServer,
     });
     // eslint-disable-next-line no-console
     console.error(

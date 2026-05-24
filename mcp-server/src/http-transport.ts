@@ -97,25 +97,61 @@ export type StartHttpTransportResult = {
 export async function startHttpTransport(opts: {
   readonly config: HttpTransportConfig;
   readonly mcpServer: McpServer;
+  /** Factory to create new MCP server instances for concurrent sessions. */
+  readonly createServer?: () => McpServer;
 }): Promise<StartHttpTransportResult> {
-  const { config, mcpServer } = opts;
+  const { config } = opts;
 
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => crypto.randomUUID(),
-  });
-  // Cast: the SDK's `Transport` interface declares `onclose` as a
-  // required function, but the transport's runtime shape sets it
-  // lazily. exactOptionalPropertyTypes flags the mismatch; the
-  // McpServer.connect call is the right operation regardless.
-  transport.onerror = (err: Error) => {
-    // eslint-disable-next-line no-console
-    console.error('[iarsma-mcp-http] transport error:', err);
-  };
-  await mcpServer.connect(transport as unknown as Parameters<typeof mcpServer.connect>[0]);
+  // Per-session transport+server pairs. The MCP SDK couples Server 1:1
+  // with a Transport, so each concurrent client needs its own pair.
+  const sessions = new Map<string, StreamableHTTPServerTransport>();
 
-  const server = createServer(async (req, res) => {
+  async function createSession(): Promise<StreamableHTTPServerTransport> {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+    });
+    transport.onerror = (err: Error) => {
+      // eslint-disable-next-line no-console
+      console.error('[iarsma-mcp-http] transport error:', err);
+    };
+    const server = opts.createServer !== undefined
+      ? opts.createServer()
+      : opts.mcpServer;
+    await server.connect(transport as unknown as Parameters<typeof server.connect>[0]);
+    return transport;
+  }
+
+  const httpServer = createServer(async (req, res) => {
     try {
+      const url = req.url ?? '';
+
+      // Non-MCP paths (healthz, agents) don't need session management.
+      if (!url.startsWith('/mcp')) {
+        await handleRequest({ req, res, transport: undefined as unknown as StreamableHTTPServerTransport, expectedToken: config.bearerToken, tokenStore: config.tokenStore });
+        return;
+      }
+
+      // Session routing: look up existing session or create a new one.
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      let transport: StreamableHTTPServerTransport;
+
+      if (sessionId !== undefined && sessions.has(sessionId)) {
+        transport = sessions.get(sessionId)!;
+      } else {
+        // New session — create a fresh Server+Transport pair.
+        transport = await createSession();
+      }
+
       await handleRequest({ req, res, transport, expectedToken: config.bearerToken, tokenStore: config.tokenStore });
+
+      // After handling, capture the session ID the transport assigned
+      // (returned in the response header) and register it.
+      const newSessionId = res.getHeader('mcp-session-id') as string | undefined;
+      if (newSessionId !== undefined && !sessions.has(newSessionId)) {
+        sessions.set(newSessionId, transport);
+        // eslint-disable-next-line no-console
+        console.error(`[iarsma-mcp-http] new session: ${newSessionId} (${sessions.size} active)`);
+      }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('[iarsma-mcp-http] unhandled error:', e);
@@ -133,13 +169,13 @@ export async function startHttpTransport(opts: {
 
   const host = config.host ?? '0.0.0.0';
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(config.port, host, () => {
-      server.off('error', reject);
+    httpServer.once('error', reject);
+    httpServer.listen(config.port, host, () => {
+      httpServer.off('error', reject);
       resolve();
     });
   });
-  const address = server.address();
+  const address = httpServer.address();
   const boundPort =
     typeof address === 'object' && address !== null ? address.port : config.port;
 
@@ -147,7 +183,7 @@ export async function startHttpTransport(opts: {
     port: boundPort,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        server.close((err) => (err !== undefined && err !== null ? reject(err) : resolve()));
+        httpServer.close((err: unknown) => (err !== undefined && err !== null ? reject(err) : resolve()));
       }),
   };
 }
