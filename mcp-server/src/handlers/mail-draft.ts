@@ -75,6 +75,7 @@ const JMAP_USING_MAIL = [
 
 export function createMailDraftHandler(deps: MailDraftDeps): ToolHandler {
   return async (input, ctx) => {
+    const token = ctx?.bearerToken ?? deps.bearerToken;
     const params = parseInput(input);
 
     // Dry-run is local — no JMAP roundtrip. Mirror the shell-side
@@ -118,7 +119,7 @@ export function createMailDraftHandler(deps: MailDraftDeps): ToolHandler {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
     });
     requireOk(sessionResponse, 'JMAP /.well-known/jmap');
@@ -140,7 +141,7 @@ export function createMailDraftHandler(deps: MailDraftDeps): ToolHandler {
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
       body,
     });

@@ -23,7 +23,7 @@
  * mode (`IARSMA_MCP_HTTP_TOKEN`).
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { makeScopeSet, type ScopeSet } from './scope-filter.js';
 
 export type TokenEntry = {
@@ -31,17 +31,26 @@ export type TokenEntry = {
   readonly name: string;
   readonly scopes: readonly string[];
   readonly tokenId: string;
+  /** Stalwart API key for this agent's JMAP calls. Scoped to match
+   *  the agent's permissions via Stalwart's Replace mode. */
+  readonly stalwartApiKey?: string;
+  /** Stalwart key ID for cleanup on revocation. */
+  readonly stalwartKeyId?: string;
 };
 
 export type ResolvedIdentity = {
   readonly id: string;
   readonly name: string;
   readonly scopes: ScopeSet;
+  readonly stalwartApiKey?: string;
 };
 
 export interface TokenStore {
   resolve(bearerToken: string): ResolvedIdentity | null;
   reload(): void;
+  register(entry: TokenEntry): void;
+  remove(tokenId: string): TokenEntry | null;
+  list(): readonly TokenEntry[];
 }
 
 export function fileTokenStore(filePath: string): TokenStore {
@@ -91,13 +100,33 @@ export function fileTokenStore(filePath: string): TokenStore {
       return {
         id: match.tokenId,
         name: match.name,
+        ...(match.stalwartApiKey !== undefined ? { stalwartApiKey: match.stalwartApiKey } : {}),
         scopes: makeScopeSet(match.scopes),
       };
     },
     reload(): void {
       load();
     },
+    register(entry: TokenEntry): void {
+      entries = [...entries, entry];
+      save();
+    },
+    remove(tokenId: string): TokenEntry | null {
+      const idx = entries.findIndex((e) => e.tokenId === tokenId);
+      if (idx === -1) return null;
+      const removed = entries[idx]!;
+      entries = [...entries.slice(0, idx), ...entries.slice(idx + 1)];
+      save();
+      return removed;
+    },
+    list(): readonly TokenEntry[] {
+      return entries;
+    },
   };
+
+  function save(): void {
+    writeFileSync(filePath, JSON.stringify(entries, null, 2));
+  }
 }
 
 export function singleTokenStore(
@@ -113,6 +142,9 @@ export function singleTokenStore(
     resolve(bearerToken: string): ResolvedIdentity | null {
       return constantTimeEqual(bearerToken, secret) ? resolved : null;
     },
+    register(): void {},
+    remove(): null { return null; },
+    list(): readonly TokenEntry[] { return []; },
     reload(): void {},
   };
 }

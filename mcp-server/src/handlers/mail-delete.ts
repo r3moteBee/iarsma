@@ -51,6 +51,7 @@ const JMAP_USING_MAIL = [
 
 export function createMailDeleteHandler(deps: MailDeleteDeps): ToolHandler {
   return async (input, ctx) => {
+    const token = ctx?.bearerToken ?? deps.bearerToken;
     const params = parseInput(input);
 
     // Both branches need the session — resolve it once.
@@ -60,7 +61,7 @@ export function createMailDeleteHandler(deps: MailDeleteDeps): ToolHandler {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
     });
     requireOk(sessionResponse, 'JMAP /.well-known/jmap');

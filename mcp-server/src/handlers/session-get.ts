@@ -84,8 +84,9 @@ export function loadSessionGetDeps(env: NodeJS.ProcessEnv): SessionGetDeps | nul
  * catch and surface as `tool_error` (or `unauthorized` for 401).
  */
 export function createSessionGetHandler(deps: SessionGetDeps): ToolHandler {
-  return async (_input) => {
+  return async (_input, ctx) => {
     const fetchImpl = deps.fetch ?? fetch;
+    const token = ctx?.bearerToken ?? deps.bearerToken;
     const url = `${deps.jmapBaseUrl.replace(/\/$/, '')}/.well-known/jmap`;
     let response: Response;
     try {
@@ -93,7 +94,7 @@ export function createSessionGetHandler(deps: SessionGetDeps): ToolHandler {
         method: 'GET',
         headers: {
           accept: 'application/json',
-          authorization: `Bearer ${deps.bearerToken}`,
+          authorization: `Bearer ${token}`,
         },
       });
     } catch (e) {

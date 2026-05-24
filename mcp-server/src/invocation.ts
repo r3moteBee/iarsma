@@ -27,6 +27,9 @@ import { requiredScope } from './tool-scopes.js';
 export type InvocationOptions = {
   /** True for dry-run; false (default) for commit. */
   readonly dryRun?: boolean;
+  /** Per-agent Stalwart API key override. When set, handlers use this
+   *  instead of the shared IARSMA_AGENT_TOKEN for JMAP calls. */
+  readonly bearerToken?: string;
 };
 
 export type InvocationResult =
@@ -56,7 +59,7 @@ export type DispatcherDeps = {
 
 export type ToolHandler = (
   input: unknown,
-  ctx: { readonly dryRun: boolean; readonly scopes: ScopeSet },
+  ctx: { readonly dryRun: boolean; readonly scopes: ScopeSet; readonly bearerToken?: string },
 ) => Promise<unknown>;
 
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
@@ -97,7 +100,11 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
         };
       }
       try {
-        const output = await handler(input, { dryRun, scopes: callerScopes });
+        const output = await handler(input, {
+          dryRun,
+          scopes: callerScopes,
+          ...(options.bearerToken !== undefined ? { bearerToken: options.bearerToken } : {}),
+        });
         return dryRun ? { kind: 'preview', preview: output } : { kind: 'ok', output };
       } catch (e) {
         return {

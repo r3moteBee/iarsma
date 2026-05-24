@@ -91,7 +91,8 @@ const EMAIL_LIST_PROPERTIES = [
  *   `{ mailboxId: string, position?: number, limit?: number }`
  */
 export function createThreadListHandler(deps: ThreadListDeps): ToolHandler {
-  return async (input) => {
+  return async (input, ctx) => {
+    const token = ctx?.bearerToken ?? deps.bearerToken;
     const params = parseInput(input);
     const fetchImpl = deps.fetch ?? fetch;
 
@@ -101,7 +102,7 @@ export function createThreadListHandler(deps: ThreadListDeps): ToolHandler {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
     });
     requireOk(sessionResponse, 'JMAP /.well-known/jmap');
@@ -147,7 +148,7 @@ export function createThreadListHandler(deps: ThreadListDeps): ToolHandler {
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',
-        authorization: `Bearer ${deps.bearerToken}`,
+        authorization: `Bearer ${token}`,
       },
       body: requestBody,
     });

@@ -109,23 +109,30 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
     };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
     const args = (req.params.arguments ?? {}) as Record<string, unknown>;
-    // Phase 0 transport-agnostic scope passing: the caller may include
-    // `_iarsmaScopes` in arguments for testing. Real transports pull from
-    // the Authorization header; this fallback is documented in server.ts.
-    const scopesArg = args['_iarsmaScopes'];
     const dryRunArg = args['_iarsmaDryRun'];
-    const scopes = makeScopeSet(
-      Array.isArray(scopesArg) ? scopesArg.map(String) : [],
-    );
+
+    // Scope resolution: prefer authInfo from HTTP transport (real per-agent
+    // tokens), fall back to _iarsmaScopes in arguments (dev/stdio mode).
+    const authInfo = extra.authInfo as { scopes?: ScopeSet; stalwartApiKey?: string } | undefined;
+    const scopes = authInfo?.scopes !== undefined
+      ? authInfo.scopes
+      : makeScopeSet(
+          Array.isArray(args['_iarsmaScopes'])
+            ? (args['_iarsmaScopes'] as unknown[]).map(String)
+            : [],
+        );
     const cleanInput = stripIarsmaArgs(args);
 
     const result = await dispatcher.invoke(
       req.params.name,
       cleanInput,
       scopes,
-      { dryRun: typeof dryRunArg === 'boolean' ? dryRunArg : false },
+      {
+        dryRun: typeof dryRunArg === 'boolean' ? dryRunArg : false,
+        ...(authInfo?.stalwartApiKey !== undefined ? { bearerToken: authInfo.stalwartApiKey } : {}),
+      },
     );
 
     switch (result.kind) {
