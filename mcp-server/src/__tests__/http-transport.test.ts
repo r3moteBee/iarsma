@@ -21,7 +21,7 @@ import {
   readApproval,
 } from '../http-transport.js';
 import path from 'node:path';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
