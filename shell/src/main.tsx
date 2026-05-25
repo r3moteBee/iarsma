@@ -13,3 +13,15 @@ ReactDOM.createRoot(rootEl).render(
     <App />
   </React.StrictMode>,
 );
+
+// Register the service worker for app shell caching.
+// This prevents the browser HTTP Basic Auth dialog on reload —
+// the shell is served from cache without hitting Stalwart's auth.
+if ('serviceWorker' in navigator) {
+  const base = import.meta.env.BASE_URL ?? '/';
+  const swUrl = `${base}sw.js`;
+  navigator.serviceWorker.register(swUrl, { scope: base }).catch(() => {
+    // SW registration failure is non-fatal — the app still works,
+    // just without cache-first reload behavior.
+  });
+}
