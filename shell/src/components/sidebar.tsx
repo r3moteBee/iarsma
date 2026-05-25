@@ -10,6 +10,7 @@
  * tree (mail view only), user info, sign-out, and theme toggle.
  */
 
+import React from 'react';
 import type { ActiveView } from '../nav-state.js';
 import type { ThemePreference } from '../runtime/theme.js';
 import styles from './sidebar.module.css';
@@ -279,38 +280,36 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* Navigation items */}
+        {/* Navigation items with mailboxes nested under Mail */}
         <nav className={styles.nav} aria-label="Views">
           {NAV_ITEMS.map(({ view, label, icon: Icon }) => (
-            <button
-              key={view}
-              type="button"
-              className={`${styles.navItem} ${activeView === view ? styles.navItemActive : ''}`}
-              onClick={() => handleNavClick(view)}
-              aria-current={activeView === view ? 'page' : undefined}
-              data-testid={`nav-${view}`}
-            >
-              <span className={styles.navIcon}><Icon /></span>
-              {label}
-            </button>
+            <React.Fragment key={view}>
+              <button
+                type="button"
+                className={`${styles.navItem} ${activeView === view ? styles.navItemActive : ''}`}
+                onClick={() => handleNavClick(view)}
+                aria-current={activeView === view ? 'page' : undefined}
+                data-testid={`nav-${view}`}
+              >
+                <span className={styles.navIcon}><Icon /></span>
+                {label}
+              </button>
+              {view === 'mail' && activeView === 'mail' && tree.length > 0 && (
+                <div className={styles.mailboxInline}>
+                  {tree.map((node) => (
+                    <MailboxTreeItem
+                      key={node.id}
+                      node={node}
+                      depth={1}
+                      selectedId={selectedMailboxId}
+                      onSelect={(id) => { onMailboxSelect?.(id); onClose?.(); }}
+                    />
+                  ))}
+                </div>
+              )}
+            </React.Fragment>
           ))}
         </nav>
-
-        {/* Mailbox tree (mail view only) */}
-        {activeView === 'mail' && tree.length > 0 && (
-          <div className={styles.mailboxSection}>
-            <div className={styles.mailboxSectionLabel}>Mailboxes</div>
-            {tree.map((node) => (
-              <MailboxTreeItem
-                key={node.id}
-                node={node}
-                depth={0}
-                selectedId={selectedMailboxId}
-                onSelect={(id) => { onMailboxSelect?.(id); onClose?.(); }}
-              />
-            ))}
-          </div>
-        )}
 
         {/* Footer: user info + theme */}
         <div style={{ flex: '1 1 auto' }} />
