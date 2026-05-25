@@ -25,10 +25,16 @@ import {
   buildMailSendRequest,
   fetchAttachmentUpload,
   fetchCalendarList,
+  fetchContactCreateCommit,
+  fetchContactDeleteCommit,
   fetchContactGet,
   fetchContactList,
+  fetchContactUpdateCommit,
+  fetchEventCreateCommit,
+  fetchEventDeleteCommit,
   fetchEventGet,
   fetchEventList,
+  fetchEventUpdateCommit,
   fetchIdentityList,
   fetchMailDeleteCommit,
   fetchMailDraftCommit,
@@ -43,8 +49,18 @@ import {
   type Calendar,
   type CalendarEvent,
   type Contact,
+  type ContactCreateInput,
+  type ContactCreateResult,
+  type ContactDeleteResult,
   type ContactList,
+  type ContactUpdateInput,
+  type ContactUpdateResult,
+  type EventCreateInput,
+  type EventCreateResult,
+  type EventDeleteResult,
   type EventList,
+  type EventUpdateInput,
+  type EventUpdateResult,
   type IdentityList,
   type JmapClientOptions,
   type Mailbox,
@@ -383,6 +399,110 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             contactId: cgParams.contactId,
           });
           return contact as unknown as O;
+        }
+        case 'event.create': {
+          const params = _input as unknown as EventCreateInput;
+          if (_options.dryRun === true) {
+            return {
+              calendarId: params.calendarId,
+              title: params.title,
+              start: params.start,
+              ...(params.duration !== undefined ? { duration: params.duration } : {}),
+              ...(params.timeZone !== undefined ? { timeZone: params.timeZone } : {}),
+              ...(params.description !== undefined ? { description: params.description } : {}),
+              ...(params.location !== undefined ? { location: params.location } : {}),
+            } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: EventCreateResult = await fetchEventCreateCommit({
+            ...opts,
+            session,
+            params,
+          });
+          return result as unknown as O;
+        }
+        case 'event.update': {
+          const params = _input as unknown as EventUpdateInput;
+          if (_options.dryRun === true) {
+            return {
+              eventId: params.eventId,
+              ...(params.title !== undefined ? { title: params.title } : {}),
+              ...(params.start !== undefined ? { start: params.start } : {}),
+              ...(params.duration !== undefined ? { duration: params.duration } : {}),
+              ...(params.description !== undefined ? { description: params.description } : {}),
+              ...(params.location !== undefined ? { location: params.location } : {}),
+            } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: EventUpdateResult = await fetchEventUpdateCommit({
+            ...opts,
+            session,
+            params,
+          });
+          return result as unknown as O;
+        }
+        case 'event.delete': {
+          const params = _input as unknown as { eventId: string };
+          if (_options.dryRun === true) {
+            return { eventId: params.eventId } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: EventDeleteResult = await fetchEventDeleteCommit({
+            ...opts,
+            session,
+            eventId: params.eventId,
+          });
+          return result as unknown as O;
+        }
+        case 'contact.create': {
+          const params = _input as unknown as ContactCreateInput;
+          if (_options.dryRun === true) {
+            return {
+              name: params.name,
+              ...(params.addressBookId !== undefined ? { addressBookId: params.addressBookId } : {}),
+              ...(params.emails !== undefined ? { emails: params.emails } : {}),
+              ...(params.phones !== undefined ? { phones: params.phones } : {}),
+              ...(params.organizations !== undefined ? { organizations: params.organizations } : {}),
+            } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: ContactCreateResult = await fetchContactCreateCommit({
+            ...opts,
+            session,
+            params,
+          });
+          return result as unknown as O;
+        }
+        case 'contact.update': {
+          const params = _input as unknown as ContactUpdateInput;
+          if (_options.dryRun === true) {
+            return {
+              contactId: params.contactId,
+              ...(params.name !== undefined ? { name: params.name } : {}),
+              ...(params.emails !== undefined ? { emails: params.emails } : {}),
+              ...(params.phones !== undefined ? { phones: params.phones } : {}),
+            } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: ContactUpdateResult = await fetchContactUpdateCommit({
+            ...opts,
+            session,
+            params,
+          });
+          return result as unknown as O;
+        }
+        case 'contact.delete': {
+          const params = _input as unknown as { contactId: string };
+          if (_options.dryRun === true) {
+            return { contactId: params.contactId } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: ContactDeleteResult = await fetchContactDeleteCommit({
+            ...opts,
+            session,
+            contactId: params.contactId,
+          });
+          return result as unknown as O;
         }
         default:
           throw makeToolError(

@@ -27,6 +27,12 @@
  */
 
 export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
+  'contact.create',
+  'contact.delete',
+  'contact.update',
+  'event.create',
+  'event.delete',
+  'event.update',
   'mail.delete',
   'mail.draft',
   'mail.modify',
@@ -54,6 +60,36 @@ export type AffectedJsonBuilder = (output: unknown) => string;
 export const AFFECTED_JSON_BUILDERS: Readonly<
   Record<string, AffectedJsonBuilder>
 > = {
+  'contact.create': (output) => {
+    const o = output as { contactId?: unknown } | undefined;
+    if (o === undefined || typeof o.contactId !== 'string') {
+      return JSON.stringify([] as AffectedArtifact[]);
+    }
+    return JSON.stringify([
+      { kind: 'contact', id: o.contactId, op: 'create' } as AffectedArtifact,
+    ]);
+  },
+  'contact.delete': (_output) => {
+    return JSON.stringify([] as AffectedArtifact[]);
+  },
+  'contact.update': (_output) => {
+    return JSON.stringify([] as AffectedArtifact[]);
+  },
+  'event.create': (output) => {
+    const o = output as { eventId?: unknown } | undefined;
+    if (o === undefined || typeof o.eventId !== 'string') {
+      return JSON.stringify([] as AffectedArtifact[]);
+    }
+    return JSON.stringify([
+      { kind: 'calendar-event', id: o.eventId, op: 'create' } as AffectedArtifact,
+    ]);
+  },
+  'event.delete': (_output) => {
+    return JSON.stringify([] as AffectedArtifact[]);
+  },
+  'event.update': (_output) => {
+    return JSON.stringify([] as AffectedArtifact[]);
+  },
   'mail.delete': (_output) => {
     // mail.delete's output only has `deletedCount` — the destroyed ids
     // are not echoed back (the caller already knows them from the input).

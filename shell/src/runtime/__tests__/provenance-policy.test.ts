@@ -16,7 +16,18 @@ import {
 
 describe('DESTRUCTIVE_TOOLS', () => {
   it('lists exactly the destructive tools', () => {
-    expect([...DESTRUCTIVE_TOOLS].sort()).toEqual(['mail.delete', 'mail.draft', 'mail.modify', 'mail.send']);
+    expect([...DESTRUCTIVE_TOOLS].sort()).toEqual([
+      'contact.create',
+      'contact.delete',
+      'contact.update',
+      'event.create',
+      'event.delete',
+      'event.update',
+      'mail.delete',
+      'mail.draft',
+      'mail.modify',
+      'mail.send',
+    ]);
   });
 
   it('isDestructive recognizes the destructive set', () => {
