@@ -38,3 +38,19 @@ export const selectedThreadIdAtom = atom<string | null>(null);
  * (e.g., mailbox-scoped search) needs to coexist.
  */
 export const searchQueryAtom = atom<string>('');
+
+/**
+ * Mail layout preference: 'side' renders thread list and thread view
+ * side-by-side (default on desktop); 'stacked' renders them vertically.
+ * Persisted to localStorage so the preference survives reloads.
+ */
+export type MailLayout = 'side' | 'stacked';
+
+const storedLayout =
+  typeof window !== 'undefined'
+    ? localStorage.getItem('iarsma-mail-layout')
+    : null;
+
+export const mailLayoutAtom = atom<MailLayout>(
+  storedLayout === 'stacked' ? 'stacked' : 'side',
+);
