@@ -1,7 +1,8 @@
 // Phase 0 work items 6 + 7 — OAuth 2.1 + PKCE flow + login UI.
+// Phase 4 — responsive shell layout with sidebar, top bar, bottom nav.
 
 import { Provider as JotaiProvider, useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   actionLog,
   agentContextAtom,
@@ -14,9 +15,11 @@ import {
 import { composeStateAtom } from './compose-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
+import { useBreakpoint } from './hooks/use-media-query.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
 import { searchQueryAtom } from './mail-state.js';
 import { activeViewAtom } from './nav-state.js';
+import type { ActiveView } from './nav-state.js';
 import {
   IarsmaProvider,
   cachedInvoker,
@@ -28,15 +31,22 @@ import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runti
 import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
+import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
+import { BottomNav } from './components/bottom-nav.js';
+import { Sidebar } from './components/sidebar.js';
+import { TopBar } from './components/top-bar.js';
 import { ComposeView } from './views/compose-view.js';
+import { ContactsView } from './views/contacts-view.js';
 import { AgentSettingsView } from './views/agent-settings-view.js';
 import { ActivityView } from './views/activity-view.js';
 import { ApprovalsView } from './views/approvals-view.js';
+import { CalendarView } from './views/calendar-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
 import { ThreadList } from './views/thread-list.js';
 import { ThreadView } from './views/thread-view.js';
+import layoutStyles from './styles/layout.module.css';
 
 type Phase =
   | { kind: 'loading' }
@@ -166,16 +176,320 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
 
 function Shell({ config }: { readonly config: ShellConfig }) {
   const isSignedIn = useAtomValue(isSignedInAtom);
+  const themePreference = useAtomValue(themePreferenceAtom);
+  const resolvedTheme = resolveTheme(themePreference);
   useGlobalKeyboardShortcuts();
+
+  if (!isSignedIn) {
+    return (
+      <main aria-label="Iarsma — sign in" data-theme={resolvedTheme}>
+        <header>
+          <h1>Iarsma</h1>
+        </header>
+        <SignedOutView config={config} />
+        <KeyboardHelpOverlay />
+      </main>
+    );
+  }
+
   return (
-    <main aria-label={isSignedIn ? 'Iarsma — signed in' : 'Iarsma — sign in'}>
-      <header>
-        <h1>Iarsma</h1>
-      </header>
-      {isSignedIn ? <SignedInView config={config} /> : <SignedOutView config={config} />}
+    <SignedInShell config={config} resolvedTheme={resolvedTheme} />
+  );
+}
+
+/**
+ * The signed-in shell with responsive sidebar/top-bar/bottom-nav layout.
+ * Separated from Shell so hooks that depend on signed-in state (session,
+ * mailboxes) are only called when authenticated.
+ */
+function SignedInShell({
+  config,
+  resolvedTheme,
+}: {
+  readonly config: ShellConfig;
+  readonly resolvedTheme: 'light' | 'dark';
+}) {
+  const breakpoint = useBreakpoint();
+  const isMobile = breakpoint === 'mobile';
+  const isTablet = breakpoint === 'tablet';
+  const isDesktop = breakpoint === 'desktop';
+
+  const [activeView, setActiveView] = useAtom(activeViewAtom);
+  const [themePreference, setThemePreference] = useAtom(themePreferenceAtom);
+  const setCompose = useSetAtom(composeStateAtom);
+  const openCompose = useCallback(() => setCompose({ kind: 'open', prefill: {} }), [setCompose]);
+  const session = useSessionGet({});
+  const tokens = useAtomValue(tokensAtom);
+  const bumpAuth = useSetAtom(authVersionAtom);
+  const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Sidebar drawer state (tablet only)
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  // Calendar view state
+  const [calendarView, setCalendarView] = useState<'month' | 'week' | 'day'>('month');
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+
+  // Expose search input ref globally for `/` keybinding.
+  useEffect(() => {
+    searchInputRefHandle.current = searchInputRef.current;
+    return () => {
+      searchInputRefHandle.current = null;
+    };
+  }, []);
+
+  const userName = session.data?.username ?? tokens?.email;
+
+  const onSignOut = useCallback(() => {
+    void (async () => {
+      await signOut({ config, storage: authStorage });
+      try {
+        await cacheStorage.clearAll();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] failed to clear capability cache on sign-out:', e);
+      }
+      bumpAuth((v) => v + 1);
+    })();
+  }, [config, bumpAuth]);
+
+  // Agent token management (settings view)
+  const metadataStore = useMemo(
+    () =>
+      typeof indexedDB !== 'undefined'
+        ? indexedDbAgentMetadataStore()
+        : inMemoryAgentMetadataStore(),
+    [],
+  );
+  const issuer = useMemo(
+    () => localTokenIssuer({ metadataStore }),
+    [metadataStore],
+  );
+
+  const [agentTokens, setAgentTokens] = useState<readonly AgentTokenInfo[]>([]);
+  const [agentTokensLoading, setAgentTokensLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAgentTokensLoading(true);
+    issuer.listTokens().then(
+      (list) => { if (!cancelled) { setAgentTokens(list); setAgentTokensLoading(false); } },
+      () => { if (!cancelled) setAgentTokensLoading(false); },
+    );
+    return () => { cancelled = true; };
+  }, [issuer]);
+
+  const handleIssue = async (name: string, scopes: string[], lifetimeSec: number) => {
+    const result = await issuer.issueToken({ name, scopes, lifetimeSec });
+    const refreshed = await issuer.listTokens();
+    setAgentTokens(refreshed);
+    return result;
+  };
+  const handleRevoke = async (tokenId: string) => {
+    await issuer.revokeToken(tokenId);
+    const refreshed = await issuer.listTokens();
+    setAgentTokens(refreshed);
+  };
+
+  // View title for mobile top bar
+  const VIEW_TITLES: Record<ActiveView, string> = {
+    mail: 'Mail',
+    calendar: 'Calendar',
+    contacts: 'Contacts',
+    approvals: 'Approvals',
+    activity: 'Activity',
+    settings: 'Settings',
+  };
+
+  return (
+    <main
+      className={layoutStyles.app}
+      aria-label="Iarsma — signed in"
+      data-theme={resolvedTheme}
+    >
+      {/* Desktop/Tablet: Sidebar */}
+      {!isMobile && (
+        <Sidebar
+          activeView={activeView}
+          onNavigate={setActiveView}
+          onCompose={openCompose}
+          userName={userName}
+          onSignOut={onSignOut}
+          theme={themePreference}
+          onThemeChange={setThemePreference}
+          isOpen={sidebarOpen}
+          onClose={closeSidebar}
+        />
+      )}
+
+      {/* Tablet: Top bar with hamburger */}
+      {isTablet && (
+        <TopBar
+          title={VIEW_TITLES[activeView]}
+          onMenuToggle={toggleSidebar}
+        />
+      )}
+
+      {/* Mobile: Top bar with title */}
+      {isMobile && (
+        <TopBar title={VIEW_TITLES[activeView]} />
+      )}
+
+      {/* Main content area */}
+      <div className={layoutStyles.content}>
+        {/* Search bar (visible on all breakpoints when in mail view) */}
+        {activeView === 'mail' && (
+          <div style={{ display: 'flex', gap: '0.5em', alignItems: 'center', padding: isDesktop ? 'var(--space-md)' : 'var(--space-sm)' }}>
+            <label htmlFor="thread-search-input" style={{ flex: '0 0 auto' }}>
+              Search:
+            </label>
+            <input
+              id="thread-search-input"
+              ref={searchInputRef}
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setSearchQuery('');
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder="Search every mailbox..."
+              aria-label="Search threads"
+              style={{
+                flex: '1 1 auto',
+                maxWidth: '30em',
+                padding: '0.3em 0.5em',
+                font: 'inherit',
+                border: '1px solid var(--surface-3)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--surface-1)',
+                color: 'var(--text-1)',
+              }}
+            />
+            {searchQuery !== '' ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear search"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+        )}
+
+        {activeView === 'mail' ? (
+          <MailLayout isLoading={session.isLoading} error={session.error} />
+        ) : activeView === 'calendar' ? (
+          <CalendarView
+            events={[]}
+            view={calendarView}
+            onViewChange={setCalendarView}
+            currentDate={calendarDate}
+            onDateChange={setCalendarDate}
+          />
+        ) : activeView === 'contacts' ? (
+          <ContactsView
+            contacts={[]}
+            selectedContact={null}
+            onSelect={() => {}}
+            onSearch={() => {}}
+            searchQuery=""
+          />
+        ) : activeView === 'approvals' ? (
+          <ApprovalsView
+            approvals={[]}
+            onApprove={async () => {}}
+            onDeny={async () => {}}
+          />
+        ) : activeView === 'activity' ? (
+          <ActivityView
+            entries={[]}
+            integrityStatus="unchecked"
+            filters={{ actor: 'all', action: 'all', mode: 'all', timeRange: 'all' }}
+            onFilterChange={() => {}}
+            page={1}
+            pageSize={25}
+            totalEntries={0}
+            onPageChange={() => {}}
+          />
+        ) : activeView === 'settings' ? (
+          <AgentSettingsView
+            tokens={agentTokens}
+            onIssue={handleIssue}
+            onRevoke={handleRevoke}
+            isLoading={agentTokensLoading}
+          />
+        ) : (
+          <PlaceholderView name="Unknown" />
+        )}
+      </div>
+
+      {/* Mobile: Bottom nav */}
+      {isMobile && (
+        <BottomNav
+          activeView={activeView}
+          onNavigate={setActiveView}
+          onSignOut={onSignOut}
+        />
+      )}
+
       <KeyboardHelpOverlay />
-      {isSignedIn ? <ComposeView /> : null}
+      <ComposeView />
     </main>
+  );
+}
+
+/**
+ * Mail layout — 3-column reading pane (desktop), or stacked on smaller
+ * screens. Extracted so SignedInShell stays manageable.
+ */
+function MailLayout({
+  isLoading,
+  error,
+}: {
+  readonly isLoading: boolean;
+  readonly error?: { message: string } | undefined;
+}) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '16em 22em minmax(0, 1fr)',
+        gap: '1em',
+        alignItems: 'start',
+        flex: 1,
+      }}
+    >
+      <aside aria-label="Mailbox sidebar">
+        <MailboxList />
+      </aside>
+      <section aria-label="Selected mailbox">
+        {isLoading ? <p>Loading session...</p> : null}
+        {error !== undefined ? (
+          <p role="alert">Session error: {error.message}</p>
+        ) : null}
+        <ThreadList />
+      </section>
+      <section aria-label="Selected thread">
+        <ThreadView />
+      </section>
+    </div>
+  );
+}
+
+/** Placeholder view for Calendar and Contacts (Phase 4 stubs). */
+function PlaceholderView({ name }: { readonly name: string }) {
+  return (
+    <div style={{ padding: '2em', color: 'var(--text-3)' }}>
+      {name} — coming soon
+    </div>
   );
 }
 
@@ -250,260 +564,6 @@ function isEditableElement(target: EventTarget | null): boolean {
   return false;
 }
 
-
-function SignedInView({ config }: { readonly config: ShellConfig }) {
-  const session = useSessionGet({});
-  const bumpAuth = useSetAtom(authVersionAtom);
-  const tokens = useAtomValue(tokensAtom);
-  const setCompose = useSetAtom(composeStateAtom);
-  const openCompose = () => setCompose({ kind: 'open', prefill: {} });
-  const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
-  const [activeView, setActiveView] = useAtom(activeViewAtom);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-  // Expose the search input ref globally so the `/` keybinding (wired
-  // at App-level via useGlobalKeyboardShortcuts) can focus it without
-  // crossing the render tree.
-  useEffect(() => {
-    searchInputRefHandle.current = searchInputRef.current;
-    return () => {
-      searchInputRefHandle.current = null;
-    };
-  }, []);
-
-  const onSignOut = () => {
-    void (async () => {
-      // Thread the IDB-backed authStorage through explicitly.
-      // signOut's default `storage: sessionAuthStorage()` would clear
-      // the wrong backing — leaving tokens still in IndexedDB and the
-      // user appearing signed-in on the next reload.
-      await signOut({ config, storage: authStorage });
-      // Drop every cached email row so the next sign-in (possibly a
-      // different user) doesn't read another user's mail. Failure is
-      // non-fatal — the auth tokens are already gone, so the next
-      // capability call will fail closed before serving stale cache.
-      try {
-        await cacheStorage.clearAll();
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[iarsma] failed to clear capability cache on sign-out:', e);
-      }
-      // tokensAtom is read-derived (storage-backed); the version bump
-      // triggers re-derivation so it picks up the cleared tokens.
-      bumpAuth((v) => v + 1);
-    })();
-  };
-
-  const metadataStore = useMemo(
-    () =>
-      typeof indexedDB !== 'undefined'
-        ? indexedDbAgentMetadataStore()
-        : inMemoryAgentMetadataStore(),
-    [],
-  );
-  const issuer = useMemo(
-    () => localTokenIssuer({ metadataStore }),
-    [metadataStore],
-  );
-
-  const [agentTokens, setAgentTokens] = useState<readonly AgentTokenInfo[]>([]);
-  const [agentTokensLoading, setAgentTokensLoading] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setAgentTokensLoading(true);
-    issuer.listTokens().then(
-      (list) => { if (!cancelled) { setAgentTokens(list); setAgentTokensLoading(false); } },
-      () => { if (!cancelled) setAgentTokensLoading(false); },
-    );
-    return () => { cancelled = true; };
-  }, [issuer]);
-
-  const handleIssue = async (name: string, scopes: string[], lifetimeSec: number) => {
-    const result = await issuer.issueToken({ name, scopes, lifetimeSec });
-    const refreshed = await issuer.listTokens();
-    setAgentTokens(refreshed);
-    return result;
-  };
-  const handleRevoke = async (tokenId: string) => {
-    await issuer.revokeToken(tokenId);
-    const refreshed = await issuer.listTokens();
-    setAgentTokens(refreshed);
-  };
-
-  return (
-    <section aria-labelledby="signedin-heading">
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75em' }}>
-        <h2 id="signedin-heading" style={{ margin: 0 }}>Signed in</h2>
-        <span style={{ flex: '1 1 auto', display: 'flex', gap: '0.5em', alignItems: 'baseline' }}>
-          <label htmlFor="thread-search-input" style={{ flex: '0 0 auto' }}>
-            Search:
-          </label>
-          <input
-            id="thread-search-input"
-            ref={searchInputRef}
-            type="search"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                setSearchQuery('');
-                e.currentTarget.blur();
-              }
-            }}
-            placeholder="Search every mailbox…"
-            aria-label="Search threads"
-            style={{
-              flex: '1 1 auto',
-              maxWidth: '30em',
-              padding: '0.3em 0.5em',
-              font: 'inherit',
-              border: '1px solid rgba(0,0,0,0.2)',
-              borderRadius: 4,
-            }}
-          />
-          {searchQuery !== '' ? (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              aria-label="Clear search"
-            >
-              Clear
-            </button>
-          ) : null}
-        </span>
-        <span style={{ display: 'flex', gap: '0.75em', alignItems: 'baseline' }}>
-          <button type="button" onClick={openCompose} aria-label="Compose new message">
-            Compose
-          </button>
-          {session.data !== undefined ? (
-            <span>
-              {session.data.username} (
-              <button type="button" onClick={onSignOut}>
-                Sign out
-              </button>
-              )
-            </span>
-          ) : tokens?.email !== undefined ? (
-            <span>
-              {tokens.email} (
-              <button type="button" onClick={onSignOut}>
-                Sign out
-              </button>
-              )
-            </span>
-          ) : (
-            <button type="button" onClick={onSignOut}>
-              Sign out
-            </button>
-          )}
-        </span>
-      </header>
-
-      <nav aria-label="Main navigation" style={{ display: 'flex', gap: '0.25em', margin: '0.75em 0' }}>
-        <button
-          type="button"
-          onClick={() => setActiveView('mail')}
-          aria-current={activeView === 'mail' ? 'page' : undefined}
-          style={navButtonStyle(activeView === 'mail')}
-        >
-          Mail
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveView('approvals')}
-          aria-current={activeView === 'approvals' ? 'page' : undefined}
-          style={navButtonStyle(activeView === 'approvals')}
-        >
-          Approvals
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveView('activity')}
-          aria-current={activeView === 'activity' ? 'page' : undefined}
-          style={navButtonStyle(activeView === 'activity')}
-        >
-          Activity
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveView('settings')}
-          aria-current={activeView === 'settings' ? 'page' : undefined}
-          style={navButtonStyle(activeView === 'settings')}
-        >
-          Settings
-        </button>
-      </nav>
-
-      {activeView === 'mail' ? (
-        <div
-          style={{
-            display: 'grid',
-            // 3-column reading layout: mailboxes | threads | thread body.
-            gridTemplateColumns: '16em 22em minmax(0, 1fr)',
-            gap: '1em',
-            alignItems: 'start',
-          }}
-        >
-          <aside aria-label="Mailbox sidebar">
-            <MailboxList />
-          </aside>
-          <section aria-label="Selected mailbox">
-            {session.isLoading ? <p>Loading session…</p> : null}
-            {session.error !== undefined ? (
-              <p role="alert">Session error: {session.error.message}</p>
-            ) : null}
-            <ThreadList />
-          </section>
-          <section aria-label="Selected thread">
-            <ThreadView />
-          </section>
-        </div>
-      ) : activeView === 'approvals' ? (
-        <ApprovalsView
-          approvals={[]}
-          onApprove={async () => {}}
-          onDeny={async () => {}}
-        />
-      ) : activeView === 'activity' ? (
-        <ActivityView
-          entries={[]}
-          integrityStatus="unchecked"
-          filters={{ actor: 'all', action: 'all', mode: 'all', timeRange: 'all' }}
-          onFilterChange={() => {}}
-          page={1}
-          pageSize={25}
-          totalEntries={0}
-          onPageChange={() => {}}
-        />
-      ) : activeView === 'settings' ? (
-        <AgentSettingsView
-          tokens={agentTokens}
-          onIssue={handleIssue}
-          onRevoke={handleRevoke}
-          isLoading={agentTokensLoading}
-        />
-      ) : (
-        <div style={{ padding: '2em', color: 'rgba(0,0,0,0.5)' }}>
-          Coming soon
-        </div>
-      )}
-    </section>
-  );
-}
-
-function navButtonStyle(active: boolean, disabled?: boolean): React.CSSProperties {
-  return {
-    padding: '0.3em 0.8em',
-    font: 'inherit',
-    border: 'none',
-    borderBottom: active ? '2px solid currentColor' : '2px solid transparent',
-    background: 'none',
-    cursor: disabled === true ? 'default' : 'pointer',
-    fontWeight: active ? 600 : 400,
-    opacity: disabled === true ? 0.45 : 1,
-  };
-}
 
 function CallbackView({
   config,

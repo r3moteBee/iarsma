@@ -1,0 +1,161 @@
+.container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.listPane {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  min-width: 260px;
+  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.1));
+  overflow: hidden;
+}
+
+.listPane.fullWidth {
+  width: 100%;
+  border-right: none;
+}
+
+.searchBar {
+  padding: var(--space-sm, 0.5em);
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.1));
+}
+
+.searchInput {
+  width: 100%;
+  padding: 0.4em 0.6em;
+  font: inherit;
+  font-size: 0.9em;
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.2));
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #000);
+}
+
+.searchInput::placeholder {
+  color: var(--text-3, rgba(0, 0, 0, 0.4));
+}
+
+.contactList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.contactItem {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.6em 0.8em;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.06));
+  transition: background 0.1s;
+}
+
+.contactItem:hover {
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+}
+
+.contactItem.selected {
+  background: var(--surface-3, rgba(0, 0, 0, 0.08));
+}
+
+.contactItemText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+  min-width: 0;
+}
+
+.contactName {
+  font-weight: 500;
+  font-size: 0.9em;
+  color: var(--text-1, #000);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contactEmail {
+  font-size: 0.8em;
+  color: var(--text-3, rgba(0, 0, 0, 0.5));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detailPane {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-md, 1.5em);
+}
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  margin-bottom: 1.5em;
+}
+
+.detailName {
+  font-size: 1.4em;
+  font-weight: 600;
+  color: var(--text-1, #000);
+  margin: 0;
+}
+
+.detailSection {
+  margin-bottom: 1.2em;
+}
+
+.detailSectionTitle {
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--text-3, rgba(0, 0, 0, 0.5));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.4em;
+}
+
+.detailItem {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.3em 0;
+  font-size: 0.9em;
+  color: var(--text-1, #000);
+}
+
+.detailLabel {
+  font-size: 0.8em;
+  color: var(--text-3, rgba(0, 0, 0, 0.5));
+  min-width: 4em;
+}
+
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 2em;
+  color: var(--text-3, rgba(0, 0, 0, 0.5));
+}
+
+.emptyDetail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-3, rgba(0, 0, 0, 0.4));
+  font-size: 0.9em;
+}

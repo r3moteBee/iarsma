@@ -1,0 +1,65 @@
+/* ── Top bar ───────────────────────────────────────────────────
+ * Tablet: hamburger + title. Mobile: back arrow + title.
+ * Desktop: not rendered.
+ * ────────────────────────────────────────────────────────────── */
+
+.topBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--surface-3);
+  z-index: 90;
+}
+
+.menuButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.menuButton:hover {
+  background: var(--surface-3);
+}
+
+.menuButton svg {
+  width: 20px;
+  height: 20px;
+}
+
+.title {
+  flex: 1;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Center the title on mobile when there's a back button */
+@media (max-width: 639px) {
+  .title {
+    text-align: center;
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}

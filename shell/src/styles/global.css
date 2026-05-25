@@ -1,0 +1,30 @@
+@import './reset.css';
+@import './tokens.css';
+
+html {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--text-1);
+  background: var(--surface-1);
+  transition: background var(--transition-normal), color var(--transition-normal);
+}
+
+/* Responsive breakpoints as custom media (for documentation) */
+/* Mobile: < 640px (default) */
+/* Tablet: >= 640px */
+/* Desktop: >= 1024px */
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--text-3); border-radius: var(--radius-sm); }
+
+/* Selection */
+::selection { background: var(--accent); color: white; }

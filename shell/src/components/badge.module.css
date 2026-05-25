@@ -1,0 +1,83 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-body);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Count variant — small pill */
+.count {
+  padding: 2px var(--space-sm);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* Status variant — dot + label */
+.status {
+  gap: var(--space-xs);
+  font-size: var(--text-sm);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Scope variant — outlined pill */
+.scope {
+  padding: 2px var(--space-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid currentColor;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* Colors — count fills */
+.count.accent {
+  background-color: var(--accent);
+  color: #fff;
+}
+
+.count.success {
+  background-color: var(--success);
+  color: #fff;
+}
+
+.count.warning {
+  background-color: var(--warning);
+  color: #000;
+}
+
+.count.destructive {
+  background-color: var(--destructive);
+  color: #fff;
+}
+
+.count.neutral {
+  background-color: var(--surface-3);
+  color: var(--text-1);
+}
+
+/* Colors — status dots */
+.status.accent .dot { background-color: var(--accent); }
+.status.success .dot { background-color: var(--success); }
+.status.warning .dot { background-color: var(--warning); }
+.status.destructive .dot { background-color: var(--destructive); }
+.status.neutral .dot { background-color: var(--text-3); }
+
+.status.accent { color: var(--text-1); }
+.status.success { color: var(--text-1); }
+.status.warning { color: var(--text-1); }
+.status.destructive { color: var(--text-1); }
+.status.neutral { color: var(--text-2); }
+
+/* Colors — scope outlines */
+.scope.accent { color: var(--accent); }
+.scope.success { color: var(--success); }
+.scope.warning { color: var(--warning); }
+.scope.destructive { color: var(--destructive); }
+.scope.neutral { color: var(--text-2); }

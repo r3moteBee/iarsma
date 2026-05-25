@@ -1,0 +1,29 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-family: var(--font-body);
+  font-weight: 600;
+  color: #fff;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.sm {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.md {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.lg {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
