@@ -268,7 +268,7 @@ export function Sidebar({
       >
         {/* Header: logo + compose */}
         <div className={styles.header}>
-          <span className={styles.logo}>Iarsma</span>
+          <span className={styles.logo}>Iarsma <span className={styles.version}>{__APP_VERSION__}</span></span>
           <button
             type="button"
             className={styles.composeButton}

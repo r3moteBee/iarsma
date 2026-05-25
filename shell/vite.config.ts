@@ -53,6 +53,9 @@ export default defineConfig({
     strictPort: true,
     ...(httpsConfig !== undefined ? { https: httpsConfig } : {}),
   },
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env['IARSMA_VERSION'] ?? 'dev'),
+  },
   build: {
     outDir: 'dist',
     target: 'es2022',
