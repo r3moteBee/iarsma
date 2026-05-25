@@ -14,16 +14,32 @@
  *   - Today is highlighted with special class
  *   - Empty state when no events
  *   - Click on event calls onEventClick
+ *   - CRUD: "+ New Event" button renders and opens form
+ *   - CRUD: Form has title and date fields
+ *   - CRUD: Clicking event opens detail with Edit/Delete
+ *   - CRUD: onSaveEvent called with form data
+ *   - CRUD: onDeleteEvent called on confirm
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runAxe } from '../../__tests__/util/axe.js';
 import type { CalendarViewEvent } from '../calendar-view.js';
 import { CalendarView } from '../calendar-view.js';
 
 afterEach(cleanup);
+
+// jsdom does not implement HTMLDialogElement.showModal() natively.
+// Polyfill the bare minimum so the Dialog component can call it.
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal ??= vi.fn(function (this: HTMLDialogElement) {
+    this.setAttribute('open', '');
+  });
+  HTMLDialogElement.prototype.close ??= vi.fn(function (this: HTMLDialogElement) {
+    this.removeAttribute('open');
+  });
+});
 
 const TEST_DATE = new Date(2026, 4, 15); // May 15, 2026 (Thursday)
 
@@ -35,6 +51,8 @@ const SAMPLE_EVENTS: readonly CalendarViewEvent[] = [
     duration: 'PT30M',
     calendarColor: '#3b82f6',
     status: 'confirmed',
+    description: 'Daily sync',
+    location: 'Room A',
   },
   {
     id: 'evt-2',
@@ -417,6 +435,240 @@ describe('CalendarView', () => {
       );
 
       expect(await runAxe(container)).toEqual([]);
+    });
+  });
+
+  describe('CRUD: create/edit/delete', () => {
+    it('renders "+ New Event" button when onSaveEvent is provided', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+        />,
+      );
+
+      expect(screen.getByRole('button', { name: /new event/i })).toBeInTheDocument();
+    });
+
+    it('does not render "+ New Event" button without onSaveEvent', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+
+      expect(screen.queryByRole('button', { name: /new event/i })).not.toBeInTheDocument();
+    });
+
+    it('clicking "+ New Event" opens the form dialog', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+
+      // Dialog should be open with title and date fields
+      expect(screen.getByText('New Event')).toBeInTheDocument();
+      expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/date/i)).toBeInTheDocument();
+    });
+
+    it('event form has all expected fields', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+
+      expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/date/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/start time/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/duration/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/location/i)).toBeInTheDocument();
+    });
+
+    it('clicking an event opens detail view with Edit and Delete buttons', () => {
+      render(
+        <CalendarView
+          events={SAMPLE_EVENTS}
+          view="day"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+          onUpdateEvent={async () => {}}
+          onDeleteEvent={async () => {}}
+        />,
+      );
+
+      // Click on an event block
+      fireEvent.click(screen.getByText('Team Standup'));
+
+      // Detail view should show event info
+      expect(screen.getByTestId('event-detail')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /edit event/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /delete event/i })).toBeInTheDocument();
+    });
+
+    it('event detail shows description and location when present', () => {
+      render(
+        <CalendarView
+          events={SAMPLE_EVENTS}
+          view="day"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onUpdateEvent={async () => {}}
+          onDeleteEvent={async () => {}}
+        />,
+      );
+
+      fireEvent.click(screen.getByText('Team Standup'));
+
+      expect(screen.getByText('Daily sync')).toBeInTheDocument();
+      expect(screen.getByText('Room A')).toBeInTheDocument();
+    });
+
+    it('onSaveEvent is called with form data on save', async () => {
+      const onSaveEvent = vi.fn().mockResolvedValue(undefined);
+
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={onSaveEvent}
+        />,
+      );
+
+      // Open form
+      fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+
+      // Fill in title
+      fireEvent.change(screen.getByLabelText(/title/i), { target: { value: 'My New Event' } });
+
+      // Fill in date
+      fireEvent.change(screen.getByLabelText(/date/i), { target: { value: '2026-05-20' } });
+
+      // Click save
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+
+      await waitFor(() => {
+        expect(onSaveEvent).toHaveBeenCalledTimes(1);
+      });
+
+      const callArg = onSaveEvent.mock.calls[0]![0] as Record<string, unknown>;
+      expect(callArg.title).toBe('My New Event');
+      expect(callArg.date).toBe('2026-05-20');
+      expect(callArg.startTime).toBe('09:00');
+      expect(callArg.duration).toBe('PT1H');
+    });
+
+    it('onDeleteEvent is called when delete is confirmed', async () => {
+      const onDeleteEvent = vi.fn().mockResolvedValue(undefined);
+
+      render(
+        <CalendarView
+          events={SAMPLE_EVENTS}
+          view="day"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onUpdateEvent={async () => {}}
+          onDeleteEvent={onDeleteEvent}
+        />,
+      );
+
+      // Click on event to open detail
+      fireEvent.click(screen.getByText('Team Standup'));
+
+      // Click delete button in detail view
+      fireEvent.click(screen.getByRole('button', { name: /delete event/i }));
+
+      // Confirmation dialog should appear
+      expect(screen.getByText(/delete this event/i)).toBeInTheDocument();
+      // "Team Standup" appears both in the event block and the confirmation text
+      expect(screen.getAllByText(/team standup/i).length).toBeGreaterThanOrEqual(1);
+
+      // Confirm the deletion
+      fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+
+      await waitFor(() => {
+        expect(onDeleteEvent).toHaveBeenCalledWith('evt-1');
+      });
+    });
+
+    it('clicking empty day cell opens form with that date pre-filled', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+        />,
+      );
+
+      // Double-click on May 20 cell to create an event
+      const day20 = screen.getByTestId('calendar-day-2026-05-20');
+      fireEvent.doubleClick(day20);
+
+      // Form should open with date pre-filled
+      expect(screen.getByText('New Event')).toBeInTheDocument();
+      const dateInput = screen.getByLabelText(/date/i) as HTMLInputElement;
+      expect(dateInput.value).toBe('2026-05-20');
+    });
+
+    it('clicking Edit in detail view opens the edit form', () => {
+      render(
+        <CalendarView
+          events={SAMPLE_EVENTS}
+          view="day"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+          onUpdateEvent={async () => {}}
+          onDeleteEvent={async () => {}}
+        />,
+      );
+
+      // Click event to open detail
+      fireEvent.click(screen.getByText('Team Standup'));
+
+      // Click Edit
+      fireEvent.click(screen.getByRole('button', { name: /edit event/i }));
+
+      // Edit form should show with pre-filled title
+      expect(screen.getByText('Edit Event')).toBeInTheDocument();
+      const titleInput = screen.getByLabelText(/title/i) as HTMLInputElement;
+      expect(titleInput.value).toBe('Team Standup');
     });
   });
 });
