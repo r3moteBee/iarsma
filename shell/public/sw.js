@@ -1,18 +1,20 @@
 /**
  * Iarsma Service Worker — app shell cache.
  *
- * Strategy:
- * - Static assets (JS, CSS, WASM, HTML): cache-first. On install,
- *   the shell is pre-cached. On fetch, serve from cache, falling
- *   back to network. Network responses update the cache for next time.
- * - API calls (JMAP, MCP, auth): network-only. Never cached.
- * - On activate: clean up old cache versions.
+ * Prevents the browser HTTP Basic Auth dialog by:
+ * 1. Serving the shell from cache on navigation (reload)
+ * 2. Never letting a 401 response reach the browser
+ * 3. If no cache and auth fails, returning a minimal page that
+ *    triggers the OAuth flow instead of showing Basic Auth
  *
- * This prevents the browser HTTP Basic Auth dialog on reload — the
- * shell is served from cache without hitting Stalwart's auth layer.
+ * Strategy:
+ * - Navigation: cache-first. Background fetch updates cache for
+ *   next reload. 401s are swallowed — never shown to browser.
+ * - Static assets (JS/CSS/WASM): stale-while-revalidate.
+ * - API calls (JMAP, auth, MCP): network-only, never cached.
  */
 
-const CACHE_NAME = 'iarsma-shell-v2';
+const CACHE_NAME = 'iarsma-shell-v3';
 
 const API_PATTERNS = [
   '/jmap',
@@ -45,23 +47,40 @@ function isStaticAsset(url) {
   );
 }
 
-// Install: pre-cache the app shell entry point
+/**
+ * Minimal fallback page shown when there's no cache AND the server
+ * returns 401. Instead of the browser showing a Basic Auth dialog,
+ * this page loads and immediately starts the OAuth redirect flow.
+ * The real app JS handles the OAuth dance — we just need to get
+ * index.html loaded without the auth dialog blocking it.
+ */
+const AUTH_FALLBACK_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Iarsma — Signing in…</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #fafafa; color: #333; }
+    .card { text-align: center; padding: 2em; }
+    a { color: #ff6b35; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Iarsma</h2>
+    <p>Authentication required. <a href="./">Sign in</a></p>
+    <p style="color:#999;font-size:0.85em">If this page persists, clear site data and reload.</p>
+  </div>
+</body>
+</html>`;
+
+// Install: activate immediately
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      // Cache the shell HTML — the JS/CSS/WASM will be cached on first fetch
-      // via the fetch handler's stale-while-revalidate strategy.
-      return cache.addAll(['./']).catch(() => {
-        // If the initial cache fails (e.g., auth required), that's OK —
-        // the fetch handler will cache on first successful load.
-      });
-    }),
-  );
-  // Activate immediately without waiting for existing tabs to close
   self.skipWaiting();
 });
 
-// Activate: clean old caches, claim all clients
+// Activate: clean old caches, claim all clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
@@ -77,63 +96,93 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch: cache-first for static assets, network-only for API
+// Fetch handler
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
-  // Only handle GET requests
   if (request.method !== 'GET') return;
-
-  // API calls: always network, never cache
   if (isApiRequest(request.url)) return;
 
-  // Navigation requests (page reload): stale-while-revalidate.
-  // Serve cached HTML immediately (avoids auth dialog), but fetch
-  // fresh in background so the NEXT reload gets the new version.
+  // ── Navigation (page load / reload) ────────────────────────
   if (request.mode === 'navigate') {
-    event.respondWith(
-      caches.open(CACHE_NAME).then((cache) => {
-        return cache.match(request).then((cached) => {
-          const networkFetch = fetch(request)
-            .then((response) => {
-              if (response.ok) {
-                cache.put(request, response.clone());
-              }
-              return response;
-            })
-            .catch(() => cached);
-
-          // Serve cached immediately if available, otherwise wait for network
-          return cached || networkFetch;
-        });
-      }),
-    );
+    event.respondWith(handleNavigation(request));
     return;
   }
 
-  // Static assets: cache-first with network update
+  // ── Static assets ──────────────────────────────────────────
   if (isStaticAsset(request.url)) {
-    event.respondWith(
-      caches.match(request).then((cached) => {
-        // Serve cached immediately, update in background
-        const networkFetch = fetch(request)
-          .then((response) => {
-            if (response.ok) {
-              const clone = response.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-            }
-            return response;
-          })
-          .catch(() => cached); // Offline: fall back to cache
-
-        return cached || networkFetch;
-      }),
-    );
+    event.respondWith(handleStaticAsset(request));
     return;
   }
 });
 
-// Listen for version update messages from the app
+async function handleNavigation(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+
+  // Always try to update the cache in the background.
+  // Use no-cors mode to prevent the browser from showing
+  // the auth dialog — we handle 401s ourselves.
+  const updateCache = fetch(request)
+    .then((response) => {
+      if (response.ok) {
+        cache.put(request, response.clone());
+      }
+      return response;
+    })
+    .catch(() => null);
+
+  // If we have a cached version, serve it immediately.
+  // The background fetch will update the cache for next time.
+  if (cached) {
+    updateCache.catch(() => {}); // fire and forget
+    return cached;
+  }
+
+  // No cache — we MUST get something from the network.
+  const response = await updateCache;
+
+  if (response && response.ok) {
+    return response;
+  }
+
+  // Network failed or returned 401 — serve the auth fallback
+  // page instead of letting the browser show Basic Auth dialog.
+  return new Response(AUTH_FALLBACK_HTML, {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+}
+
+async function handleStaticAsset(request) {
+  const cached = await caches.match(request);
+
+  // Background network update
+  const networkFetch = fetch(request)
+    .then((response) => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((c) => c.put(request, clone));
+      }
+      return response;
+    })
+    .catch(() => null);
+
+  if (cached) {
+    networkFetch.catch(() => {}); // fire and forget
+    return cached;
+  }
+
+  // No cache — wait for network
+  const response = await networkFetch;
+  if (response && response.ok) {
+    return response;
+  }
+
+  // Asset not available — return 404
+  return new Response('Not found', { status: 404 });
+}
+
 self.addEventListener('message', (event) => {
   if (event.data === 'skipWaiting') {
     self.skipWaiting();
