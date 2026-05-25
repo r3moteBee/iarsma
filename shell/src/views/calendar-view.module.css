@@ -271,6 +271,103 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
+/* ── Event form ────────────────────────────────────────────── */
+
+.eventForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md, 1rem);
+}
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs, 0.25rem);
+}
+
+.formRow {
+  display: flex;
+  gap: var(--space-md, 1rem);
+}
+
+.formRow > .formField {
+  flex: 1;
+}
+
+.formLabel {
+  font-size: var(--text-sm, 0.85rem);
+  font-weight: 500;
+  color: var(--text-2, rgba(0, 0, 0, 0.6));
+}
+
+.formInput {
+  padding: 0.5em 0.6em;
+  font: inherit;
+  font-size: 0.9em;
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #000);
+}
+
+.formInput:focus {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: -1px;
+}
+
+.formSelect {
+  padding: 0.5em 0.6em;
+  font: inherit;
+  font-size: 0.9em;
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #000);
+  cursor: pointer;
+}
+
+.formSelect:focus {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: -1px;
+}
+
+.formTextarea {
+  padding: 0.5em 0.6em;
+  font: inherit;
+  font-size: 0.9em;
+  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #000);
+  resize: vertical;
+  min-height: 4em;
+}
+
+.formTextarea:focus {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: -1px;
+}
+
+/* ── Event detail ──────────────────────────────────────────── */
+
+.eventDetail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm, 0.5rem);
+}
+
+.detailRow {
+  display: flex;
+  gap: var(--space-sm, 0.5rem);
+}
+
+.detailLabel {
+  font-weight: 600;
+  min-width: 6em;
+  color: var(--text-2, rgba(0, 0, 0, 0.6));
+  font-size: 0.9em;
+}
+
 /* ── Responsive ─────────────────────────────────────────────── */
 
 @media (max-width: 639px) {
@@ -297,6 +394,10 @@
 
   .weekGrid {
     grid-template-columns: 3em repeat(7, minmax(4em, 1fr));
+  }
+
+  .formRow {
+    flex-direction: column;
   }
 }
 
