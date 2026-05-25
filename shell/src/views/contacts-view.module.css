@@ -20,6 +20,9 @@
 }
 
 .searchBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
   padding: var(--space-sm, 0.5em);
   border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.1));
 }
@@ -140,6 +143,24 @@
   font-size: 0.8em;
   color: var(--text-3, rgba(0, 0, 0, 0.5));
   min-width: 4em;
+}
+
+.detailActions {
+  display: flex;
+  gap: 0.5em;
+  margin-left: auto;
+}
+
+.dialogFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+.contactForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8em;
 }
 
 .emptyState {
