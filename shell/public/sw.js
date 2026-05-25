@@ -12,7 +12,7 @@
  * shell is served from cache without hitting Stalwart's auth layer.
  */
 
-const CACHE_NAME = 'iarsma-shell-v1';
+const CACHE_NAME = 'iarsma-shell-v2';
 
 const API_PATTERNS = [
   '/jmap',
@@ -87,22 +87,24 @@ self.addEventListener('fetch', (event) => {
   // API calls: always network, never cache
   if (isApiRequest(request.url)) return;
 
-  // Navigation requests (page reload): serve cached shell HTML
+  // Navigation requests (page reload): stale-while-revalidate.
+  // Serve cached HTML immediately (avoids auth dialog), but fetch
+  // fresh in background so the NEXT reload gets the new version.
   if (request.mode === 'navigate') {
     event.respondWith(
-      caches.match(request).then((cached) => {
-        if (cached) return cached;
-        // Try the root index as fallback (SPA routing)
-        return caches.match('./').then((shell) => {
-          if (shell) return shell;
-          // Last resort: try network (may trigger auth dialog on first load)
-          return fetch(request).then((response) => {
-            if (response.ok) {
-              const clone = response.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-            }
-            return response;
-          });
+      caches.open(CACHE_NAME).then((cache) => {
+        return cache.match(request).then((cached) => {
+          const networkFetch = fetch(request)
+            .then((response) => {
+              if (response.ok) {
+                cache.put(request, response.clone());
+              }
+              return response;
+            })
+            .catch(() => cached);
+
+          // Serve cached immediately if available, otherwise wait for network
+          return cached || networkFetch;
         });
       }),
     );
