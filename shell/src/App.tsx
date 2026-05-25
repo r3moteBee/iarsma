@@ -17,7 +17,7 @@ import { loadConfig, type ShellConfig } from './config.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { useBreakpoint } from './hooks/use-media-query.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
-import { searchQueryAtom } from './mail-state.js';
+import { mailLayoutAtom, searchQueryAtom, type MailLayout as MailLayoutType } from './mail-state.js';
 import { activeViewAtom } from './nav-state.js';
 import type { ActiveView } from './nav-state.js';
 import {
@@ -222,7 +222,16 @@ function SignedInShell({
   const tokens = useAtomValue(tokensAtom);
   const bumpAuth = useSetAtom(authVersionAtom);
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
+  const [mailLayout, setMailLayout] = useAtom(mailLayoutAtom);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleLayoutChange = useCallback(
+    (layout: MailLayoutType) => {
+      setMailLayout(layout);
+      localStorage.setItem('iarsma-mail-layout', layout);
+    },
+    [setMailLayout],
+  );
 
   // Sidebar drawer state (tablet only)
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -381,11 +390,39 @@ function SignedInShell({
                 Clear
               </button>
             ) : null}
+            <div className={layoutStyles.layoutToggle} role="group" aria-label="Mail layout">
+              <button
+                type="button"
+                className={`${layoutStyles.layoutToggleBtn}${mailLayout === 'side' ? ` ${layoutStyles.layoutToggleBtnActive}` : ''}`}
+                onClick={() => handleLayoutChange('side')}
+                aria-pressed={mailLayout === 'side'}
+                aria-label="Side-by-side layout"
+                title="Side-by-side"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                  <rect x="0.5" y="0.5" width="6" height="13" rx="1" stroke="currentColor" />
+                  <rect x="7.5" y="0.5" width="6" height="13" rx="1" stroke="currentColor" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`${layoutStyles.layoutToggleBtn}${mailLayout === 'stacked' ? ` ${layoutStyles.layoutToggleBtnActive}` : ''}`}
+                onClick={() => handleLayoutChange('stacked')}
+                aria-pressed={mailLayout === 'stacked'}
+                aria-label="Stacked layout"
+                title="Stacked"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                  <rect x="0.5" y="0.5" width="13" height="6" rx="1" stroke="currentColor" />
+                  <rect x="0.5" y="7.5" width="13" height="6" rx="1" stroke="currentColor" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
 
         {activeView === 'mail' ? (
-          <MailLayout isLoading={session.isLoading} error={session.error} />
+          <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} />
         ) : activeView === 'calendar' ? (
           <CalendarView
             events={[]}
@@ -447,37 +484,42 @@ function SignedInShell({
 }
 
 /**
- * Mail layout — 3-column reading pane (desktop), or stacked on smaller
- * screens. Extracted so SignedInShell stays manageable.
+ * Mail layout — 3-column reading pane (side) or 2-column with stacked
+ * thread list + view. Extracted so SignedInShell stays manageable.
  */
 function MailLayout({
   isLoading,
   error,
+  layout,
 }: {
   readonly isLoading: boolean;
   readonly error?: { message: string } | undefined;
+  readonly layout: MailLayoutType;
 }) {
+  const gridClass =
+    layout === 'stacked'
+      ? `${layoutStyles.mailGrid} ${layoutStyles.mailGridStacked}`
+      : `${layoutStyles.mailGrid} ${layoutStyles.mailGridSide}`;
+
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: '16em 22em minmax(0, 1fr)',
-        gap: '1em',
-        alignItems: 'start',
-        flex: 1,
-      }}
-    >
+    <div className={gridClass}>
       <aside aria-label="Mailbox sidebar">
         <MailboxList />
       </aside>
-      <section aria-label="Selected mailbox">
+      <section
+        aria-label="Selected mailbox"
+        className={layout === 'stacked' ? layoutStyles.mailThreadColStacked : undefined}
+      >
         {isLoading ? <p>Loading session...</p> : null}
         {error !== undefined ? (
           <p role="alert">Session error: {error.message}</p>
         ) : null}
         <ThreadList />
       </section>
-      <section aria-label="Selected thread">
+      <section
+        aria-label="Selected thread"
+        className={layout === 'stacked' ? layoutStyles.mailViewColStacked : undefined}
+      >
         <ThreadView />
       </section>
     </div>

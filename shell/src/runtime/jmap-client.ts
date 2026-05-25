@@ -2649,6 +2649,846 @@ function parseContact(raw: unknown, index: number): Contact {
   return contact;
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// CalendarEvent/set — event.create / event.update / event.delete
+// ──────────────────────────────────────────────────────────────────────
+
+export type EventCreateInput = {
+  readonly calendarId: string;
+  readonly title: string;
+  readonly start: string;
+  readonly duration?: string;
+  readonly timeZone?: string;
+  readonly description?: string;
+  readonly location?: string;
+};
+
+export type EventCreateResult = { readonly eventId: string };
+
+export type EventUpdateInput = {
+  readonly eventId: string;
+  readonly title?: string;
+  readonly start?: string;
+  readonly duration?: string;
+  readonly description?: string;
+  readonly location?: string;
+};
+
+export type EventUpdateResult = { readonly updated: boolean };
+
+export type EventDeleteInput = { readonly eventId: string };
+export type EventDeleteResult = { readonly deleted: boolean };
+
+export type FetchEventCreateOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly params: EventCreateInput;
+};
+
+export type FetchEventUpdateOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly params: EventUpdateInput;
+};
+
+export type FetchEventDeleteOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly eventId: string;
+};
+
+/**
+ * Build the JMAP `CalendarEvent/set` create payload. Pure function — no I/O.
+ */
+export function buildEventCreateRequest(opts: {
+  readonly accountId: string;
+  readonly params: EventCreateInput;
+}): string {
+  const { accountId, params } = opts;
+  const event: Record<string, unknown> = {
+    '@type': 'Event',
+    calendarIds: { [params.calendarId]: true },
+    title: params.title,
+    start: params.start,
+  };
+  if (params.duration !== undefined) {
+    event.duration = params.duration;
+  }
+  if (params.timeZone !== undefined) {
+    event.timeZone = params.timeZone;
+  }
+  if (params.description !== undefined) {
+    event.description = params.description;
+  }
+  if (params.location !== undefined) {
+    event.locations = { loc0: { name: params.location } };
+  }
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [
+      [
+        'CalendarEvent/set',
+        {
+          accountId,
+          create: { c0: event },
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+/**
+ * Build the JMAP `CalendarEvent/set` update payload. Only includes fields
+ * present in the input — JMAP path-based patching semantics.
+ */
+export function buildEventUpdateRequest(opts: {
+  readonly accountId: string;
+  readonly params: EventUpdateInput;
+}): string {
+  const { accountId, params } = opts;
+  const patch: Record<string, unknown> = {};
+  if (params.title !== undefined) {
+    patch.title = params.title;
+  }
+  if (params.start !== undefined) {
+    patch.start = params.start;
+  }
+  if (params.duration !== undefined) {
+    patch.duration = params.duration;
+  }
+  if (params.description !== undefined) {
+    patch.description = params.description;
+  }
+  if (params.location !== undefined) {
+    patch.locations = { loc0: { name: params.location } };
+  }
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [
+      [
+        'CalendarEvent/set',
+        {
+          accountId,
+          update: { [params.eventId]: patch },
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+/**
+ * Build the JMAP `CalendarEvent/set` destroy payload.
+ */
+export function buildEventDeleteRequest(opts: {
+  readonly accountId: string;
+  readonly eventId: string;
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [
+      ['CalendarEvent/set', { accountId: opts.accountId, destroy: [opts.eventId] }, '0'],
+    ],
+  });
+}
+
+/**
+ * Parse a JMAP `CalendarEvent/set` create response.
+ */
+export function parseEventCreateResponse(body: string): EventCreateResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse CalendarEvent/set response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'CalendarEvent/set response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'CalendarEvent/set response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'CalendarEvent/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not CalendarEvent/set.',
+    );
+  }
+  const result = first[1] as {
+    created?: Record<string, unknown>;
+    notCreated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notCreated !== undefined) {
+    const c0 = result.notCreated['c0'];
+    if (c0 !== undefined) {
+      throw makeError(
+        'jmap_set_error',
+        `CalendarEvent/set rejected: ${c0.type ?? 'unknown'}${c0.description !== undefined ? ` — ${c0.description}` : ''}`,
+        c0,
+      );
+    }
+  }
+  const created = result.created?.['c0'] as { id?: string } | undefined;
+  if (created === undefined || typeof created.id !== 'string') {
+    throw makeError(
+      'jmap_parse_error',
+      'CalendarEvent/set response has no created["c0"] entry.',
+    );
+  }
+  return { eventId: created.id };
+}
+
+/**
+ * Parse a JMAP `CalendarEvent/set` update response.
+ */
+export function parseEventUpdateResponse(body: string): EventUpdateResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse CalendarEvent/set update response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'CalendarEvent/set update response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'CalendarEvent/set update response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'CalendarEvent/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not CalendarEvent/set.',
+    );
+  }
+  const result = first[1] as {
+    updated?: Record<string, unknown>;
+    notUpdated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notUpdated !== undefined) {
+    const entries = Object.entries(result.notUpdated);
+    if (entries.length > 0) {
+      const [id, err] = entries[0]!;
+      throw makeError(
+        'jmap_set_error',
+        `CalendarEvent/set update rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
+        result.notUpdated,
+      );
+    }
+  }
+  return { updated: true };
+}
+
+/**
+ * Parse a JMAP `CalendarEvent/set` destroy response.
+ */
+export function parseEventDeleteResponse(body: string): EventDeleteResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse CalendarEvent/set destroy response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'CalendarEvent/set destroy response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'CalendarEvent/set destroy response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'CalendarEvent/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not CalendarEvent/set.',
+    );
+  }
+  const result = first[1] as {
+    destroyed?: unknown[];
+    notDestroyed?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notDestroyed !== undefined && Object.keys(result.notDestroyed).length > 0) {
+    const ids = Object.keys(result.notDestroyed);
+    const details = ids
+      .map((id) => {
+        const entry = result.notDestroyed![id]!;
+        return `${id}: ${entry.type ?? 'unknown'}${entry.description !== undefined ? ` — ${entry.description}` : ''}`;
+      })
+      .join('; ');
+    throw makeError(
+      'jmap_set_error',
+      `CalendarEvent/set notDestroyed: ${details}`,
+      result.notDestroyed,
+    );
+  }
+  return { deleted: true };
+}
+
+/**
+ * POST a JMAP `CalendarEvent/set` create and parse the response.
+ */
+export async function fetchEventCreateCommit(
+  opts: FetchEventCreateOptions,
+): Promise<EventCreateResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildEventCreateRequest({ accountId, params: opts.params });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP CalendarEvent/set create returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseEventCreateResponse(text);
+}
+
+/**
+ * POST a JMAP `CalendarEvent/set` update and parse the response.
+ */
+export async function fetchEventUpdateCommit(
+  opts: FetchEventUpdateOptions,
+): Promise<EventUpdateResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildEventUpdateRequest({ accountId, params: opts.params });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP CalendarEvent/set update returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseEventUpdateResponse(text);
+}
+
+/**
+ * POST a JMAP `CalendarEvent/set` destroy and parse the response.
+ */
+export async function fetchEventDeleteCommit(
+  opts: FetchEventDeleteOptions,
+): Promise<EventDeleteResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildEventDeleteRequest({ accountId, eventId: opts.eventId });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP CalendarEvent/set destroy returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseEventDeleteResponse(text);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// ContactCard/set — contact.create / contact.update / contact.delete
+// ──────────────────────────────────────────────────────────────────────
+
+export type ContactCreateInput = {
+  readonly addressBookId?: string;
+  readonly name: { readonly full?: string; readonly given?: string; readonly surname?: string };
+  readonly emails?: readonly { readonly address: string; readonly label?: string }[];
+  readonly phones?: readonly { readonly number: string; readonly label?: string }[];
+  readonly organizations?: readonly { readonly name?: string; readonly title?: string }[];
+};
+
+export type ContactCreateResult = { readonly contactId: string };
+
+export type ContactUpdateInput = {
+  readonly contactId: string;
+  readonly name?: { readonly full?: string; readonly given?: string; readonly surname?: string };
+  readonly emails?: readonly { readonly address: string; readonly label?: string }[];
+  readonly phones?: readonly { readonly number: string; readonly label?: string }[];
+};
+
+export type ContactUpdateResult = { readonly updated: boolean };
+
+export type ContactDeleteInput = { readonly contactId: string };
+export type ContactDeleteResult = { readonly deleted: boolean };
+
+export type FetchContactCreateOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly params: ContactCreateInput;
+};
+
+export type FetchContactUpdateOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly params: ContactUpdateInput;
+};
+
+export type FetchContactDeleteOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly contactId: string;
+};
+
+/**
+ * Build the JMAP `ContactCard/set` create payload. Translates the flat
+ * array-based input into JSContact's map-keyed structure.
+ */
+export function buildContactCreateRequest(opts: {
+  readonly accountId: string;
+  readonly params: ContactCreateInput;
+}): string {
+  const { accountId, params } = opts;
+  const card: Record<string, unknown> = {
+    '@type': 'Card',
+    name: params.name,
+  };
+  if (params.addressBookId !== undefined) {
+    card.addressBookIds = { [params.addressBookId]: true };
+  }
+  if (params.emails !== undefined && params.emails.length > 0) {
+    const emailMap: Record<string, unknown> = {};
+    params.emails.forEach((e, i) => {
+      emailMap[`e${i}`] = {
+        address: e.address,
+        ...(e.label !== undefined ? { label: e.label } : {}),
+      };
+    });
+    card.emails = emailMap;
+  }
+  if (params.phones !== undefined && params.phones.length > 0) {
+    const phoneMap: Record<string, unknown> = {};
+    params.phones.forEach((p, i) => {
+      phoneMap[`p${i}`] = {
+        number: p.number,
+        ...(p.label !== undefined ? { label: p.label } : {}),
+      };
+    });
+    card.phones = phoneMap;
+  }
+  if (params.organizations !== undefined && params.organizations.length > 0) {
+    const orgMap: Record<string, unknown> = {};
+    params.organizations.forEach((o, i) => {
+      orgMap[`o${i}`] = {
+        ...(o.name !== undefined ? { name: o.name } : {}),
+        ...(o.title !== undefined ? { title: o.title } : {}),
+      };
+    });
+    card.organizations = orgMap;
+  }
+  return JSON.stringify({
+    using: JMAP_USING_CONTACTS,
+    methodCalls: [
+      [
+        'ContactCard/set',
+        {
+          accountId,
+          create: { c0: card },
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+/**
+ * Build the JMAP `ContactCard/set` update payload. Only includes fields
+ * present in the input.
+ */
+export function buildContactUpdateRequest(opts: {
+  readonly accountId: string;
+  readonly params: ContactUpdateInput;
+}): string {
+  const { accountId, params } = opts;
+  const patch: Record<string, unknown> = {};
+  if (params.name !== undefined) {
+    patch.name = params.name;
+  }
+  if (params.emails !== undefined && params.emails.length > 0) {
+    const emailMap: Record<string, unknown> = {};
+    params.emails.forEach((e, i) => {
+      emailMap[`e${i}`] = {
+        address: e.address,
+        ...(e.label !== undefined ? { label: e.label } : {}),
+      };
+    });
+    patch.emails = emailMap;
+  }
+  if (params.phones !== undefined && params.phones.length > 0) {
+    const phoneMap: Record<string, unknown> = {};
+    params.phones.forEach((p, i) => {
+      phoneMap[`p${i}`] = {
+        number: p.number,
+        ...(p.label !== undefined ? { label: p.label } : {}),
+      };
+    });
+    patch.phones = phoneMap;
+  }
+  return JSON.stringify({
+    using: JMAP_USING_CONTACTS,
+    methodCalls: [
+      [
+        'ContactCard/set',
+        {
+          accountId,
+          update: { [params.contactId]: patch },
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
+/**
+ * Build the JMAP `ContactCard/set` destroy payload.
+ */
+export function buildContactDeleteRequest(opts: {
+  readonly accountId: string;
+  readonly contactId: string;
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_CONTACTS,
+    methodCalls: [
+      ['ContactCard/set', { accountId: opts.accountId, destroy: [opts.contactId] }, '0'],
+    ],
+  });
+}
+
+/**
+ * Parse a JMAP `ContactCard/set` create response.
+ */
+export function parseContactCreateResponse(body: string): ContactCreateResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse ContactCard/set response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'ContactCard/set response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'ContactCard/set response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'ContactCard/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not ContactCard/set.',
+    );
+  }
+  const result = first[1] as {
+    created?: Record<string, unknown>;
+    notCreated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notCreated !== undefined) {
+    const c0 = result.notCreated['c0'];
+    if (c0 !== undefined) {
+      throw makeError(
+        'jmap_set_error',
+        `ContactCard/set rejected: ${c0.type ?? 'unknown'}${c0.description !== undefined ? ` — ${c0.description}` : ''}`,
+        c0,
+      );
+    }
+  }
+  const created = result.created?.['c0'] as { id?: string } | undefined;
+  if (created === undefined || typeof created.id !== 'string') {
+    throw makeError(
+      'jmap_parse_error',
+      'ContactCard/set response has no created["c0"] entry.',
+    );
+  }
+  return { contactId: created.id };
+}
+
+/**
+ * Parse a JMAP `ContactCard/set` update response.
+ */
+export function parseContactUpdateResponse(body: string): ContactUpdateResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse ContactCard/set update response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'ContactCard/set update response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'ContactCard/set update response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'ContactCard/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not ContactCard/set.',
+    );
+  }
+  const result = first[1] as {
+    updated?: Record<string, unknown>;
+    notUpdated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notUpdated !== undefined) {
+    const entries = Object.entries(result.notUpdated);
+    if (entries.length > 0) {
+      const [id, err] = entries[0]!;
+      throw makeError(
+        'jmap_set_error',
+        `ContactCard/set update rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
+        result.notUpdated,
+      );
+    }
+  }
+  return { updated: true };
+}
+
+/**
+ * Parse a JMAP `ContactCard/set` destroy response.
+ */
+export function parseContactDeleteResponse(body: string): ContactDeleteResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse ContactCard/set destroy response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'ContactCard/set destroy response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'ContactCard/set destroy response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'ContactCard/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not ContactCard/set.',
+    );
+  }
+  const result = first[1] as {
+    destroyed?: unknown[];
+    notDestroyed?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notDestroyed !== undefined && Object.keys(result.notDestroyed).length > 0) {
+    const ids = Object.keys(result.notDestroyed);
+    const details = ids
+      .map((id) => {
+        const entry = result.notDestroyed![id]!;
+        return `${id}: ${entry.type ?? 'unknown'}${entry.description !== undefined ? ` — ${entry.description}` : ''}`;
+      })
+      .join('; ');
+    throw makeError(
+      'jmap_set_error',
+      `ContactCard/set notDestroyed: ${details}`,
+      result.notDestroyed,
+    );
+  }
+  return { deleted: true };
+}
+
+/**
+ * POST a JMAP `ContactCard/set` create and parse the response.
+ */
+export async function fetchContactCreateCommit(
+  opts: FetchContactCreateOptions,
+): Promise<ContactCreateResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildContactCreateRequest({ accountId, params: opts.params });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP ContactCard/set create returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseContactCreateResponse(text);
+}
+
+/**
+ * POST a JMAP `ContactCard/set` update and parse the response.
+ */
+export async function fetchContactUpdateCommit(
+  opts: FetchContactUpdateOptions,
+): Promise<ContactUpdateResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildContactUpdateRequest({ accountId, params: opts.params });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP ContactCard/set update returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseContactUpdateResponse(text);
+}
+
+/**
+ * POST a JMAP `ContactCard/set` destroy and parse the response.
+ */
+export async function fetchContactDeleteCommit(
+  opts: FetchContactDeleteOptions,
+): Promise<ContactDeleteResult> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildContactDeleteRequest({ accountId, contactId: opts.contactId });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP ContactCard/set destroy returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseContactDeleteResponse(text);
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }

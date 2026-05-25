@@ -166,6 +166,12 @@
   overflow-y: auto;
 }
 
+.mailboxInline {
+  padding-left: var(--space-sm, 8px);
+  overflow-y: auto;
+  max-height: 40vh;
+}
+
 .mailboxSectionLabel {
   font-size: var(--text-sm);
   font-weight: 600;

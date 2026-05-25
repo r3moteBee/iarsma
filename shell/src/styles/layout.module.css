@@ -34,6 +34,72 @@
   }
 }
 
+/* ── Mail layout variants ─────────────────────────────────── */
+
+.mailGrid {
+  display: grid;
+  gap: 1em;
+  align-items: start;
+  flex: 1;
+}
+
+.mailGridSide {
+  grid-template-columns: 16em 22em minmax(0, 1fr);
+}
+
+.mailGridStacked {
+  grid-template-columns: 16em minmax(0, 1fr);
+  grid-template-rows: auto auto;
+}
+
+.mailThreadColStacked {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.mailViewColStacked {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+/* ── Layout toggle buttons ───────────────────────────────── */
+
+.layoutToggle {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.layoutToggleBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: var(--surface-1);
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.layoutToggleBtn:hover {
+  background: var(--surface-2);
+}
+
+.layoutToggleBtnActive {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+
+.layoutToggleBtnActive:hover {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+
 /* Mobile: stack vertically, leave room for bottom nav */
 @media (max-width: 639px) {
   .app {
@@ -44,5 +110,19 @@
     /* top-bar + bottom nav */
     padding-top: 48px;
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Force stacked on mobile regardless of preference */
+  .mailGrid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .mailThreadColStacked,
+  .mailViewColStacked {
+    grid-column: 1;
+  }
+
+  .layoutToggle {
+    display: none;
   }
 }
