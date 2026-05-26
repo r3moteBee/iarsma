@@ -84,11 +84,9 @@
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 0;
-}
-
-.monthGrid .dayCell {
   border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.1));
-  margin: -0.5px;
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
 }
 
 .dayHeader {
@@ -99,8 +97,8 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-3, rgba(0, 0, 0, 0.45));
-  background: transparent;
-  border: none;
+  background: var(--surface-2, #f5f5f5);
+  border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.1));
 }
 
 .dayCell {
@@ -239,7 +237,7 @@
   height: 3em;
 }
 
-.dayHeader {
+.dayHeaderFull {
   grid-column: 1 / -1;
   padding: 0.5em;
   font-weight: 600;

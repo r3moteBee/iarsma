@@ -430,6 +430,18 @@ function SignedInShell({
             onViewChange={setCalendarView}
             currentDate={calendarDate}
             onDateChange={setCalendarDate}
+            onSaveEvent={async (data) => {
+              // eslint-disable-next-line no-console
+              console.log('[iarsma] create event:', data);
+            }}
+            onUpdateEvent={async (id, data) => {
+              // eslint-disable-next-line no-console
+              console.log('[iarsma] update event:', id, data);
+            }}
+            onDeleteEvent={async (id) => {
+              // eslint-disable-next-line no-console
+              console.log('[iarsma] delete event:', id);
+            }}
           />
         ) : activeView === 'contacts' ? (
           <ContactsView
@@ -438,6 +450,18 @@ function SignedInShell({
             onSelect={() => {}}
             onSearch={() => {}}
             searchQuery=""
+            onCreateContact={async (data) => {
+              // eslint-disable-next-line no-console
+              console.log('[iarsma] create contact:', data);
+            }}
+            onUpdateContact={async (id, data) => {
+              // eslint-disable-next-line no-console
+              console.log('[iarsma] update contact:', id, data);
+            }}
+            onDeleteContact={async (id) => {
+              // eslint-disable-next-line no-console
+              console.log('[iarsma] delete contact:', id);
+            }}
           />
         ) : activeView === 'approvals' ? (
           <ApprovalsView
