@@ -656,7 +656,7 @@ function DayView({
 
   return (
     <div className={styles.dayGrid} role="region" aria-label="Day calendar grid">
-      <div className={styles.dayHeader} role="heading" aria-level={3}>
+      <div className={styles.dayHeaderFull} role="heading" aria-level={3}>
         {shortLabel}
       </div>
 
