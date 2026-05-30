@@ -14,7 +14,7 @@
  * - API calls (JMAP, auth, MCP): network-only, never cached.
  */
 
-const CACHE_NAME = 'iarsma-shell-v3';
+const CACHE_NAME = 'iarsma-shell-v4';
 
 const API_PATTERNS = [
   '/jmap',
@@ -120,10 +120,17 @@ async function handleNavigation(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
 
-  // Always try to update the cache in the background.
-  // Use no-cors mode to prevent the browser from showing
-  // the auth dialog — we handle 401s ourselves.
-  const updateCache = fetch(request)
+  // Background fetch to update cache. Uses a NEW Request with
+  // credentials: 'omit' to prevent the browser from showing the
+  // HTTP Basic Auth dialog on 401. The browser only shows the
+  // dialog when credentials are included in the request.
+  const bgRequest = new Request(request.url, {
+    method: 'GET',
+    headers: { 'Accept': 'text/html' },
+    credentials: 'omit',
+    redirect: 'follow',
+  });
+  const updateCache = fetch(bgRequest)
     .then((response) => {
       if (response.ok) {
         cache.put(request, response.clone());
@@ -133,21 +140,19 @@ async function handleNavigation(request) {
     .catch(() => null);
 
   // If we have a cached version, serve it immediately.
-  // The background fetch will update the cache for next time.
   if (cached) {
     updateCache.catch(() => {}); // fire and forget
     return cached;
   }
 
-  // No cache — we MUST get something from the network.
+  // No cache — wait for network. If 401 or failure, serve
+  // the fallback page instead of the browser auth dialog.
   const response = await updateCache;
 
   if (response && response.ok) {
     return response;
   }
 
-  // Network failed or returned 401 — serve the auth fallback
-  // page instead of letting the browser show Basic Auth dialog.
   return new Response(AUTH_FALLBACK_HTML, {
     status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -157,8 +162,12 @@ async function handleNavigation(request) {
 async function handleStaticAsset(request) {
   const cached = await caches.match(request);
 
-  // Background network update
-  const networkFetch = fetch(request)
+  // Background network update with credentials: 'omit'
+  const bgRequest = new Request(request.url, {
+    method: 'GET',
+    credentials: 'omit',
+  });
+  const networkFetch = fetch(bgRequest)
     .then((response) => {
       if (response.ok) {
         const clone = response.clone();
