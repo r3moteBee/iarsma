@@ -432,6 +432,7 @@ function SignedInShell({
     mail: 'Mail',
     calendar: 'Calendar',
     contacts: 'Contacts',
+    files: 'Files',
     approvals: 'Approvals',
     activity: 'Activity',
     settings: 'Settings',
