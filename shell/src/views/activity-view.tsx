@@ -53,12 +53,12 @@ export type ActivityViewProps = {
 const thStyle: React.CSSProperties = {
   textAlign: 'left',
   padding: '0.4em 0.6em',
-  borderBottom: '2px solid rgba(0,0,0,0.15)',
+  borderBottom: '2px solid var(--surface-3)',
 };
 
 const tdStyle: React.CSSProperties = {
   padding: '0.4em 0.6em',
-  borderBottom: '1px solid rgba(0,0,0,0.08)',
+  borderBottom: '1px solid var(--surface-3)',
 };
 
 const filterBarStyle: React.CSSProperties = {
@@ -78,8 +78,10 @@ const filterGroupStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = {
   padding: '0.3em 0.5em',
   font: 'inherit',
-  border: '1px solid rgba(0,0,0,0.2)',
+  border: '1px solid var(--surface-3)',
   borderRadius: 4,
+  color: 'var(--text-1)',
+  background: 'var(--surface-2)',
 };
 
 const badgeBaseStyle: React.CSSProperties = {
@@ -97,7 +99,8 @@ const modeBadgeStyle: React.CSSProperties = {
   padding: '0.1em 0.4em',
   borderRadius: 3,
   fontSize: '0.85em',
-  background: 'rgba(0,0,0,0.07)',
+  background: 'var(--surface-3)',
+  color: 'var(--text-1)',
 };
 
 const paginationStyle: React.CSSProperties = {
@@ -240,7 +243,7 @@ export function ActivityView({
 
       {/* Table or empty state */}
       {entries.length === 0 ? (
-        <p style={{ color: 'rgba(0,0,0,0.5)' }}>No activity recorded yet.</p>
+        <p style={{ color: 'var(--text-2)' }}>No activity recorded yet.</p>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -302,9 +305,9 @@ function IntegrityBadge({
       <span
         style={{
           ...badgeBaseStyle,
-          background: '#eafaf1',
-          color: '#1e8449',
-          border: '1px solid #27ae60',
+          background: 'color-mix(in srgb, var(--success) 15%, transparent)',
+          color: 'var(--success)',
+          border: '1px solid var(--success)',
         }}
         role="status"
       >
@@ -318,9 +321,9 @@ function IntegrityBadge({
       <span
         style={{
           ...badgeBaseStyle,
-          background: '#fdedec',
-          color: '#922b21',
-          border: '1px solid #c0392b',
+          background: 'color-mix(in srgb, var(--destructive) 15%, transparent)',
+          color: 'var(--destructive)',
+          border: '1px solid var(--destructive)',
         }}
         role="alert"
       >
@@ -334,9 +337,9 @@ function IntegrityBadge({
       <span
         style={{
           ...badgeBaseStyle,
-          background: '#fef9e7',
-          color: '#7d6608',
-          border: '1px solid #f1c40f',
+          background: 'color-mix(in srgb, var(--warning) 15%, transparent)',
+          color: 'var(--warning)',
+          border: '1px solid var(--warning)',
         }}
         role="status"
       >
@@ -355,9 +358,10 @@ function IntegrityBadge({
         padding: '0.3em 0.8em',
         font: 'inherit',
         fontSize: '0.85em',
-        border: '1px solid rgba(0,0,0,0.2)',
+        border: '1px solid var(--surface-3)',
         borderRadius: 4,
         background: 'none',
+        color: 'var(--text-1)',
         cursor: 'pointer',
       }}
     >
@@ -376,7 +380,7 @@ function ActivityRow({
   readonly index: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const bgColor = index % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.02)';
+  const bgColor = index % 2 === 0 ? 'transparent' : 'var(--surface-2)';
 
   return (
     <>
@@ -388,7 +392,7 @@ function ActivityRow({
           {entry.mode !== undefined ? (
             <span style={modeBadgeStyle}>{entry.mode}</span>
           ) : (
-            <span style={{ color: 'rgba(0,0,0,0.3)' }}>--</span>
+            <span style={{ color: 'var(--text-3)' }}>--</span>
           )}
         </td>
         <td style={tdStyle}>
@@ -402,7 +406,7 @@ function ActivityRow({
               background: 'none',
               border: 'none',
               cursor: 'pointer',
-              color: 'rgba(0,0,0,0.5)',
+              color: 'var(--text-2)',
               padding: 0,
             }}
           >
@@ -420,11 +424,12 @@ function ActivityRow({
                 style={{
                   marginTop: '0.3em',
                   padding: '0.5em',
-                  background: 'rgba(0,0,0,0.03)',
+                  background: 'var(--surface-2)',
                   borderRadius: 4,
                   fontSize: '0.85em',
                   overflow: 'auto',
                   maxHeight: '16em',
+                  color: 'var(--text-1)',
                 }}
               >
                 {JSON.stringify(entry.params, null, 2)}
@@ -437,11 +442,11 @@ function ActivityRow({
                 <strong style={{ fontSize: '0.85em' }}>Provenance:</strong>
                 <div style={{ fontSize: '0.85em', marginTop: '0.2em' }}>
                   <div>
-                    <span style={{ color: 'rgba(0,0,0,0.5)' }}>affectedJson:</span>{' '}
+                    <span style={{ color: 'var(--text-2)' }}>affectedJson:</span>{' '}
                     <code>{entry.provenance.affectedJson}</code>
                   </div>
                   <div>
-                    <span style={{ color: 'rgba(0,0,0,0.5)' }}>previewHashHex:</span>{' '}
+                    <span style={{ color: 'var(--text-2)' }}>previewHashHex:</span>{' '}
                     <code>{entry.provenance.previewHashHex}</code>
                   </div>
                 </div>
@@ -453,14 +458,14 @@ function ActivityRow({
               <strong style={{ fontSize: '0.85em' }}>Hash chain:</strong>
               <div style={{ fontSize: '0.85em', marginTop: '0.2em' }}>
                 <div>
-                  <span style={{ color: 'rgba(0,0,0,0.5)' }}>seq:</span> {entry.seq}
+                  <span style={{ color: 'var(--text-2)' }}>seq:</span> {entry.seq}
                 </div>
                 <div>
-                  <span style={{ color: 'rgba(0,0,0,0.5)' }}>hashHex:</span>{' '}
+                  <span style={{ color: 'var(--text-2)' }}>hashHex:</span>{' '}
                   <code>{entry.hashHex}</code>
                 </div>
                 <div>
-                  <span style={{ color: 'rgba(0,0,0,0.5)' }}>prevHashHex:</span>{' '}
+                  <span style={{ color: 'var(--text-2)' }}>prevHashHex:</span>{' '}
                   <code>{entry.prevHashHex}</code>
                 </div>
               </div>

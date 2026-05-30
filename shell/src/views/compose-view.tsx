@@ -476,15 +476,15 @@ function ComposeModal(props: {
           onKeyDown={onDialogKeyDown}
           onClick={(e) => e.stopPropagation()}
           style={{
-            background: 'white',
-            color: 'black',
+            background: 'var(--surface-1)',
+            color: 'var(--text-1)',
             maxWidth: '40em',
             width: '100%',
             maxHeight: '85vh',
             overflow: 'auto',
             padding: '1.25em',
             borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+            boxShadow: 'var(--shadow-md)',
           }}
         >
           <header
@@ -509,7 +509,7 @@ function ComposeModal(props: {
           <form onSubmit={onSendClick}>
             <FieldRow label="From" htmlFor="compose-identity">
               {identities.length === 0 ? (
-                <output style={{ opacity: 0.75 }}>
+                <output style={{ color: 'var(--text-2)' }}>
                   {identityList.isLoading
                     ? 'Loading identities…'
                     : 'No sending identities configured on the server.'}
@@ -518,7 +518,7 @@ function ComposeModal(props: {
                 // Single identity — render as static text + a hidden
                 // select so the field row still associates with the
                 // (auto-selected) value.
-                <output style={{ opacity: 0.75 }}>
+                <output style={{ color: 'var(--text-2)' }}>
                   {formatIdentityLabel(identities[0]!)}
                 </output>
               ) : (
@@ -694,13 +694,15 @@ function FieldRow(props: {
 const fieldStyle = {
   width: '100%',
   padding: '0.4em 0.5em',
-  border: '1px solid rgba(0,0,0,0.2)',
+  border: '1px solid var(--surface-3)',
   borderRadius: 4,
   font: 'inherit',
+  color: 'var(--text-1)',
+  background: 'var(--surface-2)',
 };
 
 const errorStyle = {
-  color: '#b00020',
+  color: 'var(--destructive)',
   fontSize: '0.9em',
   margin: '0.25em 0 0',
 };
@@ -742,13 +744,13 @@ function SendPreviewModal(props: {
           if (e.key === 'Escape') onCancel();
         }}
         style={{
-          background: 'white',
-          color: 'black',
+          background: 'var(--surface-1)',
+          color: 'var(--text-1)',
           maxWidth: '36em',
           width: '100%',
           padding: '1.25em',
           borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          boxShadow: 'var(--shadow-md)',
         }}
       >
         <h2 id="send-preview-title" style={{ marginTop: 0 }}>
@@ -784,7 +786,7 @@ function SendPreviewModal(props: {
             style={{
               margin: '0 0 0.5em',
               padding: '0.5em',
-              background: 'rgba(0,0,0,0.04)',
+              background: 'var(--surface-2)',
               borderRadius: 4,
               whiteSpace: 'pre-wrap',
             }}
@@ -844,7 +846,7 @@ function AttachmentsPanel(props: {
       style={{
         marginTop: '0.75em',
         paddingTop: '0.5em',
-        borderTop: '1px solid rgba(0,0,0,0.06)',
+        borderTop: '1px solid var(--surface-3)',
       }}
     >
       <div style={{ display: 'flex', gap: '0.5em', alignItems: 'baseline' }}>
@@ -871,7 +873,7 @@ function AttachmentsPanel(props: {
           style={{ font: 'inherit' }}
         />
         {uploadsInFlight > 0 ? (
-          <output style={{ opacity: 0.75, fontSize: '0.9em' }}>
+          <output style={{ color: 'var(--text-2)', fontSize: '0.9em' }}>
             Uploading {uploadsInFlight} file{uploadsInFlight === 1 ? '' : 's'}…
           </output>
         ) : null}
@@ -895,16 +897,16 @@ function AttachmentsPanel(props: {
                 display: 'flex',
                 gap: '0.5em',
                 padding: '0.25em 0',
-                borderTop: '1px solid rgba(0,0,0,0.06)',
+                borderTop: '1px solid var(--surface-3)',
                 alignItems: 'baseline',
               }}
             >
               <span style={{ flex: '1 1 auto' }}>{a.name}</span>
-              <span style={{ flex: '0 0 auto', opacity: 0.7 }}>{a.type}</span>
+              <span style={{ flex: '0 0 auto', color: 'var(--text-2)' }}>{a.type}</span>
               <span
                 style={{
                   flex: '0 0 auto',
-                  opacity: 0.7,
+                  color: 'var(--text-2)',
                   fontVariantNumeric: 'tabular-nums',
                 }}
               >

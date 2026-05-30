@@ -14,10 +14,11 @@ import {
 } from './auth-state.js';
 import { composeStateAtom } from './compose-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
+import { useMailboxList } from './generated/capabilities/mailbox-list.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { useBreakpoint } from './hooks/use-media-query.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
-import { mailLayoutAtom, searchQueryAtom, type MailLayout as MailLayoutType } from './mail-state.js';
+import { mailLayoutAtom, searchQueryAtom, selectedMailboxIdAtom, type MailLayout as MailLayoutType } from './mail-state.js';
 import { activeViewAtom } from './nav-state.js';
 import type { ActiveView } from './nav-state.js';
 import {
@@ -42,7 +43,6 @@ import { ActivityView } from './views/activity-view.js';
 import { ApprovalsView } from './views/approvals-view.js';
 import { CalendarView } from './views/calendar-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
-import { MailboxList } from './views/mailbox-list.js';
 import { SignedOutView } from './views/signed-out-view.js';
 import { ThreadList } from './views/thread-list.js';
 import { ThreadView } from './views/thread-view.js';
@@ -223,6 +223,27 @@ function SignedInShell({
   const bumpAuth = useSetAtom(authVersionAtom);
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
   const [mailLayout, setMailLayout] = useAtom(mailLayoutAtom);
+  const [selectedMailboxId, setSelectedMailboxId] = useAtom(selectedMailboxIdAtom);
+  const mailboxListResult = useMailboxList({});
+  const sidebarMailboxes = useMemo(() => {
+    if (mailboxListResult.data === undefined) return undefined;
+    return (mailboxListResult.data as ReadonlyArray<{
+      id: string;
+      name: string;
+      role?: string;
+      unreadEmails: number;
+      parentId?: string;
+    }>).map((m) => {
+      const entry: { id: string; name: string; role?: string; unreadCount: number; parentId?: string | null } = {
+        id: m.id,
+        name: m.name,
+        unreadCount: m.unreadEmails,
+      };
+      if (m.role !== undefined) entry.role = m.role;
+      if (m.parentId !== undefined) entry.parentId = m.parentId;
+      return entry;
+    });
+  }, [mailboxListResult.data]);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleLayoutChange = useCallback(
@@ -331,6 +352,9 @@ function SignedInShell({
           onThemeChange={setThemePreference}
           isOpen={sidebarOpen}
           onClose={closeSidebar}
+          {...(sidebarMailboxes !== undefined ? { mailboxes: sidebarMailboxes } : {})}
+          onMailboxSelect={setSelectedMailboxId}
+          {...(selectedMailboxId !== null ? { selectedMailboxId } : {})}
         />
       )}
 
@@ -527,9 +551,6 @@ function MailLayout({
 
   return (
     <div className={gridClass}>
-      <aside aria-label="Mailbox sidebar">
-        <MailboxList />
-      </aside>
       <section
         aria-label="Selected mailbox"
         className={layout === 'stacked' ? layoutStyles.mailThreadColStacked : undefined}

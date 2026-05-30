@@ -400,9 +400,10 @@ function ThreadRow(props: {
         height: `${rowHeight}px`,
         padding: '0.5em 0.75em',
         boxSizing: 'border-box',
-        borderBottom: '1px solid rgba(0,0,0,0.08)',
+        borderBottom: '1px solid var(--surface-3)',
         cursor: 'pointer',
-        background: isSelected ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+        background: isSelected ? 'var(--surface-2)' : 'transparent',
+        color: 'var(--text-1)',
         fontWeight: seen ? 400 : 600,
         outline: 'inherit',
       }}
@@ -419,7 +420,7 @@ function ThreadRow(props: {
         >
           {sender}
         </span>
-        <span style={{ flex: '0 0 auto', fontVariantNumeric: 'tabular-nums', opacity: 0.7 }}>
+        <span style={{ flex: '0 0 auto', fontVariantNumeric: 'tabular-nums', color: 'var(--text-2)' }}>
           {date}
         </span>
       </div>
@@ -449,7 +450,7 @@ function ThreadRow(props: {
       {e.preview !== undefined && e.preview.length > 0 ? (
         <div
           style={{
-            opacity: 0.7,
+            color: 'var(--text-2)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
