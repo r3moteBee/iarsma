@@ -14,7 +14,7 @@
  * - API calls (JMAP, auth, MCP): network-only, never cached.
  */
 
-const CACHE_NAME = 'iarsma-shell-v4';
+const CACHE_NAME = 'iarsma-shell-v5';
 
 const API_PATTERNS = [
   '/jmap',
