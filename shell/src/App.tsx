@@ -392,6 +392,7 @@ function SignedInShell({
   const [filesHistory, setFilesHistory] = useState<readonly CommitHistoryEntry[]>([]);
   const [filesLoadingTree, setFilesLoadingTree] = useState(false);
   const [filesLoadingContent, setFilesLoadingContent] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
 
   // Load saved GitHub config on mount
   useEffect(() => {
@@ -417,16 +418,27 @@ function SignedInShell({
     if (activeView !== 'files' || gh === null) return;
     let cancelled = false;
     setFilesLoadingTree(true);
+    setFilesError(null);
     gh.list('').then((entries) => {
-      if (!cancelled) setFilesTree(entries);
+      if (!cancelled) {
+        setFilesTree(entries);
+        if (entries.length === 0) {
+          setFilesError(`No files found at the root of ${githubConfig?.owner}/${githubConfig?.repo} on branch '${githubConfig?.branch}'. Verify the branch name (default branches are often 'main' or 'master') and that your token has access.`);
+        }
+      }
     }).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
       // eslint-disable-next-line no-console
       console.error('[iarsma] files list failed:', err);
+      if (!cancelled) {
+        setFilesTree([]);
+        setFilesError(`Failed to load repo contents: ${msg}`);
+      }
     }).finally(() => {
       if (!cancelled) setFilesLoadingTree(false);
     });
     return () => { cancelled = true; };
-  }, [activeView, gh]);
+  }, [activeView, gh, githubConfig]);
 
   const handleFilesConnect = useCallback(async (cfg: GitHubConfig) => {
     const stored: GitHubStoredConfig = {
@@ -782,6 +794,7 @@ function SignedInShell({
             history={filesHistory}
             isLoadingTree={filesLoadingTree}
             isLoadingContent={filesLoadingContent}
+            error={filesError}
             onSelectPath={handleFilesSelectPath}
             onExpandDir={handleFilesExpandDir}
             onSave={handleFilesSave}

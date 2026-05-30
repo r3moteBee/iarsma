@@ -53,6 +53,7 @@ export type FilesViewProps = {
   readonly history: readonly CommitHistoryEntry[];
   readonly isLoadingTree?: boolean;
   readonly isLoadingContent?: boolean;
+  readonly error?: string | null;
   readonly onSelectPath: (path: string) => void;
   readonly onExpandDir: (path: string) => Promise<readonly FileTreeNode[]>;
   readonly onSave: (path: string, newContent: string, sha: string, message: string) => Promise<void>;
@@ -195,6 +196,7 @@ function ConnectedFilesView({
   history,
   isLoadingTree,
   isLoadingContent,
+  error,
   onSelectPath,
   onExpandDir,
   onSave,
@@ -302,6 +304,25 @@ function ConnectedFilesView({
             <Skeleton height="1em" />
             <div style={{ height: 6 }} />
             <Skeleton height="1em" />
+          </div>
+        ) : error !== null && error !== undefined ? (
+          <div
+            role="alert"
+            style={{
+              padding: '0.75em',
+              margin: '0.5em',
+              background: 'color-mix(in srgb, var(--destructive) 10%, transparent)',
+              color: 'var(--destructive)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--text-sm)',
+              lineHeight: 1.4,
+            }}
+          >
+            {error}
+          </div>
+        ) : tree.length === 0 ? (
+          <div style={{ padding: '0.75em', color: 'var(--text-3)', fontSize: 'var(--text-sm)' }}>
+            No files in this repo.
           </div>
         ) : (
           <FileTree
