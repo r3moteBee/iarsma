@@ -3,6 +3,13 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import './styles/global.css';
 
+// Expose the bundled version for DevTools inspection. Lets an operator
+// confirm what's actually running by typing `__IARSMA_VERSION__` in the
+// console, independent of the sidebar label.
+(window as unknown as { __IARSMA_VERSION__: string }).__IARSMA_VERSION__ = __APP_VERSION__;
+// eslint-disable-next-line no-console
+console.info(`[iarsma] v${__APP_VERSION__}`);
+
 const rootEl = document.getElementById('root');
 if (!rootEl) {
   throw new Error('No #root element. Check index.html.');
