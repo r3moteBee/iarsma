@@ -26,6 +26,7 @@ import {
   cachedInvoker,
   jmapInvoker,
   loggingInvoker,
+  useInvoker,
   type Invoker,
 } from './runtime/index.js';
 import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
@@ -221,6 +222,8 @@ function SignedInShell({
   const session = useSessionGet({});
   const tokens = useAtomValue(tokensAtom);
   const bumpAuth = useSetAtom(authVersionAtom);
+  const invoker = useInvoker();
+  const [crudRefresh, setCrudRefresh] = useState(0);
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
   const [mailLayout, setMailLayout] = useAtom(mailLayoutAtom);
   const [selectedMailboxId, setSelectedMailboxId] = useAtom(selectedMailboxIdAtom);
@@ -262,6 +265,79 @@ function SignedInShell({
   // Calendar view state
   const [calendarView, setCalendarView] = useState<'month' | 'week' | 'day'>('month');
   const [calendarDate, setCalendarDate] = useState(() => new Date());
+
+  // Calendar data fetching
+  const [calendars, setCalendars] = useState<ReadonlyArray<{ id: string; name: string; color?: string }>>([]);
+  const [calendarEvents, setCalendarEvents] = useState<ReadonlyArray<{
+    id: string;
+    title: string;
+    start: string;
+    duration?: string;
+    calendarColor?: string;
+  }>>([]);
+
+  useEffect(() => {
+    if (activeView !== 'calendar') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await invoker.invoke<unknown, ReadonlyArray<{ id: string; name: string; color?: string }>>('calendar.list', {});
+        if (!cancelled) setCalendars(list as ReadonlyArray<{ id: string; name: string; color?: string }>);
+
+        const monthStart = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
+        const monthEnd = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 2, 1);
+        const events = await invoker.invoke<unknown, { events: ReadonlyArray<{
+          id: string;
+          title: string;
+          start: string;
+          duration?: string;
+        }> }>('event.list', {
+          after: monthStart.toISOString(),
+          before: monthEnd.toISOString(),
+        });
+        if (!cancelled) {
+          const e = events as { events: ReadonlyArray<{ id: string; title: string; start: string; duration?: string }> };
+          setCalendarEvents(e.events ?? []);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[iarsma] calendar fetch failed:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeView, calendarDate, invoker, crudRefresh]);
+
+  // Contacts data fetching
+  const [contacts, setContacts] = useState<ReadonlyArray<{
+    id: string;
+    name?: { full?: string; given?: string; surname?: string };
+    emails?: ReadonlyArray<{ address: string; label?: string }>;
+    phones?: ReadonlyArray<{ number: string; label?: string }>;
+    organizations?: ReadonlyArray<{ name?: string; title?: string }>;
+  }>>([]);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [contactSearch, setContactSearch] = useState('');
+
+  useEffect(() => {
+    if (activeView !== 'contacts') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await invoker.invoke<unknown, { contacts: ReadonlyArray<typeof contacts[number]> }>(
+          'contact.list',
+          { query: contactSearch },
+        );
+        if (!cancelled) {
+          const r = result as { contacts: ReadonlyArray<typeof contacts[number]> };
+          setContacts(r.contacts ?? []);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[iarsma] contacts fetch failed:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeView, contactSearch, invoker, crudRefresh]);
 
   // Expose search input ref globally for `/` keybinding.
   useEffect(() => {
@@ -449,42 +525,88 @@ function SignedInShell({
           <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} />
         ) : activeView === 'calendar' ? (
           <CalendarView
-            events={[]}
+            events={calendarEvents}
             view={calendarView}
             onViewChange={setCalendarView}
             currentDate={calendarDate}
             onDateChange={setCalendarDate}
             onSaveEvent={async (data) => {
-              // eslint-disable-next-line no-console
-              console.log('[iarsma] create event:', data);
+              const defaultCalendar = calendars[0];
+              if (defaultCalendar === undefined) {
+                throw new Error('No calendar available to create event in.');
+              }
+              const startIso = `${data.date}T${data.startTime}:00`;
+              await invoker.invoke('event.create', {
+                calendarId: defaultCalendar.id,
+                title: data.title,
+                start: startIso,
+                duration: data.duration,
+                ...(data.description !== undefined ? { description: data.description } : {}),
+                ...(data.location !== undefined ? { location: data.location } : {}),
+              });
+              setCrudRefresh((n) => n + 1);
             }}
             onUpdateEvent={async (id, data) => {
-              // eslint-disable-next-line no-console
-              console.log('[iarsma] update event:', id, data);
+              const startIso = `${data.date}T${data.startTime}:00`;
+              await invoker.invoke('event.update', {
+                eventId: id,
+                title: data.title,
+                start: startIso,
+                duration: data.duration,
+                ...(data.description !== undefined ? { description: data.description } : {}),
+                ...(data.location !== undefined ? { location: data.location } : {}),
+              });
+              setCrudRefresh((n) => n + 1);
             }}
             onDeleteEvent={async (id) => {
-              // eslint-disable-next-line no-console
-              console.log('[iarsma] delete event:', id);
+              await invoker.invoke('event.delete', { eventId: id });
+              setCrudRefresh((n) => n + 1);
             }}
           />
         ) : activeView === 'contacts' ? (
           <ContactsView
-            contacts={[]}
-            selectedContact={null}
-            onSelect={() => {}}
-            onSearch={() => {}}
-            searchQuery=""
+            contacts={contacts}
+            selectedContact={
+              contacts.find((c) => c.id === selectedContactId) ?? null
+            }
+            onSelect={setSelectedContactId}
+            onSearch={setContactSearch}
+            searchQuery={contactSearch}
             onCreateContact={async (data) => {
-              // eslint-disable-next-line no-console
-              console.log('[iarsma] create contact:', data);
+              const nameObj: { full?: string; given?: string; surname?: string } = {};
+              if (data.givenName !== undefined) nameObj.given = data.givenName;
+              if (data.surname !== undefined) nameObj.surname = data.surname;
+              const emails = data.email !== undefined ? [{ address: data.email }] : undefined;
+              const phones = data.phone !== undefined ? [{ number: data.phone }] : undefined;
+              const orgs = (data.organization !== undefined || data.title !== undefined)
+                ? [{ ...(data.organization !== undefined ? { name: data.organization } : {}), ...(data.title !== undefined ? { title: data.title } : {}) }]
+                : undefined;
+              await invoker.invoke('contact.create', {
+                name: nameObj,
+                ...(emails !== undefined ? { emails } : {}),
+                ...(phones !== undefined ? { phones } : {}),
+                ...(orgs !== undefined ? { organizations: orgs } : {}),
+              });
+              setCrudRefresh((n) => n + 1);
             }}
             onUpdateContact={async (id, data) => {
-              // eslint-disable-next-line no-console
-              console.log('[iarsma] update contact:', id, data);
+              const nameObj: { full?: string; given?: string; surname?: string } = {};
+              if (data.givenName !== undefined) nameObj.given = data.givenName;
+              if (data.surname !== undefined) nameObj.surname = data.surname;
+              const emails = data.email !== undefined ? [{ address: data.email }] : undefined;
+              const phones = data.phone !== undefined ? [{ number: data.phone }] : undefined;
+              await invoker.invoke('contact.update', {
+                contactId: id,
+                name: nameObj,
+                ...(emails !== undefined ? { emails } : {}),
+                ...(phones !== undefined ? { phones } : {}),
+              });
+              setCrudRefresh((n) => n + 1);
             }}
             onDeleteContact={async (id) => {
-              // eslint-disable-next-line no-console
-              console.log('[iarsma] delete contact:', id);
+              await invoker.invoke('contact.delete', { contactId: id });
+              setSelectedContactId(null);
+              setCrudRefresh((n) => n + 1);
             }}
           />
         ) : activeView === 'approvals' ? (
