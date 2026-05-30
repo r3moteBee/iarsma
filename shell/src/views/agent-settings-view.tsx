@@ -11,6 +11,8 @@
 
 import { useState } from 'react';
 import type { AgentTokenInfo, IssuedToken } from '../runtime/agent-token-issuer.js';
+import { FilesSettingsPanel } from './files-settings-panel.js';
+import type { FilesSettingsPanelProps } from './files-settings-panel.js';
 
 // ── Scope definitions ──────────────────────────────────────────────
 
@@ -39,6 +41,8 @@ type AgentSettingsViewProps = {
   readonly onIssue: (name: string, scopes: string[], lifetimeSec: number) => Promise<IssuedToken>;
   readonly onRevoke: (tokenId: string) => Promise<void>;
   readonly isLoading?: boolean;
+  /** Optional GitHub Files integration settings. When omitted, the section is hidden. */
+  readonly files?: FilesSettingsPanelProps;
 };
 
 // ── Component ──────────────────────────────────────────────────────
@@ -48,10 +52,13 @@ export function AgentSettingsView({
   onIssue,
   onRevoke,
   isLoading,
+  files,
 }: AgentSettingsViewProps) {
   return (
     <section aria-labelledby="agent-settings-heading" style={{ maxWidth: '56em' }}>
-      <h2 id="agent-settings-heading">Agent Settings</h2>
+      <h2 id="agent-settings-heading">Settings</h2>
+      {files !== undefined ? <FilesSettingsPanel {...files} /> : null}
+      <h2 style={{ marginTop: '1.5em' }}>Agent Tokens</h2>
       {isLoading === true ? <p>Loading tokens...</p> : null}
       <IssueTokenForm onIssue={onIssue} />
       <TokenTable tokens={tokens} onRevoke={onRevoke} />

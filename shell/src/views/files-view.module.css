@@ -1,0 +1,280 @@
+/* ── FilesView ───────────────────────────────────────────────
+ * Phase 5a file browser + editor UI. Three-column layout:
+ * tree (left) | content (center) | history (right, optional)
+ * ──────────────────────────────────────────────────────────── */
+
+.container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-1);
+  color: var(--text-1);
+}
+
+/* ── Left column — file tree ──────────────────────────────── */
+
+.treePane {
+  width: 280px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--surface-3);
+  overflow: hidden;
+}
+
+.treeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm, 0.5em);
+  padding: var(--space-sm, 0.5em) var(--space-md, 1em);
+  border-bottom: 1px solid var(--surface-3);
+  font-size: var(--text-sm, 0.857rem);
+  color: var(--text-2);
+}
+
+.treeHeaderTitle {
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeList {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-xs, 0.25em) 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.treeItem {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  width: 100%;
+  padding: 0.3em 0.6em;
+  font: inherit;
+  font-size: 0.875em;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-1);
+  border-radius: var(--radius-sm, 4px);
+  transition: background-color var(--transition-fast, 100ms ease);
+}
+
+.treeItem:hover {
+  background: var(--surface-2);
+}
+
+.treeItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.treeItemSelected {
+  background: var(--accent-subtle, rgba(255, 107, 53, 0.1));
+  color: var(--text-1);
+}
+
+.treeIcon {
+  flex: none;
+  width: 1em;
+  display: inline-flex;
+  justify-content: center;
+  color: var(--text-3);
+  font-size: 0.85em;
+}
+
+.treeName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+/* ── Center column — file content ─────────────────────────── */
+
+.contentPane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.contentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm, 0.5em);
+  padding: var(--space-sm, 0.5em) var(--space-md, 1em);
+  border-bottom: 1px solid var(--surface-3);
+  background: var(--surface-2);
+}
+
+.contentPath {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contentActions {
+  display: flex;
+  gap: 0.5em;
+  flex: none;
+}
+
+.editorArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+.editorPlaceholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-size: 0.9em;
+  padding: 2em;
+}
+
+.binaryView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  padding: 2em;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.binaryMeta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  color: var(--text-2);
+}
+
+.modifiedDot {
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 0.4em;
+  vertical-align: middle;
+}
+
+/* ── Right column — commit history ────────────────────────── */
+
+.historyPane {
+  width: 240px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--surface-3);
+  overflow: hidden;
+  background: var(--surface-1);
+}
+
+.historyHeader {
+  padding: var(--space-sm, 0.5em) var(--space-md, 1em);
+  border-bottom: 1px solid var(--surface-3);
+  font-size: var(--text-sm, 0.857rem);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.historyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.historyItem {
+  padding: var(--space-sm, 0.5em) var(--space-md, 1em);
+  border-bottom: 1px solid var(--surface-3);
+  font-size: 0.85em;
+}
+
+.historyMessage {
+  color: var(--text-1);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.historyMeta {
+  color: var(--text-3);
+  font-size: 0.85em;
+  margin-top: 0.2em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.historyAuthor {
+  color: var(--text-2);
+  font-size: 0.85em;
+}
+
+/* ── Empty state ──────────────────────────────────────────── */
+
+.emptyContainer {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2em;
+}
+
+.dialogFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+.commitForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+}
+
+.commitFormPath {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.875em;
+  color: var(--text-2);
+  padding: 0.4em 0.6em;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm, 4px);
+}
+
+/* ── Mobile collapse ─────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .historyPane {
+    display: none;
+  }
+
+  .treePane {
+    width: 220px;
+    min-width: 160px;
+  }
+}
