@@ -317,12 +317,39 @@ function SignedInShell({
   }>>([]);
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [contactSearch, setContactSearch] = useState('');
+  const [addressBookId, setAddressBookId] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeView !== 'contacts') return;
     let cancelled = false;
     (async () => {
       try {
+        // Fetch address book ID directly (we don't have a capability for it).
+        const sessionResult = await invoker.invoke<unknown, { apiUrl: string; primaryAccountIdMail: string }>('session.get', {});
+        const sess = sessionResult as { apiUrl: string; primaryAccountIdMail: string };
+        const tok = tokens?.accessToken;
+        if (tok !== undefined && tok !== null) {
+          const resp = await fetch(sess.apiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${tok}`,
+            },
+            body: JSON.stringify({
+              using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+              methodCalls: [['AddressBook/get', { accountId: sess.primaryAccountIdMail }, '0']],
+            }),
+          });
+          if (resp.ok) {
+            const data = await resp.json() as { methodResponses: Array<[string, { list: Array<{ id: string; isDefault?: boolean }> }, string]> };
+            const books = data.methodResponses[0]?.[1]?.list ?? [];
+            const defaultBook = books.find((b) => b.isDefault) ?? books[0];
+            if (!cancelled && defaultBook !== undefined) {
+              setAddressBookId(defaultBook.id);
+            }
+          }
+        }
+
         const result = await invoker.invoke<unknown, { contacts: ReadonlyArray<typeof contacts[number]> }>(
           'contact.list',
           { query: contactSearch },
@@ -337,7 +364,7 @@ function SignedInShell({
       }
     })();
     return () => { cancelled = true; };
-  }, [activeView, contactSearch, invoker, crudRefresh]);
+  }, [activeView, contactSearch, invoker, crudRefresh, tokens]);
 
   // Expose search input ref globally for `/` keybinding.
   useEffect(() => {
@@ -573,6 +600,9 @@ function SignedInShell({
             onSearch={setContactSearch}
             searchQuery={contactSearch}
             onCreateContact={async (data) => {
+              if (addressBookId === null) {
+                throw new Error('No address book available. Reload and try again.');
+              }
               const nameObj: { full?: string; given?: string; surname?: string } = {};
               if (data.givenName !== undefined) nameObj.given = data.givenName;
               if (data.surname !== undefined) nameObj.surname = data.surname;
@@ -581,13 +611,20 @@ function SignedInShell({
               const orgs = (data.organization !== undefined || data.title !== undefined)
                 ? [{ ...(data.organization !== undefined ? { name: data.organization } : {}), ...(data.title !== undefined ? { title: data.title } : {}) }]
                 : undefined;
-              await invoker.invoke('contact.create', {
-                name: nameObj,
-                ...(emails !== undefined ? { emails } : {}),
-                ...(phones !== undefined ? { phones } : {}),
-                ...(orgs !== undefined ? { organizations: orgs } : {}),
-              });
-              setCrudRefresh((n) => n + 1);
+              try {
+                await invoker.invoke('contact.create', {
+                  addressBookId,
+                  name: nameObj,
+                  ...(emails !== undefined ? { emails } : {}),
+                  ...(phones !== undefined ? { phones } : {}),
+                  ...(orgs !== undefined ? { organizations: orgs } : {}),
+                });
+                setCrudRefresh((n) => n + 1);
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('[iarsma] contact create failed:', err);
+                throw err;
+              }
             }}
             onUpdateContact={async (id, data) => {
               const nameObj: { full?: string; given?: string; surname?: string } = {};

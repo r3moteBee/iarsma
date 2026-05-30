@@ -108,13 +108,19 @@ export function ContactsView({
   }
 
   async function handleFormSave(data: ContactFormData) {
-    if (editingContact !== null && onUpdateContact !== undefined) {
-      await onUpdateContact(editingContact.id, data);
-    } else if (onCreateContact !== undefined) {
-      await onCreateContact(data);
+    try {
+      if (editingContact !== null && onUpdateContact !== undefined) {
+        await onUpdateContact(editingContact.id, data);
+      } else if (onCreateContact !== undefined) {
+        await onCreateContact(data);
+      }
+      setFormOpen(false);
+      setEditingContact(null);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[contacts] save failed:', err);
+      throw err;
     }
-    setFormOpen(false);
-    setEditingContact(null);
   }
 
   function handleFormCancel() {
@@ -246,7 +252,7 @@ export function ContactsView({
 type ContactFormDialogProps = {
   readonly open: boolean;
   readonly contact: Contact | null;
-  readonly onSave: (data: ContactFormData) => void;
+  readonly onSave: (data: ContactFormData) => Promise<void> | void;
   readonly onCancel: () => void;
 };
 
@@ -267,6 +273,8 @@ function ContactFormDialog({ open, contact, onSave, onCancel }: ContactFormDialo
   const [organization, setOrganization] = useState(initial.organization ?? '');
   const [title, setTitle] = useState(initial.title ?? '');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reset form when dialog opens or contact changes
   const [prevOpen, setPrevOpen] = useState(false);
@@ -303,7 +311,7 @@ function ContactFormDialog({ open, contact, onSave, onCancel }: ContactFormDialo
     return Object.keys(newErrors).length === 0;
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!validate()) return;
     const data: ContactFormData = {
       email: email.trim(),
@@ -313,7 +321,16 @@ function ContactFormDialog({ open, contact, onSave, onCancel }: ContactFormDialo
       ...(organization.trim() ? { organization: organization.trim() } : {}),
       ...(title.trim() ? { title: title.trim() } : {}),
     };
-    onSave(data);
+    setSubmitError(null);
+    setIsSubmitting(true);
+    try {
+      await onSave(data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSubmitError(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   const dialogTitle = contact !== null ? 'Edit Contact' : 'Add Contact';
@@ -325,16 +342,21 @@ function ContactFormDialog({ open, contact, onSave, onCancel }: ContactFormDialo
       title={dialogTitle}
       footer={
         <div className={styles['dialogFooter']}>
-          <Button variant="secondary" onClick={onCancel}>
+          <Button variant="secondary" onClick={onCancel} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={handleSave}>
-            Save
+          <Button variant="primary" onClick={handleSave} disabled={isSubmitting}>
+            {isSubmitting ? 'Saving…' : 'Save'}
           </Button>
         </div>
       }
     >
       <div className={styles['contactForm']}>
+        {submitError !== null && (
+          <div role="alert" style={{ padding: '0.5em 0.75em', background: 'color-mix(in srgb, var(--destructive) 10%, transparent)', color: 'var(--destructive)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)' }}>
+            {submitError}
+          </div>
+        )}
         <Input
           label="Given name"
           value={givenName}
