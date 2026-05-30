@@ -135,7 +135,7 @@ jobs:
               stable="iarsma.zip"
             fi
             echo "::group::Building base=$base_path → $versioned + $stable"
-            VITE_BASE_PATH="$base_path" pnpm --filter '@iarsma/shell' run build
+            VITE_BASE_PATH="$base_path" IARSMA_VERSION="$version" pnpm --filter '@iarsma/shell' run build
             echo "{\"version\":\"${version}\",\"basePath\":\"${base_path}\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
               > shell/dist/version.json
             (cd shell/dist && zip -qr "$GITHUB_WORKSPACE/$versioned" .)
@@ -199,6 +199,7 @@ jobs:
         id: dispatch_pkg
         env:
           VITE_BASE_PATH: ${{ inputs.base_path }}
+          IARSMA_VERSION: ${{ steps.trig.outputs.version }}
         run: |
           set -euo pipefail
           version="${{ steps.trig.outputs.version }}"
