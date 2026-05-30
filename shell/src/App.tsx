@@ -40,6 +40,9 @@ import { TopBar } from './components/top-bar.js';
 import { ComposeView } from './views/compose-view.js';
 import { ContactsView } from './views/contacts-view.js';
 import { AgentSettingsView } from './views/agent-settings-view.js';
+import { FilesView, type FileTreeNode, type FileContent as FilesViewContent, type CommitHistoryEntry } from './views/files-view.js';
+import { githubClient, type GitHubConfig } from './runtime/github-client.js';
+import { indexedDbGitHubConfigStore, inMemoryGitHubConfigStore, type GitHubStoredConfig } from './runtime/github-config-store.js';
 import { ActivityView } from './views/activity-view.js';
 import { ApprovalsView } from './views/approvals-view.js';
 import { CalendarView } from './views/calendar-view.js';
@@ -374,6 +377,112 @@ function SignedInShell({
     };
   }, []);
 
+  // ─── GitHub Files state ─────────────────────────────────────────
+  const githubConfigStore = useMemo(
+    () =>
+      typeof indexedDB !== 'undefined'
+        ? indexedDbGitHubConfigStore()
+        : inMemoryGitHubConfigStore(),
+    [],
+  );
+  const [githubConfig, setGithubConfig] = useState<GitHubStoredConfig | null>(null);
+  const [filesTree, setFilesTree] = useState<readonly FileTreeNode[]>([]);
+  const [filesSelectedPath, setFilesSelectedPath] = useState<string | null>(null);
+  const [filesSelectedContent, setFilesSelectedContent] = useState<FilesViewContent | null>(null);
+  const [filesHistory, setFilesHistory] = useState<readonly CommitHistoryEntry[]>([]);
+  const [filesLoadingTree, setFilesLoadingTree] = useState(false);
+  const [filesLoadingContent, setFilesLoadingContent] = useState(false);
+
+  // Load saved GitHub config on mount
+  useEffect(() => {
+    let cancelled = false;
+    githubConfigStore.load().then((cfg) => {
+      if (!cancelled && cfg !== null) setGithubConfig(cfg);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [githubConfigStore]);
+
+  const gh = useMemo(() => {
+    if (githubConfig === null) return null;
+    return githubClient({
+      token: githubConfig.token,
+      owner: githubConfig.owner,
+      repo: githubConfig.repo,
+      branch: githubConfig.branch,
+    });
+  }, [githubConfig]);
+
+  // Load top-level tree when entering files view with valid config
+  useEffect(() => {
+    if (activeView !== 'files' || gh === null) return;
+    let cancelled = false;
+    setFilesLoadingTree(true);
+    gh.list('').then((entries) => {
+      if (!cancelled) setFilesTree(entries);
+    }).catch((err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.error('[iarsma] files list failed:', err);
+    }).finally(() => {
+      if (!cancelled) setFilesLoadingTree(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeView, gh]);
+
+  const handleFilesConnect = useCallback(async (cfg: GitHubConfig) => {
+    const stored: GitHubStoredConfig = {
+      token: cfg.token,
+      owner: cfg.owner,
+      repo: cfg.repo,
+      branch: cfg.branch ?? 'main',
+      connectedAt: new Date().toISOString(),
+    };
+    await githubConfigStore.save(stored);
+    setGithubConfig(stored);
+  }, [githubConfigStore]);
+
+  const handleFilesDisconnect = useCallback(async () => {
+    await githubConfigStore.clear();
+    setGithubConfig(null);
+    setFilesTree([]);
+    setFilesSelectedPath(null);
+    setFilesSelectedContent(null);
+    setFilesHistory([]);
+  }, [githubConfigStore]);
+
+  const handleFilesExpandDir = useCallback(async (path: string): Promise<readonly FileTreeNode[]> => {
+    if (gh === null) return [];
+    return gh.list(path);
+  }, [gh]);
+
+  const handleFilesSelectPath = useCallback((path: string) => {
+    if (gh === null) return;
+    setFilesSelectedPath(path);
+    setFilesLoadingContent(true);
+    (async () => {
+      try {
+        const content = await gh.read(path);
+        setFilesSelectedContent(content);
+        const history = await gh.history(path, 20);
+        setFilesHistory(history);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[iarsma] files read failed:', err);
+      } finally {
+        setFilesLoadingContent(false);
+      }
+    })();
+  }, [gh]);
+
+  const handleFilesSave = useCallback(async (path: string, newContent: string, sha: string, message: string) => {
+    if (gh === null) throw new Error('Not connected to GitHub');
+    await gh.write(path, newContent, message, sha);
+    // Refetch content + history
+    const fresh = await gh.read(path);
+    setFilesSelectedContent(fresh);
+    const history = await gh.history(path, 20);
+    setFilesHistory(history);
+  }, [gh]);
+
   const userName = session.data?.username ?? tokens?.email;
 
   const onSignOut = useCallback(() => {
@@ -664,12 +773,31 @@ function SignedInShell({
             totalEntries={0}
             onPageChange={() => {}}
           />
+        ) : activeView === 'files' ? (
+          <FilesView
+            config={githubConfig !== null ? { owner: githubConfig.owner, repo: githubConfig.repo, branch: githubConfig.branch } : null}
+            tree={filesTree}
+            selectedPath={filesSelectedPath}
+            selectedContent={filesSelectedContent}
+            history={filesHistory}
+            isLoadingTree={filesLoadingTree}
+            isLoadingContent={filesLoadingContent}
+            onSelectPath={handleFilesSelectPath}
+            onExpandDir={handleFilesExpandDir}
+            onSave={handleFilesSave}
+            onDisconnect={handleFilesDisconnect}
+          />
         ) : activeView === 'settings' ? (
           <AgentSettingsView
             tokens={agentTokens}
             onIssue={handleIssue}
             onRevoke={handleRevoke}
             isLoading={agentTokensLoading}
+            files={{
+              currentConfig: githubConfig !== null ? { owner: githubConfig.owner, repo: githubConfig.repo, branch: githubConfig.branch } : null,
+              onConnect: handleFilesConnect,
+              onDisconnect: handleFilesDisconnect,
+            }}
           />
         ) : (
           <PlaceholderView name="Unknown" />
