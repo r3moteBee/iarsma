@@ -25,3 +25,31 @@ if ('serviceWorker' in navigator) {
     // just without cache-first reload behavior.
   });
 }
+
+// Auto-update check: compare in-bundle version against the latest
+// version.json from the network. If they differ, the SW served us
+// a stale shell — clear caches and reload to pick up the new version.
+(async () => {
+  try {
+    const base = import.meta.env.BASE_URL ?? '/';
+    const resp = await fetch(`${base}version.json`, {
+      cache: 'no-store',
+      credentials: 'omit',
+    });
+    if (!resp.ok) return;
+    const data = (await resp.json()) as { version?: string };
+    if (typeof data.version !== 'string') return;
+    if (data.version !== __APP_VERSION__ && __APP_VERSION__ !== 'dev') {
+      // eslint-disable-next-line no-console
+      console.warn(`[iarsma] running v${__APP_VERSION__}, network has v${data.version} — updating`);
+      // Clear all SW caches and reload
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      window.location.reload();
+    }
+  } catch {
+    // Network check failed — skip silently
+  }
+})();
