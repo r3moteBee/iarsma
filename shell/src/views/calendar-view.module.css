@@ -45,7 +45,7 @@
 
 .viewToggleBtnActive {
   background: var(--accent, #3b82f6);
-  color: #fff;
+  color: var(--surface-1);
   font-weight: 600;
 }
 
@@ -136,7 +136,7 @@
 
 .dayNumberToday {
   background: var(--accent, #3b82f6);
-  color: #fff;
+  color: var(--surface-1);
   border-radius: 50%;
   width: 1.6em;
   height: 1.6em;

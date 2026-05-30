@@ -74,7 +74,7 @@ function relativeTime(iso: string): string {
 // ── Styles ────────────────────────────────────────────────────────
 
 const cardStyle: React.CSSProperties = {
-  border: '1px solid rgba(0,0,0,0.12)',
+  border: '1px solid var(--surface-3)',
   borderRadius: 4,
   padding: '0.75em 1em',
   marginBottom: '0.5em',
@@ -85,7 +85,8 @@ const badgeStyle: React.CSSProperties = {
   padding: '0.1em 0.45em',
   borderRadius: 3,
   fontSize: '0.85em',
-  background: 'rgba(0,0,0,0.07)',
+  background: 'var(--surface-3)',
+  color: 'var(--text-1)',
   marginLeft: '0.5em',
 };
 
@@ -94,7 +95,8 @@ const countBadgeStyle: React.CSSProperties = {
   padding: '0 0.45em',
   borderRadius: '0.75em',
   fontSize: '0.8em',
-  background: 'rgba(0,0,0,0.12)',
+  background: 'var(--surface-3)',
+  color: 'var(--text-1)',
   marginLeft: '0.35em',
   fontWeight: 600,
 };
@@ -102,10 +104,10 @@ const countBadgeStyle: React.CSSProperties = {
 const approveButtonStyle: React.CSSProperties = {
   padding: '0.25em 0.7em',
   font: 'inherit',
-  border: '1px solid #27ae60',
+  border: '1px solid var(--success)',
   borderRadius: 4,
-  background: '#eafaf1',
-  color: '#1e8449',
+  background: 'color-mix(in srgb, var(--success) 15%, transparent)',
+  color: 'var(--success)',
   cursor: 'pointer',
   marginRight: '0.4em',
 };
@@ -113,10 +115,10 @@ const approveButtonStyle: React.CSSProperties = {
 const denyButtonStyle: React.CSSProperties = {
   padding: '0.25em 0.7em',
   font: 'inherit',
-  border: '1px solid #c0392b',
+  border: '1px solid var(--destructive)',
   borderRadius: 4,
-  background: '#fdedec',
-  color: '#922b21',
+  background: 'color-mix(in srgb, var(--destructive) 15%, transparent)',
+  color: 'var(--destructive)',
   cursor: 'pointer',
 };
 
@@ -174,9 +176,9 @@ export function ApprovalsView({
 
       {/* List or empty state */}
       {approvals.length === 0 ? (
-        <p style={{ color: 'rgba(0,0,0,0.5)' }}>No approval history yet.</p>
+        <p style={{ color: 'var(--text-2)' }}>No approval history yet.</p>
       ) : filtered.length === 0 ? (
-        <p style={{ color: 'rgba(0,0,0,0.5)' }}>
+        <p style={{ color: 'var(--text-2)' }}>
           No pending approvals. Agents that require approval will appear here.
         </p>
       ) : (
@@ -280,7 +282,7 @@ function ApprovalCard({
           style={{
             marginLeft: 'auto',
             fontSize: '0.85em',
-            color: 'rgba(0,0,0,0.5)',
+            color: 'var(--text-2)',
           }}
         >
           {relativeTime(approval.requestedAt)}
@@ -288,7 +290,7 @@ function ApprovalCard({
       </div>
 
       {/* Summary */}
-      <div style={{ marginBottom: '0.4em', color: 'rgba(0,0,0,0.75)' }}>
+      <div style={{ marginBottom: '0.4em', color: 'var(--text-1)' }}>
         {approval.summary}
       </div>
 
@@ -304,7 +306,7 @@ function ApprovalCard({
             background: 'none',
             border: 'none',
             cursor: 'pointer',
-            color: 'rgba(0,0,0,0.5)',
+            color: 'var(--text-2)',
             padding: 0,
           }}
         >
@@ -315,11 +317,12 @@ function ApprovalCard({
             style={{
               marginTop: '0.4em',
               padding: '0.5em',
-              background: 'rgba(0,0,0,0.03)',
+              background: 'var(--surface-2)',
               borderRadius: 4,
               fontSize: '0.85em',
               overflow: 'auto',
               maxHeight: '16em',
+              color: 'var(--text-1)',
             }}
           >
             {JSON.stringify(approval.preview, null, 2)}
@@ -352,7 +355,7 @@ function ApprovalCard({
           style={{
             fontSize: '0.85em',
             fontWeight: 600,
-            color: approval.status === 'approved' ? '#27ae60' : '#c0392b',
+            color: approval.status === 'approved' ? 'var(--success)' : 'var(--destructive)',
           }}
         >
           {approval.status === 'approved' ? 'Approved' : 'Denied'}

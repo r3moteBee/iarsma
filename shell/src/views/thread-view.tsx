@@ -269,9 +269,11 @@ function MessageView(props: {
       tabIndex={isFocused ? 0 : -1}
       data-message-id={email.id}
       style={{
-        border: '1px solid rgba(0,0,0,0.12)',
+        border: '1px solid var(--surface-3)',
         borderRadius: 4,
         marginBottom: '0.5em',
+        background: 'var(--surface-1)',
+        color: 'var(--text-1)',
         outline: 'inherit',
       }}
     >
@@ -293,17 +295,18 @@ function MessageView(props: {
             border: 'none',
             padding: 0,
             font: 'inherit',
+            color: 'inherit',
             cursor: 'pointer',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5em' }}>
             <strong>{sender}</strong>
-            <span style={{ flex: '0 0 auto', opacity: 0.7 }}>{date}</span>
+            <span style={{ flex: '0 0 auto', color: 'var(--text-2)' }}>{date}</span>
           </div>
           {!isExpanded && email.preview !== undefined ? (
             <div
               style={{
-                opacity: 0.75,
+                color: 'var(--text-2)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -314,7 +317,7 @@ function MessageView(props: {
             </div>
           ) : null}
           {isExpanded && recipients !== null ? (
-            <div style={{ opacity: 0.75, marginTop: '0.25em', fontSize: '0.9em' }}>
+            <div style={{ color: 'var(--text-2)', marginTop: '0.25em', fontSize: '0.9em' }}>
               {recipients}
             </div>
           ) : null}
@@ -330,10 +333,11 @@ function MessageView(props: {
           {hasExternalImages && !externalContentAllowed ? (
             <p
               style={{
-                background: 'rgba(0,0,0,0.04)',
+                background: 'var(--surface-2)',
                 padding: '0.5em',
                 borderRadius: 4,
                 margin: '0 0 0.75em',
+                color: 'var(--text-2)',
               }}
             >
               External images are blocked.{' '}
@@ -362,7 +366,7 @@ function MessageView(props: {
               {email.bodyText}
             </pre>
           ) : (
-            <p style={{ opacity: 0.6 }}>(empty body)</p>
+            <p style={{ color: 'var(--text-3)' }}>(empty body)</p>
           )}
           {email.attachments.length > 0 ? (
             <Attachments email={email} />
@@ -397,7 +401,7 @@ function ReplyActions({ email }: { readonly email: EmailFull }) {
         gap: '0.5em',
         marginTop: '0.75em',
         paddingTop: '0.5em',
-        borderTop: '1px solid rgba(0,0,0,0.06)',
+        borderTop: '1px solid var(--surface-3)',
       }}
     >
       <button type="button" onClick={() => open('reply')}>
@@ -434,12 +438,12 @@ function Attachments({ email }: { readonly email: EmailFull }) {
               display: 'flex',
               gap: '0.5em',
               padding: '0.25em 0',
-              borderTop: '1px solid rgba(0,0,0,0.06)',
+              borderTop: '1px solid var(--surface-3)',
             }}
           >
             <span style={{ flex: '1 1 auto' }}>{a.name ?? '(unnamed)'}</span>
-            <span style={{ flex: '0 0 auto', opacity: 0.7 }}>{a.type}</span>
-            <span style={{ flex: '0 0 auto', opacity: 0.7, fontVariantNumeric: 'tabular-nums' }}>
+            <span style={{ flex: '0 0 auto', color: 'var(--text-2)' }}>{a.type}</span>
+            <span style={{ flex: '0 0 auto', color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
               {formatBytes(a.size)}
             </span>
           </li>

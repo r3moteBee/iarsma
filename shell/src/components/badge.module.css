@@ -39,22 +39,22 @@
 /* Colors — count fills */
 .count.accent {
   background-color: var(--accent);
-  color: #fff;
+  color: var(--surface-1);
 }
 
 .count.success {
   background-color: var(--success);
-  color: #fff;
+  color: var(--surface-1);
 }
 
 .count.warning {
   background-color: var(--warning);
-  color: #000;
+  color: var(--text-1);
 }
 
 .count.destructive {
   background-color: var(--destructive);
-  color: #fff;
+  color: var(--surface-1);
 }
 
 .count.neutral {

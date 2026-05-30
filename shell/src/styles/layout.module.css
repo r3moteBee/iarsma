@@ -44,21 +44,21 @@
 }
 
 .mailGridSide {
-  grid-template-columns: 16em 22em minmax(0, 1fr);
+  grid-template-columns: 22em minmax(0, 1fr);
 }
 
 .mailGridStacked {
-  grid-template-columns: 16em minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto;
 }
 
 .mailThreadColStacked {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 1;
 }
 
 .mailViewColStacked {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 2;
 }
 

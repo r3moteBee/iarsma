@@ -123,9 +123,9 @@ function IssueTokenForm({
           role="alert"
           style={{
             padding: '1em',
-            border: '2px solid #c9a800',
+            border: '2px solid var(--warning)',
             borderRadius: 4,
-            background: '#fff9db',
+            background: 'color-mix(in srgb, var(--warning) 15%, transparent)',
             marginBottom: '1em',
           }}
         >
@@ -136,7 +136,7 @@ function IssueTokenForm({
           <button type="button" onClick={handleCopy} aria-label="Copy secret">
             {copyFeedback ? 'Copied!' : 'Copy'}
           </button>
-          <p style={{ color: '#7a5f00', marginTop: '0.5em', fontSize: '0.9em' }}>
+          <p style={{ color: 'var(--warning)', marginTop: '0.5em', fontSize: '0.9em' }}>
             This secret won't be shown again. Store it securely now.
           </p>
           <button
@@ -162,16 +162,18 @@ function IssueTokenForm({
             style={{
               padding: '0.3em 0.5em',
               font: 'inherit',
-              border: '1px solid rgba(0,0,0,0.2)',
+              border: '1px solid var(--surface-3)',
               borderRadius: 4,
               width: '20em',
+              color: 'var(--text-1)',
+              background: 'var(--surface-2)',
             }}
           />
         </div>
 
         <fieldset
           style={{
-            border: '1px solid rgba(0,0,0,0.15)',
+            border: '1px solid var(--surface-3)',
             borderRadius: 4,
             padding: '0.5em 0.75em',
             marginBottom: '0.75em',
@@ -204,8 +206,10 @@ function IssueTokenForm({
             style={{
               padding: '0.3em 0.5em',
               font: 'inherit',
-              border: '1px solid rgba(0,0,0,0.2)',
+              border: '1px solid var(--surface-3)',
               borderRadius: 4,
+              color: 'var(--text-1)',
+              background: 'var(--surface-2)',
             }}
           >
             {LIFETIME_OPTIONS.map((opt) => (
@@ -260,12 +264,12 @@ function TokenTable({
 const thStyle: React.CSSProperties = {
   textAlign: 'left',
   padding: '0.4em 0.6em',
-  borderBottom: '2px solid rgba(0,0,0,0.15)',
+  borderBottom: '2px solid var(--surface-3)',
 };
 
 const tdStyle: React.CSSProperties = {
   padding: '0.4em 0.6em',
-  borderBottom: '1px solid rgba(0,0,0,0.08)',
+  borderBottom: '1px solid var(--surface-3)',
 };
 
 const badgeStyle: React.CSSProperties = {
@@ -274,7 +278,8 @@ const badgeStyle: React.CSSProperties = {
   margin: '0.1em 0.2em',
   borderRadius: 3,
   fontSize: '0.85em',
-  background: 'rgba(0,0,0,0.07)',
+  background: 'var(--surface-3)',
+  color: 'var(--text-1)',
 };
 
 function TokenRow({
@@ -309,9 +314,9 @@ function TokenRow({
       <td style={tdStyle}>{formatDate(token.expiresAt)}</td>
       <td style={tdStyle}>
         {token.revoked ? (
-          <span style={{ color: '#c0392b', fontWeight: 600 }}>Revoked</span>
+          <span style={{ color: 'var(--destructive)', fontWeight: 600 }}>Revoked</span>
         ) : (
-          <span style={{ color: '#27ae60', fontWeight: 600 }}>Active</span>
+          <span style={{ color: 'var(--success)', fontWeight: 600 }}>Active</span>
         )}
       </td>
       <td style={tdStyle}>
