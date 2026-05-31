@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Iarsma — Redesign Mockup</title>
+<link rel="stylesheet" href="secondary-views.css" />
+<template id="__bundler_thumbnail">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <rect width="100" height="100" fill="#ff6b35"/>
+    <rect x="22" y="34" width="56" height="38" rx="5" fill="#fff"/>
+    <path d="M24 37l26 18 26-18" fill="none" stroke="#ff6b35" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</template>
+<style>
+/* ──────────────────────────────────────────────────────────────
+   TOKENS — Iarsma's real tokens (styles/tokens.css), extended per
+   §5 of the analysis: derivable accent, density multiplier, borders.
+   ────────────────────────────────────────────────────────────── */
+:root {
+  --surface-1: #ffffff;
+  --surface-2: #f6f5f3;
+  --surface-3: #ebeae7;
+
+  --text-1: #1a1a1a;
+  --text-2: #6b6b6b;
+  --text-3: #a0a0a0;
+
+  /* Accent — ONE source of truth, everything derived (§5.1) */
+  --accent-h: 18;
+  --accent-s: 100%;
+  --accent-l: 60%;
+  --accent:        hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --accent-hover:  hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 8%));
+  --accent-active: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 14%));
+  --accent-subtle: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-on: #ffffff;
+
+  --destructive: #d64545;
+  --success: #2f9e44;
+  --warning: #e8a317;
+  --badge-system: #969ba3;   /* automated/system senders — muted, never accent */
+
+  --border:        var(--surface-3);
+  --border-strong: color-mix(in srgb, var(--surface-3) 55%, var(--text-3));
+
+  /* Density multiplier feeds the 4px grid + row heights (§5.3) */
+  --density: 1;
+  --space-xs: calc(4px  * var(--density));
+  --space-sm: calc(8px  * var(--density));
+  --space-md: calc(16px * var(--density));
+  --space-lg: calc(24px * var(--density));
+  --space-xl: calc(32px * var(--density));
+  --row-mail: calc(72px * var(--density));
+
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --text-sm: 12.5px;
+  --text-base: 15px;
+  --text-md: 15px;
+  --text-lg: 19px;
+  --text-xl: 24px;
+  --text-2xl: 30px;
+
+  --radius-sm: 5px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 6px 24px rgba(0,0,0,0.12);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,0.20);
+
+  --transition-fast: 110ms ease;
+  --transition-normal: 200ms ease;
+
+  --sidebar-w: 248px;
+  --list-w: 384px;
+}
+[data-theme="dark"] {
+  --surface-1: #16171a;
+  --surface-2: #1d1f23;
+  --surface-3: #2a2d33;
+  --text-1: #ededed;
+  --text-2: #a3a3a3;
+  --text-3: #6d6f74;
+  --border: #2a2d33;
+  --border-strong: color-mix(in srgb, #2a2d33 40%, var(--text-3));
+  --accent-on: #1a1206;
+  --destructive: #e06a6a;
+  --badge-system: #565b63;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 6px 24px rgba(0,0,0,0.45);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,0.6);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--text-1);
+  background: var(--surface-2);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+::selection { background: var(--accent); color: var(--accent-on); }
+
+/* ── Demo chrome (NOT part of the app — controls to exercise the spec) ── */
+.demobar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 10px 18px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.demobar .brandtag {
+  display: flex; align-items: baseline; gap: 8px; margin-right: 4px;
+}
+.demobar .brandtag b { font-size: 15px; letter-spacing: -0.01em; }
+.demobar .brandtag span { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.12em; }
+.demogroup { display: flex; align-items: center; gap: 8px; }
+.demogroup > label { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* Segmented control (§12 SegmentedControl) */
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 2px; gap: 2px; }
+.seg button {
+  border: none; background: transparent; color: var(--text-2);
+  padding: 5px 11px; border-radius: calc(var(--radius-md) - 3px);
+  font-size: 12.5px; font-weight: 600; transition: var(--transition-fast);
+}
+.seg button[aria-pressed="true"] { background: var(--surface-1); color: var(--text-1); box-shadow: var(--shadow-sm); }
+
+/* Accent swatches (§5.2) */
+.swatches { display: inline-flex; gap: 7px; }
+.swatch {
+  width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent;
+  padding: 0; position: relative; transition: var(--transition-fast);
+}
+.swatch[aria-pressed="true"] { border-color: var(--text-1); transform: scale(1.08); }
+.swatch::after { content:''; position:absolute; inset:3px; border-radius:50%; background: var(--sw); }
+
+/* ──────────────────────────────────────────────────────────────
+   APP SHELL
+   ────────────────────────────────────────────────────────────── */
+.app {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) var(--list-w) minmax(0, 1fr);
+  height: calc(100vh - 53px);
+  background: var(--surface-1);
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  display: flex; flex-direction: column;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.sb-head { padding: var(--space-md); display: flex; flex-direction: column; gap: var(--space-sm); }
+.wordmark { display:flex; align-items:baseline; gap:7px; font-size: var(--text-lg); font-weight: 800; letter-spacing: -0.02em; }
+.wordmark .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); display:inline-block; }
+.wordmark .ver { font-size: 11px; font-weight: 500; color: var(--text-3); letter-spacing: 0; }
+.compose-btn {
+  display: flex; align-items: center; justify-content: center; gap: var(--space-sm);
+  padding: 10px var(--space-md); border: none;
+  background: var(--accent); color: var(--accent-on);
+  border-radius: var(--radius-md); font-weight: 650; font-size: var(--text-md);
+  box-shadow: var(--shadow-sm); transition: var(--transition-fast);
+}
+.compose-btn:hover { background: var(--accent-hover); }
+.compose-btn:active { background: var(--accent-active); }
+.compose-btn svg { width: 17px; height: 17px; }
+
+.nav { display: flex; flex-direction: column; padding: var(--space-sm); gap: 2px; }
+.nav-item {
+  display: flex; align-items: center; gap: var(--space-sm);
+  padding: 9px var(--space-sm); border: none; background: transparent;
+  border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--text-md);
+  text-align: left; width: 100%; position: relative; transition: var(--transition-fast);
+}
+.nav-item svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.nav-item:hover { background: var(--surface-3); color: var(--text-1); }
+.nav-item .count { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--text-3); font-variant-numeric: tabular-nums; }
+/* Active nav: accent-subtle bg + accent rail (§6.3) */
+.nav-item.active {
+  background: var(--accent-subtle); color: var(--text-1); font-weight: 650;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.nav-item.active .count { color: var(--accent-active); }
+
+.mbox-tree { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 var(--space-sm) 0; }
+.mbox {
+  display: flex; align-items: center; gap: var(--space-sm);
+  padding: 6px var(--space-sm) 6px 38px; border: none; background: transparent;
+  border-radius: var(--radius-sm); color: var(--text-2); font-size: var(--text-sm);
+  text-align: left; width: 100%; transition: var(--transition-fast);
+}
+.mbox:hover { background: var(--surface-3); color: var(--text-1); }
+.mbox.sel { background: var(--surface-3); color: var(--text-1); font-weight: 650; }
+.mbox .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbox .ub { font-size: 11px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+.sb-foot { margin-top: auto; padding: var(--space-md); border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--space-sm); }
+.user-row { display: flex; align-items: center; gap: var(--space-sm); }
+.user-row .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; background: hsl(255 50% 55%); flex: 0 0 auto; }
+.user-row .un { font-size: var(--text-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.theme-row { display: flex; gap: var(--space-xs); }
+.theme-row button { width: 30px; height: 30px; display: grid; place-items: center; border: none; background: transparent; border-radius: var(--radius-sm); color: var(--text-3); transition: var(--transition-fast); }
+.theme-row button:hover { background: var(--surface-3); color: var(--text-1); }
+.theme-row button[aria-pressed="true"] { background: var(--surface-3); color: var(--accent); }
+.theme-row svg { width: 16px; height: 16px; }
+.appearance { display: flex; flex-direction: column; gap: var(--space-sm); }
+.appear-label { font-size: 11px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; }
+.sb-foot .swatches { flex-wrap: wrap; }
+.signout { width: 28px; height: 28px; margin-left: auto; flex: 0 0 auto; }
+
+/* ── Pane scaffolding (§6.2) ── */
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pane-list { background: var(--surface-2); border-right: 1px solid var(--border); }
+.pane-read { background: var(--surface-1); }
+.pane-head {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; flex-direction: column; gap: var(--space-sm);
+  padding: var(--space-md);
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.pane-read .pane-head { background: color-mix(in srgb, var(--surface-1) 88%, transparent); }
+.pane-title-row { display: flex; align-items: baseline; gap: var(--space-sm); }
+.pane-title { margin: 0; font-size: var(--text-lg); font-weight: 750; letter-spacing: -0.01em; }
+.pane-sub { font-size: var(--text-sm); color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* Search (§8.1) */
+.search { position: relative; display: flex; align-items: center; }
+.search svg.mag { position: absolute; left: 10px; width: 15px; height: 15px; color: var(--text-3); pointer-events: none; }
+.search input {
+  width: 100%; height: 34px; padding: 0 30px 0 32px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface-1); color: var(--text-1); font: inherit; font-size: var(--text-sm);
+  transition: var(--transition-fast);
+}
+.search input::placeholder { color: var(--text-3); }
+.search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
+.search .clear { position: absolute; right: 6px; width: 22px; height: 22px; border: none; background: transparent; color: var(--text-3); border-radius: 50%; display: grid; place-items: center; }
+.search .clear:hover { background: var(--surface-3); color: var(--text-1); }
+
+/* List toolbar (§7.1) */
+.toolbar { display: flex; align-items: center; gap: 2px; }
+.iconbtn {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border: none; background: transparent; color: var(--text-2);
+  border-radius: var(--radius-sm); transition: var(--transition-fast);
+}
+.iconbtn:hover { background: var(--surface-3); color: var(--text-1); }
+.iconbtn svg { width: 17px; height: 17px; }
+.toolbar .check { margin-right: 4px; accent-color: var(--accent); width: 16px; height: 16px; }
+.toolbar .spacer { flex: 1; }
+.sel-count { font-size: var(--text-sm); font-weight: 650; color: var(--accent-active); }
+
+/* ── Thread list ── */
+.list { flex: 1; overflow-y: auto; }
+.row {
+  display: grid;
+  grid-template-columns: auto 40px 1fr auto;
+  grid-template-areas: "dot av main meta";
+  align-items: center;
+  gap: 0 var(--space-sm);
+  min-height: var(--row-mail);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer; position: relative;
+  transition: background var(--transition-fast);
+}
+.row:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.row.sel { background: var(--accent-subtle); box-shadow: inset 3px 0 0 var(--accent); }
+.row .udot { grid-area: dot; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: 0; }
+.row.unread .udot { opacity: 1; }
+.row .av { grid-area: av; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; font-weight: 700; color: #fff; }
+.row .main { grid-area: main; min-width: 0; }
+.row .sender { font-size: var(--text-md); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.unread .sender { font-weight: 750; }
+.row .subj { font-size: var(--text-sm); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.row.unread .subj { font-weight: 650; }
+.row .prev { font-size: var(--text-sm); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.row .meta { grid-area: meta; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; align-self: start; padding-top: 2px; }
+.row .date { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row.unread .date { color: var(--accent-active); font-weight: 650; }
+.row .tags { display: flex; gap: 4px; }
+.row .flag { color: var(--text-3); }
+.row.flagged .flag { color: var(--accent); }
+/* per-row hover actions (§7.2) */
+.row .rowact { position: absolute; right: var(--space-md); top: 50%; transform: translateY(-50%); display: none; gap: 2px; background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 2px; box-shadow: var(--shadow-sm); }
+.row:hover .rowact, .row:focus-within .rowact { display: flex; }
+.row .rowact .iconbtn { width: 28px; height: 28px; }
+.row .agent-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 650; color: var(--accent-active);
+  background: var(--accent-subtle); padding: 1px 7px; border-radius: 999px; margin-top: 3px;
+}
+.row .agent-chip svg { width: 11px; height: 11px; }
+
+/* BEFORE/AFTER overlap demo (§6.1) */
+.before-wrap { display: none; padding: 0; }
+.before-note { padding: var(--space-sm) var(--space-md); font-size: 12px; color: var(--destructive); background: color-mix(in srgb, var(--destructive) 9%, transparent); border-bottom: 1px solid var(--border); }
+.before-list { position: relative; height: 280px; }
+.before-row {
+  position: absolute; left: 0; right: 0; height: 64px;
+  padding: 8px 11px; border-bottom: 1px solid var(--border);
+  background: var(--surface-2); overflow: visible;
+}
+.before-row .l1 { display:flex; justify-content: space-between; font-weight: 700; font-size: 14px; }
+.before-row .l2 { font-size: 14px; }
+.before-row .l3 { font-size: 14px; color: var(--text-2); }
+.before-row .l1, .before-row .l2, .before-row .l3 { line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.show-before .before-wrap { display: block; }
+body.show-before .list { display: none; }
+
+/* ── Reading pane ── */
+.read-actions { display: flex; align-items: center; gap: 2px; }
+.read-actions .spacer { flex: 1; }
+.msgs { flex: 1; overflow-y: auto; padding: var(--space-lg); display: flex; flex-direction: column; gap: var(--space-md); }
+.msgcard { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-sm); overflow: hidden; }
+.msgcard.collapsed .msg-body, .msgcard.collapsed .msg-recip { display: none; }
+.msg-head { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-md); cursor: pointer; }
+.msg-head .av { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 15px; font-weight: 700; color: #fff; flex: 0 0 auto; }
+.msg-head .who { min-width: 0; flex: 1; }
+.msg-head .nm { font-weight: 700; font-size: var(--text-md); }
+.msg-head .em { font-size: var(--text-sm); color: var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.msg-head .dt { font-size: var(--text-sm); color: var(--text-2); white-space: nowrap; }
+.msg-recip { padding: 0 var(--space-md); font-size: var(--text-sm); color: var(--text-2); margin-top: -4px; }
+.msg-body { padding: var(--space-md); padding-top: var(--space-sm); font-size: var(--text-md); line-height: 1.65; color: var(--text-1); }
+.msg-body p { margin: 0 0 0.9em; }
+.notice { display: flex; align-items: center; gap: var(--space-sm); margin: 0 var(--space-md) var(--space-md); padding: var(--space-sm) var(--space-md); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-sm); color: var(--text-2); }
+.attach { display: flex; gap: var(--space-sm); flex-wrap: wrap; padding: 0 var(--space-md) var(--space-md); }
+.chip { display: inline-flex; align-items: center; gap: var(--space-sm); padding: 7px 11px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); font-size: var(--text-sm); }
+.chip svg { width: 15px; height: 15px; color: var(--text-3); }
+.chip .sz { color: var(--text-3); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-sm);
+  height: 36px; padding: 0 var(--space-lg); border: none; border-radius: var(--radius-md);
+  font-weight: 600; font-size: var(--text-base); transition: var(--transition-fast); white-space: nowrap;
+}
+.btn svg { width: 16px; height: 16px; }
+.btn-primary { background: var(--accent); color: var(--accent-on); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { background: var(--surface-3); color: var(--text-1); }
+.btn-secondary:hover { filter: brightness(0.96); }
+.btn-ghost { background: transparent; color: var(--text-2); }
+.btn-ghost:hover { background: var(--surface-3); color: var(--text-1); }
+.btn-destructive { background: transparent; color: var(--destructive); }
+.btn-destructive:hover { background: color-mix(in srgb, var(--destructive) 12%, transparent); }
+
+.reply-bar {
+  position: sticky; bottom: 0; display: flex; align-items: center; gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  background: color-mix(in srgb, var(--surface-1) 90%, transparent);
+  backdrop-filter: blur(8px); border-top: 1px solid var(--border);
+}
+.reply-bar .assist {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--text-sm); font-weight: 650; color: var(--accent-active);
+  background: var(--accent-subtle); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 7px 13px; border-radius: var(--radius-md);
+}
+.reply-bar .assist svg { width: 15px; height: 15px; }
+
+/* Collapsible folder tree + caret (§6.5) */
+.nav-item .caret { margin-left: 6px; font-size: 10px; color: var(--text-3); transition: transform var(--transition-fast); display: inline-block; }
+.mbox-tree.collapsed { display: none; }
+
+/* Empty / no-selection states — never a blank pane (§6.4) */
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 48px 24px; text-align: center; color: var(--text-3); }
+.empty svg { width: 46px; height: 46px; opacity: 0.45; }
+.empty-t { font-size: var(--text-lg); font-weight: 700; color: var(--text-2); }
+.empty-d { font-size: var(--text-sm); max-width: 36ch; line-height: 1.5; }
+.empty-d b { color: var(--text-2); }
+.pane-view { grid-column: 2 / -1; background: var(--surface-1); }
+
+/* ── Compose modal (§8.3) ── */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.42); display: none; align-items: flex-start; justify-content: center; padding: 5vh 16px; z-index: 100; }
+.scrim.open { display: flex; }
+.modal { width: 100%; max-width: 660px; background: var(--surface-1); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); overflow: hidden; display: flex; flex-direction: column; max-height: 88vh; }
+.modal-head { display: flex; align-items: center; padding: var(--space-md) var(--space-lg); border-bottom: 1px solid var(--border); }
+.modal-head h2 { margin: 0; font-size: var(--text-lg); font-weight: 750; }
+.modal-head .iconbtn { margin-left: auto; }
+.modal-body { padding: var(--space-md) var(--space-lg); overflow-y: auto; display: flex; flex-direction: column; gap: 0; }
+.field { display: flex; align-items: center; gap: var(--space-md); border-bottom: 1px solid var(--border); }
+.field label { width: 56px; font-size: var(--text-sm); font-weight: 650; color: var(--text-2); flex: 0 0 auto; }
+.field input, .field select { flex: 1; border: none; background: transparent; font: inherit; font-size: var(--text-md); color: var(--text-1); padding: 11px 0; outline: none; }
+.field .pill { display:inline-flex; align-items:center; gap:5px; background: var(--accent-subtle); color: var(--accent-active); font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+.compose-body { min-height: 180px; padding: var(--space-md) 0; font-size: var(--text-md); line-height: 1.6; color: var(--text-1); outline: none; }
+.compose-body[contenteditable]:empty::before { content: attr(data-ph); color: var(--text-3); }
+.compose-toolbar { display: flex; align-items: center; gap: 2px; padding: var(--space-sm) 0; border-top: 1px solid var(--border); }
+.compose-toolbar .div { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
+.attach-chips { display: flex; gap: var(--space-sm); flex-wrap: wrap; padding-top: var(--space-sm); }
+.attach-chip { display:inline-flex; align-items:center; gap: var(--space-sm); padding: 6px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-sm); }
+.attach-chip .x { color: var(--text-3); display: grid; place-items: center; }
+.modal-foot { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--border); background: var(--surface-2); }
+.modal-foot .spacer { flex: 1; }
+
+.callout { font-size: 11px; color: var(--text-3); padding: 6px 18px; background: var(--surface-2); border-top: 1px dashed var(--border); }
+
+@media (max-width: 1080px) {
+  .app { grid-template-columns: var(--sidebar-w) minmax(0,1fr); }
+  .pane-read { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- DEMO CHROME — exercises the spec's accent picker, density selector, theme, and the before/after overlap fix. Not part of the app UI. -->
+<div class="demobar">
+  <div class="brandtag"><b>Iarsma redesign</b><span>reference mockup</span></div>
+  <div class="demogroup">
+    <label>Density</label>
+    <div class="seg" id="density">
+      <button data-v="0.85">Dense</button>
+      <button data-v="1" aria-pressed="true">Normal</button>
+      <button data-v="1.25">Spacious</button>
+    </div>
+  </div>
+  <div class="demogroup">
+    <label>Message list</label>
+    <div class="seg" id="beforeafter">
+      <button data-v="before">Before</button>
+      <button data-v="after" aria-pressed="true">After</button>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="sb-head">
+      <div class="wordmark"><span class="dot"></span>Iarsma<span class="ver">v0.4</span></div>
+      <button class="compose-btn" onclick="openCompose()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Compose
+      </button>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg>
+        Mail <span class="count">14</span>
+        <span class="caret" id="mailCaret" aria-hidden="true">▾</span>
+      </button>
+      <div class="mbox-tree" id="mboxTree">
+        <button class="mbox sel"><span class="nm">Inbox</span><span class="ub">14</span></button>
+        <button class="mbox"><span class="nm">Starred</span></button>
+        <button class="mbox"><span class="nm">Drafts</span><span class="ub">2</span></button>
+        <button class="mbox"><span class="nm">Sent</span></button>
+        <button class="mbox"><span class="nm">Archive</span></button>
+        <button class="mbox"><span class="nm">Trash</span></button>
+      </div>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Calendar
+      </button>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/></svg>
+        Contacts
+      </button>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Files
+      </button>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        Approvals <span class="count">3</span>
+      </button>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Activity
+      </button>
+      <button class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.82 1.17V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 14H4.5a2 2 0 010-4h.09A1.65 1.65 0 006 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6V4.5a2 2 0 014 0v.09A1.65 1.65 0 0015 6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 11z"/></svg>
+        Settings
+      </button>
+    </nav>
+    <div class="sb-foot">
+      <div class="user-row">
+        <span class="av" data-name="Brent Ellis" data-kind="human">BE</span>
+        <span class="un">brent@r3motely.com</span>
+        <button class="iconbtn signout" aria-label="Sign out" title="Sign out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+      </div>
+      <div class="appearance" role="group" aria-label="Appearance">
+        <div class="appear-label">Appearance</div>
+        <div class="theme-row" role="radiogroup" aria-label="Theme">
+          <button aria-label="Light" aria-pressed="true" onclick="setTheme('light')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="18.4" y1="18.4" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="5.6" y2="18.4"/><line x1="18.4" y1="5.6" x2="19.8" y2="4.2"/></svg></button>
+          <button aria-label="Dark" aria-pressed="false" onclick="setTheme('dark')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg></button>
+          <button aria-label="System" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></button>
+        </div>
+        <div class="swatches" id="swatches" role="radiogroup" aria-label="Accent color"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── THREAD LIST ── -->
+  <section class="pane pane-list" aria-label="Inbox">
+    <div class="pane-head">
+      <div class="pane-title-row">
+        <h2 class="pane-title" id="listTitle">Inbox</h2>
+        <span class="pane-sub" id="listSub">14 unread · 1–25 of 312</span>
+      </div>
+      <div class="search">
+        <svg class="mag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="search" placeholder="Search all mail" aria-label="Search all mail" />
+        <button class="clear" aria-label="Clear search"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></button>
+      </div>
+      <div class="toolbar" id="toolbar">
+        <input type="checkbox" class="check" aria-label="Select all" onchange="toggleAll(this)"/>
+        <span class="sel-count" id="selcount" style="display:none"></span>
+        <button class="iconbtn" aria-label="Archive" title="Archive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 002 2h12a2 2 0 002-2V9"/><line x1="10" y1="13" x2="14" y2="13"/></svg></button>
+        <button class="iconbtn" aria-label="Delete" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
+        <button class="iconbtn" aria-label="Mark read" title="Mark read"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></button>
+        <span class="spacer"></span>
+        <button class="iconbtn" aria-label="Refresh" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg></button>
+        <button class="iconbtn" aria-label="Filter" title="Sort & filter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg></button>
+      </div>
+    </div>
+
+    <!-- BEFORE: the current 64px fixed-height rows with overlapping text (§6.1) -->
+    <div class="before-wrap">
+      <div class="before-note">⚠ Current build: rows are pinned to 64px but contain ~78px of text → lines overlap the next row.</div>
+      <div class="before-list">
+        <div class="before-row" style="top:0">
+          <div class="l1"><span>Nadia Okonkwo</span><span>9:41</span></div>
+          <div class="l2">Re: Capability scoping for the triage agent</div>
+          <div class="l3">Agreed — least-privilege by default. I pushed a draft of the scope…</div>
+        </div>
+        <div class="before-row" style="top:64px">
+          <div class="l1"><span>Stalwart Releases</span><span>8:12</span></div>
+          <div class="l2">v0.11.4 is available</div>
+          <div class="l3">This release includes JMAP push improvements and a fix for…</div>
+        </div>
+        <div class="before-row" style="top:128px">
+          <div class="l1"><span>Marcus Reed</span><span>Tue</span></div>
+          <div class="l2">Dry-run preview looks great</div>
+          <div class="l3">The approve/commit flow is exactly what we discussed. One note…</div>
+        </div>
+        <div class="before-row" style="top:192px">
+          <div class="l1"><span>GitHub</span><span>Mon</span></div>
+          <div class="l2">[iarsma] CI passed on main</div>
+          <div class="l3">All required checks (ts, rust, shell-build) completed successfully…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AFTER: the redesigned rows -->
+    <div class="list" id="list"></div>
+  </section>
+
+  <!-- ── READING PANE ── -->
+  <section class="pane pane-read" aria-label="Conversation">
+    <div class="pane-head" id="readHead" style="display:none">
+      <div class="pane-title-row">
+        <h2 class="pane-title" id="readTitle" style="font-size:var(--text-xl)">Capability scoping for the triage agent</h2>
+      </div>
+      <div class="read-actions">
+        <span class="pane-sub" id="readSub">3 messages</span>
+        <span class="spacer"></span>
+        <button class="iconbtn" aria-label="Archive" title="Archive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 002 2h12a2 2 0 002-2V9"/><line x1="10" y1="13" x2="14" y2="13"/></svg></button>
+        <button class="iconbtn" aria-label="Move" title="Move to…"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg></button>
+        <button class="iconbtn" aria-label="Mark unread" title="Mark unread"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></button>
+        <button class="iconbtn" aria-label="Delete" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></button>
+      </div>
+    </div>
+    <div class="empty" id="readEmpty" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg>
+      <div class="empty-t">No conversation selected</div>
+      <div class="empty-d">Pick a message from the list to read it here. Use <b>j&nbsp;/&nbsp;k</b> to move and <b>Enter</b> to open.</div>
+    </div>
+    <div class="msgs" id="msgs">
+      <div class="msgcard collapsed" onclick="this.classList.toggle('collapsed')">
+        <div class="msg-head">
+          <span class="av" data-name="Nadia Okonkwo" data-kind="human">NO</span>
+          <div class="who"><div class="nm">Nadia Okonkwo</div><div class="em">nadia@r3motely.com</div></div>
+          <span class="dt">Apr 2, 8:50</span>
+        </div>
+        <div class="msg-body"><p>Kicking off the thread — what scopes should the triage agent actually get? My instinct is read + label, nothing destructive.</p></div>
+      </div>
+
+      <div class="msgcard collapsed" onclick="this.classList.toggle('collapsed')">
+        <div class="msg-head">
+          <span class="av" data-name="Marcus Reed" data-kind="human">MR</span>
+          <div class="who"><div class="nm">Marcus Reed</div><div class="em">marcus@r3motely.com</div></div>
+          <span class="dt">Apr 2, 9:18</span>
+        </div>
+        <div class="msg-body"><p>+1. And every mutation should still go through dry-run → approve, even the label changes, so the action log stays complete.</p></div>
+      </div>
+
+      <div class="msgcard" onclick="if(event.target.closest('.msg-head')) this.classList.toggle('collapsed')">
+        <div class="msg-head">
+          <span class="av" data-name="Nadia Okonkwo" data-kind="human">NO</span>
+          <div class="who"><div class="nm">Nadia Okonkwo</div><div class="em">nadia@r3motely.com</div></div>
+          <span class="dt">9:41</span>
+        </div>
+        <div class="msg-recip">To: Brent Ellis, Marcus Reed · Cc: agents@r3motely.com</div>
+        <div class="notice">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          External images are blocked.
+          <button class="btn btn-ghost" style="height:28px;padding:0 12px;margin-left:auto;font-size:13px">Show images</button>
+        </div>
+        <div class="msg-body">
+          <p>Agreed — least-privilege by default. I pushed a draft of the scope set to the brief:</p>
+          <p><code>mail:read</code>, <code>mail:read.metadata</code>, <code>mail:modify</code> (label only), and explicitly <em>not</em> <code>mail:delete</code> or <code>mail:send</code> for the triage role.</p>
+          <p>The triage agent drafted a reply on the Henderson thread this morning and parked it for review rather than sending — exactly the behavior we want. See the approval queue.</p>
+          <p>— Nadia</p>
+        </div>
+        <div class="attach">
+          <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>triage-scopes.md <span class="sz">8 KB</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="reply-bar" id="replyBar">
+      <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 00-4-4H4"/></svg>Reply</button>
+      <button class="btn btn-secondary">Reply all</button>
+      <button class="btn btn-ghost">Forward</button>
+      <span class="assist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg>Draft with agent</span>
+    </div>
+  </section>
+  <!-- Generic view panel for non-Mail nav (Calendar / Contacts / …) — never a blank screen -->
+  <section class="pane pane-view" id="otherView" style="display:none"></section>
+</div>
+
+<div class="callout">Demo mockup for the UX analysis. <b>Avatar color encodes sender type</b> — accent = an agent, muted grey = automated/system mail (GitHub, CI, Stalwart), and a stable hue = a human contact (same person → same color). Not decorative, and user/tool-assignable. The “Draft with agent” chip and agent badges are slots for the brief’s agent-collaboration surfaces (§3, §8.6). Content is illustrative.</div>
+
+<!-- ── COMPOSE MODAL ── -->
+<div class="scrim" id="scrim" onclick="if(event.target===this) closeCompose()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cm-title">
+    <div class="modal-head">
+      <h2 id="cm-title">New message</h2>
+      <button class="iconbtn" aria-label="Close" onclick="closeCompose()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label>From</label><select><option>Brent Ellis &lt;brent@r3motely.com&gt;</option><option>Support &lt;support@r3motely.com&gt;</option></select></div>
+      <div class="field"><label>To</label><input type="text" value="" placeholder="alice@example.net, Bob &lt;bob@example.net&gt;"/></div>
+      <div class="field"><label>Subject</label><input type="text" placeholder="Subject"/></div>
+      <div class="compose-body" contenteditable="true" data-ph="Write your message…"></div>
+      <div class="attach-chips">
+        <span class="attach-chip"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>proposal-v2.pdf <button class="x" aria-label="Remove attachment"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg></button></span>
+      </div>
+      <div class="compose-toolbar">
+        <button class="iconbtn" aria-label="Bold"><b>B</b></button>
+        <button class="iconbtn" aria-label="Italic"><i>I</i></button>
+        <button class="iconbtn" aria-label="Link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1"/></svg></button>
+        <span class="div"></span>
+        <button class="iconbtn" aria-label="Bulleted list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg></button>
+        <button class="iconbtn" aria-label="Attach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-primary">Send</button>
+      <button class="btn btn-ghost" onclick="closeCompose()">Cancel</button>
+      <span class="spacer"></span>
+      <span class="assist" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:650;color:var(--accent-active)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg>Agent assist</span>
+      <button class="btn btn-destructive">Discard</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Accent picker (§5.2) ──
+const ACCENTS = [
+  ['Ember', 18, 100, 60], ['Amber', 38, 95, 55], ['Sky', 205, 90, 52],
+  ['Violet', 265, 75, 62], ['Teal', 175, 65, 42], ['Rose', 345, 80, 60],
+];
+const sw = document.getElementById('swatches');
+ACCENTS.forEach(([name,h,s,l],i) => {
+  const b = document.createElement('button');
+  b.className = 'swatch'; b.title = name; b.setAttribute('aria-label', name);
+  b.setAttribute('aria-pressed', i===0 ? 'true':'false');
+  b.style.setProperty('--sw', `hsl(${h} ${s}% ${l}%)`);
+  b.onclick = () => {
+    document.documentElement.style.setProperty('--accent-h', h);
+    document.documentElement.style.setProperty('--accent-s', s+'%');
+    document.documentElement.style.setProperty('--accent-l', l+'%');
+    [...sw.children].forEach(c => c.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+  };
+  sw.appendChild(b);
+});
+
+// ── Density (§5.3) ──
+document.querySelectorAll('#density button').forEach(btn => {
+  btn.onclick = () => {
+    document.documentElement.style.setProperty('--density', btn.dataset.v);
+    document.querySelectorAll('#density button').forEach(b => b.setAttribute('aria-pressed','false'));
+    btn.setAttribute('aria-pressed','true');
+  };
+});
+
+// ── Theme ──
+function setTheme(v){
+  document.documentElement.setAttribute('data-theme', v);
+  document.querySelectorAll('#theme button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v===v?'true':'false'));
+  document.querySelectorAll('.theme-row button').forEach(b => b.setAttribute('aria-pressed', (b.getAttribute('aria-label')||'').toLowerCase()===v?'true':'false'));
+}
+document.querySelectorAll('#theme button').forEach(b => b.onclick = () => setTheme(b.dataset.v));
+
+// ── Before/After ──
+document.querySelectorAll('#beforeafter button').forEach(btn => {
+  btn.onclick = () => {
+    document.body.classList.toggle('show-before', btn.dataset.v==='before');
+    document.querySelectorAll('#beforeafter button').forEach(b => b.setAttribute('aria-pressed','false'));
+    btn.setAttribute('aria-pressed','true');
+  };
+});
+
+// ── Thread list data (illustrative, realistic) ──
+// ── Avatar color = meaning, never random (§7.3) ──
+// Color encodes the SENDER CLASS: agents track the accent (your
+// agents, visually tied to action), automated/system senders are a
+// muted neutral (low-signal machine mail), and human contacts get a
+// STABLE identity hue derived from their address — same person, same
+// color, forever. A user/category override slots in at colorFor().
+const KIND_LABEL = { human:'Contact', agent:'Agent', system:'Automated' };
+function hashHue(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h%360; }
+function colorFor(name, kind){
+  if(kind==='agent')  return 'var(--accent)';            // tracks the accent live
+  if(kind==='system') return 'var(--badge-system)';      // muted neutral
+  return `hsl(${hashHue(name)} 46% 50%)`;                // stable per contact
+}
+const THREADS = [
+  {i:'NO',kind:'human', from:'Nadia Okonkwo',subj:'Re: Capability scoping for the triage agent',prev:'Agreed — least-privilege by default. I pushed a draft of the scope set…',date:'9:41',unread:1,flagged:1,sel:1,agent:0},
+  {i:'TA',kind:'agent', from:'Triage agent',subj:'Drafted 2 replies for your review',prev:'I prepared replies on the Henderson and Liu threads. Both are parked…',date:'9:20',unread:1,flagged:0,sel:0,agent:1},
+  {i:'SR',kind:'system',from:'Stalwart Releases',subj:'v0.11.4 is available',prev:'This release includes JMAP push improvements and a fix for delegated…',date:'8:12',unread:1,flagged:0,sel:0,agent:0},
+  {i:'MR',kind:'human', from:'Marcus Reed',subj:'Dry-run preview looks great',prev:'The approve/commit flow is exactly what we discussed. One small note…',date:'Tue',unread:0,flagged:0,sel:0,agent:0},
+  {i:'GH',kind:'system',from:'GitHub',subj:'[iarsma] CI passed on main',prev:'All required checks (ts, rust, shell-build) completed successfully on…',date:'Tue',unread:0,flagged:0,sel:0,agent:0},
+  {i:'PL',kind:'human', from:'Priya Lal',subj:'Calendar sync edge case',prev:'Recurring events that span a DST boundary are off by an hour. Repro in…',date:'Mon',unread:0,flagged:1,sel:0,agent:0},
+  {i:'OB',kind:'system',from:'Open Brain',subj:'Memory backend discovery URN',prev:'Confirming the webmail advertises the OB1 endpoint via the capability…',date:'Mon',unread:0,flagged:0,sel:0,agent:0},
+  {i:'DH',kind:'human', from:'Dana Holt',subj:'Re: Squire paste handling',prev:'Stripping the Word noise on willPaste worked. PR is up for review when…',date:'Sun',unread:0,flagged:0,sel:0,agent:0},
+];
+// ── Navigation engine — every click renders a STATE, never a blank pane (§6.4) ──
+const listEl = document.getElementById('list');
+const listTitle = document.getElementById('listTitle');
+const listSub = document.getElementById('listSub');
+const readHead = document.getElementById('readHead');
+const readTitle = document.getElementById('readTitle');
+const readSub = document.getElementById('readSub');
+const readEmptyEl = document.getElementById('readEmpty');
+const msgsEl = document.getElementById('msgs');
+const replyBar = document.getElementById('replyBar');
+const ov = document.getElementById('otherView');
+const mboxTree = document.getElementById('mboxTree');
+const mailCaret = document.getElementById('mailCaret');
+const cur = { view:'mail', mbox:'Inbox', thread:0 };
+
+const ICN = {
+  mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg>',
+  calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  contacts:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>',
+  files:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+  approvals:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>',
+  activity:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-2.82 1.17V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 14H4.5a2 2 0 010-4h.09A1.65 1.65 0 006 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6V4.5a2 2 0 014 0v.09A1.65 1.65 0 0015 6a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 11z"/></svg>',
+};
+function emptyHTML(icon,title,desc){ return `<div class="empty">${ICN[icon]||ICN.mail}<div class="empty-t">${title}</div><div class="empty-d">${desc}</div></div>`; }
+
+const MBOX = {
+  Inbox:   { sub:'14 unread · 1–25 of 312', filter:()=>true },
+  Starred: { sub:'2 flagged',               filter:t=>!!t.flagged },
+  Drafts:  { sub:'2 drafts',                filter:()=>false, empty:['No drafts','Start one with Compose — drafts autosave here.'] },
+  Sent:    { sub:'Sent mail',               filter:()=>false, empty:['Nothing sent yet','Messages you send will appear here.'] },
+  Archive: { sub:'Archived',                filter:()=>false, empty:['Archive is empty','Archived conversations are kept here.'] },
+  Trash:   { sub:'Trash is empty',          filter:()=>false, empty:['Trash is empty','Deleted conversations stay here for 30 days.'] },
+};
+
+function rowTemplate(t){
+  return `
+    <span class="udot"></span>
+    <span class="av" title="${KIND_LABEL[t.kind]}" style="background:${colorFor(t.from,t.kind)}">${t.i}</span>
+    <div class="main">
+      <div class="sender">${t.from}</div>
+      <div class="subj">${t.subj}</div>
+      <div class="prev">${t.prev}</div>
+      ${t.agent?`<span class="agent-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg>Agent · awaiting review</span>`:''}
+    </div>
+    <div class="meta">
+      <span class="date">${t.date}</span>
+      <span class="tags"><span class="flag">${t.flagged?'★':'☆'}</span></span>
+    </div>
+    <div class="rowact">
+      <button class="iconbtn" aria-label="Archive: ${t.subj}" title="Archive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v9a2 2 0 002 2h12a2 2 0 002-2V9"/><line x1="10" y1="13" x2="14" y2="13"/></svg></button>
+      <button class="iconbtn" aria-label="Delete: ${t.subj}" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg></button>
+      <button class="iconbtn" aria-label="Mark read: ${t.subj}" title="Mark read"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></button>
+    </div>`;
+}
+function rowEl(t,i){
+  const r = document.createElement('div');
+  r.className = 'row' + (t.unread?' unread':'') + (t.flagged?' flagged':'') + (i===cur.thread?' sel':'');
+  r.tabIndex = 0; r.dataset.i = i;
+  r.innerHTML = rowTemplate(t);
+  r.addEventListener('click', () => selectThread(i));
+  r.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); selectThread(i); } });
+  r.querySelectorAll('.rowact .iconbtn').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    const l = b.getAttribute('aria-label') || '';
+    if(l.startsWith('Mark read')) r.classList.remove('unread');
+    else { r.remove(); if(i===cur.thread) readEmptyState(); }
+  }));
+  return r;
+}
+function renderList(){
+  const cfg = MBOX[cur.mbox] || MBOX.Inbox;
+  listTitle.textContent = cur.mbox;
+  listSub.textContent = cfg.sub || '';
+  const items = THREADS.map((t,i)=>({t,i})).filter(({t}) => cfg.filter(t));
+  if(!items.length){ listEl.innerHTML = emptyHTML('mail', (cfg.empty&&cfg.empty[0])||'Nothing here', (cfg.empty&&cfg.empty[1])||'This folder has no conversations.'); return; }
+  listEl.innerHTML = '';
+  items.forEach(({t,i}) => listEl.appendChild(rowEl(t,i)));
+}
+
+// Detailed thread bodies. Index 0 is the rich multi-message example;
+// others synthesize a single message from the sender + preview.
+const MSGS0 = [
+  {nm:'Nadia Okonkwo',em:'nadia@r3motely.com',kind:'human',i:'NO',date:'Apr 2, 8:50',body:'<p>Kicking off the thread — what scopes should the triage agent actually get? My instinct is read + label, nothing destructive.</p>'},
+  {nm:'Marcus Reed',em:'marcus@r3motely.com',kind:'human',i:'MR',date:'Apr 2, 9:18',body:'<p>+1. And every mutation should still go through dry-run → approve, even the label changes, so the action log stays complete.</p>'},
+  {nm:'Nadia Okonkwo',em:'nadia@r3motely.com',kind:'human',i:'NO',date:'9:41',recip:'To: Brent Ellis, Marcus Reed · Cc: agents@r3motely.com',attach:'triage-scopes.md',body:'<p>Agreed — least-privilege by default. I pushed a draft of the scope set to the brief:</p><p><code>mail:read</code>, <code>mail:read.metadata</code>, <code>mail:modify</code> (label only), and explicitly <em>not</em> <code>mail:delete</code> or <code>mail:send</code> for the triage role.</p><p>The triage agent drafted a reply on the Henderson thread this morning and parked it for review rather than sending — exactly the behaviour we want. See the approval queue.</p><p>— Nadia</p>'},
+];
+function emailFor(n){ return n.toLowerCase().replace(/[^a-z]+/g,'.').replace(/^\.|\.$/g,'') + '@r3motely.com'; }
+function msgsFor(t,i){
+  if(i===0) return MSGS0;
+  return [{nm:t.from,em:emailFor(t.from),kind:t.kind,i:t.i,date:t.date,body:`<p>${t.prev.replace(/…$/,'.')}</p><p>Happy to dig in further whenever you have a moment — just let me know what you need from my side.</p>`}];
+}
+function renderThread(t,i){
+  readHead.style.display=''; msgsEl.style.display=''; replyBar.style.display=''; readEmptyEl.style.display='none';
+  readTitle.textContent = t.subj.replace(/^Re:\s*/,'');
+  const ms = msgsFor(t,i);
+  readSub.textContent = ms.length + (ms.length===1?' message':' messages');
+  msgsEl.innerHTML = ms.map((m,idx) => {
+    const open = idx===ms.length-1;
+    return `<article class="msgcard ${open?'':'collapsed'}">
+      <div class="msg-head">
+        <span class="av" title="${KIND_LABEL[m.kind]}" style="background:${colorFor(m.nm,m.kind)}">${m.i}</span>
+        <div class="who"><div class="nm">${m.nm}</div><div class="em">${m.em}</div></div>
+        <span class="dt">${m.date}</span>
+      </div>
+      ${m.recip?`<div class="msg-recip">${m.recip}</div>`:''}
+      <div class="msg-body">${m.body}</div>
+      ${m.attach?`<div class="attach"><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>${m.attach} <span class="sz">8 KB</span></span></div>`:''}
+    </article>`;
+  }).join('');
+  msgsEl.querySelectorAll('.msg-head').forEach(h => h.addEventListener('click', () => h.closest('.msgcard').classList.toggle('collapsed')));
+}
+function readEmptyState(){
+  readHead.style.display='none'; msgsEl.style.display='none'; replyBar.style.display='none'; readEmptyEl.style.display='';
+  cur.thread = -1;
+  document.querySelectorAll('.row').forEach(r => r.classList.remove('sel'));
+}
+function selectThread(i){
+  cur.thread = i;
+  document.querySelectorAll('.row').forEach(r => r.classList.toggle('sel', +r.dataset.i===i));
+  const row = [...document.querySelectorAll('.row')].find(r => +r.dataset.i===i);
+  if(row) row.classList.remove('unread');
+  renderThread(THREADS[i], i);
+}
+function selectMailbox(name){
+  cur.mbox = name; goView('mail');
+  document.querySelectorAll('.mbox').forEach(m => m.classList.toggle('sel', m.querySelector('.nm').textContent===name));
+  renderList(); readEmptyState();
+}
+function goView(view){
+  cur.view = view;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view===view));
+  const isMail = view==='mail';
+  document.querySelector('.pane-list').style.display = isMail?'':'none';
+  document.querySelector('.pane-read').style.display = isMail?'':'none';
+  ov.style.display = isMail?'none':'';
+  if(!isMail){
+    if(window.renderSecondary && window.renderSecondary(view, ov)) return;
+    const T = {
+      calendar:['calendar','Calendar','Your month at a glance — events, invites, and agent-scheduled holds.'],
+      contacts:['contacts','Contacts','The people and agents you correspond with.'],
+      files:['files','Files','Browse and edit your Git-backed repository.'],
+      approvals:['approvals','Approvals','3 agent actions are waiting for your review.'],
+      activity:['activity','Activity','The tamper-evident log of every human and agent action.'],
+      settings:['settings','Settings','Identities, agent tokens, and appearance.'],
+    };
+    const v = T[view] || ['mail', view, ''];
+    ov.innerHTML = emptyHTML(v[0], v[1], v[2]);
+  }
+}
+// Collapsible folder tree (§6.5)
+let foldersOpen = true;
+function toggleFolders(){
+  foldersOpen = !foldersOpen;
+  mboxTree.classList.toggle('collapsed', !foldersOpen);
+  mailCaret.style.transform = foldersOpen ? '' : 'rotate(-90deg)';
+}
+
+// Wire navigation
+document.querySelectorAll('.nav-item').forEach(n => {
+  const label = (n.textContent || '').trim().split(/[\s·]+/)[0].toLowerCase();
+  n.dataset.view = label;
+  n.addEventListener('click', () => goView(label));
+});
+mailCaret.addEventListener('click', e => { e.stopPropagation(); toggleFolders(); });
+document.querySelectorAll('.mbox').forEach(m => m.addEventListener('click', () => selectMailbox(m.querySelector('.nm').textContent)));
+readHead.querySelectorAll('.iconbtn').forEach(b => b.addEventListener('click', () => {
+  const l = b.getAttribute('aria-label') || '';
+  const row = [...document.querySelectorAll('.row')].find(r => +r.dataset.i===cur.thread);
+  if(l==='Archive' || l==='Delete'){ if(row) row.remove(); readEmptyState(); }
+  if(l==='Mark unread'){ if(row) row.classList.add('unread'); }
+}));
+document.querySelectorAll('#toolbar .iconbtn').forEach(b => {
+  const l = b.getAttribute('aria-label') || '';
+  b.addEventListener('click', () => {
+    if(l==='Refresh') renderList();
+    if(l==='Mark read') document.querySelectorAll('.row.unread').forEach(r => r.classList.remove('unread'));
+  });
+});
+// Account avatar uses the same color rule
+document.querySelectorAll('.user-row .av').forEach(el => { el.style.background = colorFor(el.dataset.name || el.textContent, el.dataset.kind); el.title = KIND_LABEL[el.dataset.kind] || ''; });
+
+// Initial render — inbox selected + first conversation open, so Mail is never blank
+renderList();
+selectThread(0);
+goView('mail');
+
+// ── Compose modal ──
+function openCompose(){ document.getElementById('scrim').classList.add('open'); }
+function closeCompose(){ document.getElementById('scrim').classList.remove('open'); }
+function toggleAll(cb){
+  const n = cb.checked ? THREADS.length : 0;
+  const el = document.getElementById('selcount');
+  el.style.display = n ? 'inline' : 'none';
+  el.textContent = n ? n + ' selected' : '';
+}
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeCompose(); });
+</script>
+<script src="secondary-views.js"></script>
+</body>
+</html>
