@@ -9,10 +9,9 @@ import { makeScopeSet } from '../scope-filter.js';
 
 const ctx = { dryRun: false, scopes: makeScopeSet(['files:read']) };
 
-function staticStore(c: Parameters<typeof staticStoreInner>[0]): GithubConfigStore {
-  return staticStoreInner(c);
-}
-function staticStoreInner(config: Parameters<GithubConfigStore['current']>[0] extends never ? never : ReturnType<GithubConfigStore['current']>): GithubConfigStore {
+function staticStore(
+  config: ReturnType<GithubConfigStore['current']>,
+): GithubConfigStore {
   return { current: () => config, reload: () => {} };
 }
 

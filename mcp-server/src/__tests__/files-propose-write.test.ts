@@ -181,7 +181,7 @@ describe('createFilesProposeWriteHandler — dry run', () => {
 describe('createFilesProposeWriteHandler — commit appends approval email', () => {
   it('creates an Approvals mailbox if missing, then posts the approval email and returns its id', async () => {
     let call = 0;
-    const fetchSpy = vi.fn(async (_url: unknown, init?: { body?: unknown; method?: string }) => {
+    const fetchSpy = vi.fn(async () => {
       call += 1;
       // Call 1: read current
       if (call === 1) {
