@@ -26,6 +26,9 @@ describe('TOOL_SCOPES', () => {
     'mail.send',
     'mail.modify',
     'mail.delete',
+    'files.list',
+    'files.read',
+    'files.propose_write',
   ] as const;
 
   it('maps every known tool name to a scope string', () => {
@@ -53,6 +56,9 @@ describe('TOOL_SCOPES', () => {
     expect(TOOL_SCOPES['mail.send']).toBe('mail:send');
     expect(TOOL_SCOPES['mail.modify']).toBe('mail:modify');
     expect(TOOL_SCOPES['mail.delete']).toBe('mail:delete');
+    expect(TOOL_SCOPES['files.list']).toBe('files:read');
+    expect(TOOL_SCOPES['files.read']).toBe('files:read');
+    expect(TOOL_SCOPES['files.propose_write']).toBe('files:write');
   });
 });
 

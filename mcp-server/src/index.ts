@@ -13,6 +13,10 @@ import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
 import { fileTokenStore } from './token-store.js';
+import { createFilesListHandler } from './handlers/files-list.js';
+import { createFilesReadHandler } from './handlers/files-read.js';
+import { createFilesProposeWriteHandler } from './handlers/files-propose-write.js';
+import { loadGithubConfigStore } from './github-config.js';
 import { createMailDeleteHandler } from './handlers/mail-delete.js';
 import { createMailDraftHandler } from './handlers/mail-draft.js';
 import { createMailModifyHandler } from './handlers/mail-modify.js';
@@ -97,6 +101,33 @@ async function main(): Promise<void> {
         'session.get, mailbox.list, thread.list, thread.get, thread.search, mail.draft, mail.send, mail.modify, mail.delete',
     );
   }
+
+  // Phase 5b: files.* capabilities. The MCP server is read-only against
+  // GitHub; writes happen browser-side after human approval (D-053). The
+  // GitHub config is loaded from env vars / `run/github-config.json` —
+  // unset means files.* return `not_configured` rather than absent so
+  // agents see the tool and learn how to enable it.
+  const githubConfigStore = loadGithubConfigStore(process.env);
+  process.on('SIGHUP', () => {
+    githubConfigStore.reload();
+    // eslint-disable-next-line no-console
+    console.error('[iarsma-mcp] SIGHUP received — reloaded GitHub config');
+  });
+  handlers.set('files.list', createFilesListHandler(githubConfigStore));
+  handlers.set('files.read', createFilesReadHandler(githubConfigStore));
+  if (sessionGetDeps !== null) {
+    handlers.set(
+      'files.propose_write',
+      createFilesProposeWriteHandler({
+        configStore: githubConfigStore,
+        jmapBaseUrl: sessionGetDeps.jmapBaseUrl,
+      }),
+    );
+  }
+  // eslint-disable-next-line no-console
+  console.error(
+    `[iarsma-mcp] files.* wired (config ${githubConfigStore.current() === null ? 'NOT set — set IARSMA_GITHUB_TOKEN/OWNER/REPO or write run/github-config.json' : 'present'})`,
+  );
 
   const stdioServer = createIarsmaMcpServer({
     tools,

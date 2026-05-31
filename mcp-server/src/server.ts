@@ -115,7 +115,9 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
 
     // Scope resolution: prefer authInfo from HTTP transport (real per-agent
     // tokens), fall back to _iarsmaScopes in arguments (dev/stdio mode).
-    const authInfo = extra.authInfo as { scopes?: ScopeSet; stalwartApiKey?: string } | undefined;
+    const authInfo = extra.authInfo as
+      | { scopes?: ScopeSet; stalwartApiKey?: string; id?: string; name?: string }
+      | undefined;
     const scopes = authInfo?.scopes !== undefined
       ? authInfo.scopes
       : makeScopeSet(
@@ -132,6 +134,8 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
       {
         dryRun: typeof dryRunArg === 'boolean' ? dryRunArg : false,
         ...(authInfo?.stalwartApiKey !== undefined ? { bearerToken: authInfo.stalwartApiKey } : {}),
+        ...(authInfo?.id !== undefined ? { agentId: authInfo.id } : {}),
+        ...(authInfo?.name !== undefined ? { agentName: authInfo.name } : {}),
       },
     );
 
