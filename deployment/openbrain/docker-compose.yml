@@ -1,0 +1,108 @@
+# Iarsma + OpenBrain co-deployment recipe.
+#
+# Brings up:
+#   db       — postgres 16 + pgvector, persistent on `pgdata` volume
+#   ollama   — local embeddings server (nomic-embed-text, 768-dim)
+#   ob1      — OpenBrain MCP server built from the pinned upstream commit
+#
+# Quickstart:
+#   1. cp .env.example .env
+#   2. Edit `.env`: set MCP_ACCESS_KEY (mandatory) + chat creds (optional)
+#   3. docker compose up -d
+#   4. Wait for ollama to finish pulling the embed model (first run only)
+#   5. Point your Iarsma deployment at this service by setting
+#      IARSMA_MEMORY_BACKEND_URL=http://<host>:${OB1_HOST_PORT}/mcp on
+#      the webmail's MCP server / token-exchange.
+#
+# To swap to OpenRouter embeddings (1536-dim), see README.md.
+
+name: iarsma-openbrain
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openbrain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-openbrain}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No host port published — OB1 reaches the DB over the compose
+    # network. Uncomment if you want to attach psql from the host.
+    # ports:
+    #   - '127.0.0.1:5432:5432'
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      # Healthy once the API responds AND nomic-embed-text is present.
+      # The ollama-init service pulls the model on first run; this
+      # gate keeps ob1 from starting before embeddings are ready.
+      test:
+        - 'CMD-SHELL'
+        - 'ollama list 2>/dev/null | grep -q nomic-embed-text || exit 1'
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+    # No host port — OB1 talks to ollama over the compose network.
+
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_started
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      OLLAMA_HOST: 'http://ollama:11434'
+    entrypoint:
+      - sh
+      - -c
+      - 'ollama pull nomic-embed-text'
+    restart: 'no'
+
+  ob1:
+    # The OB1 server is Deno. We build the image from the pinned upstream
+    # commit at `integrations/kubernetes-deployment/` — that path's
+    # Dockerfile copies `index.ts` + `deno.json` and runs the server on
+    # port 8000. Bump OB1_REF in .env to upgrade.
+    build:
+      context: https://github.com/NateBJones-Projects/OB1.git#${OB1_REF:-main}:integrations/kubernetes-deployment
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: '5432'
+      DB_NAME: ${POSTGRES_DB:-openbrain}
+      DB_USER: ${POSTGRES_USER:-openbrain}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      MCP_ACCESS_KEY: ${MCP_ACCESS_KEY:?MCP_ACCESS_KEY must be set in .env}
+      EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-http://ollama:11434/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-ollama}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      CHAT_API_BASE: ${CHAT_API_BASE}
+      CHAT_API_KEY: ${CHAT_API_KEY}
+      CHAT_MODEL: ${CHAT_MODEL}
+      OPEN_BRAIN_CITATION_BASE_URL: ${OPEN_BRAIN_CITATION_BASE_URL:-https://openbrain.local/thoughts}
+      PORT: '8000'
+    ports:
+      - '${OB1_HOST_PORT:-8000}:8000'
+
+volumes:
+  pgdata:
+  ollama_models:

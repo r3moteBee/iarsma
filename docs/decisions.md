@@ -427,3 +427,31 @@ Holding the human-approved commit in the browser also makes the approval card th
 - OAuth App auth replacing PAT — Phase 5c (work items 10–12) when OpenBrain co-deploy lands and a real OAuth callback infrastructure already exists.
 - Cross-machine approval (proposal on host A, approval on host B) — needs JMAP push subscriptions, which Phase 5b deliberately leaves to the existing manual-refresh path in Approvals.
 - Conflict-resolution UI when GitHub returns 409 on commit — Phase 5b surfaces the raw error in the approval card; richer "rebase preview" lands with the Tier 2 (gitoxide) backend in a later phase.
+
+## D-054 — OpenBrain co-deploy: pinned upstream + bundled embed, BYO chat
+**Date:** 2026-05-31
+**Decision:** Phase 5c work item 10 ships a Docker Compose recipe under `deployment/openbrain/`. Three design choices anchor it:
+
+- **OB1 server image: pinned-by-default upstream build.** The recipe builds OB1 from `https://github.com/NateBJones-Projects/OB1.git#<sha>:integrations/kubernetes-deployment` with `OB1_REF` defaulting to a specific commit SHA. Operators who want latest set `OB1_REF=main`. Bumping the pin is a deliberate review event — the README documents `git diff <old> main -- integrations/kubernetes-deployment` as the canonical pre-bump check.
+- **Embeddings: bundled Ollama (`nomic-embed-text`, 768-dim) by default; OpenRouter as the documented swap.** The user's stated goal was "minimal configuration." Pinning to OpenRouter would require an API key at first boot; bundling Ollama removes that. Trade-off: nomic-embed-text is 768-dim, so the init SQL pins `vector(768)`; switching to OpenAI 1536-dim requires a one-time `docker compose down -v` (data loss) before re-init.
+- **Chat: BYO.** Hosting a chat model locally that's actually usable (a few seconds per response, not minutes) needs GPU or a serious CPU budget — outside what a small self-hosted operator brings. The recipe leaves `CHAT_API_BASE/KEY/MODEL` blank and documents both OpenRouter (one-line addition) and a local Ollama chat profile (heavier, slower).
+
+The memory-backend TS adapter (`shell/src/runtime/memory-backend.ts`) is **scaffold only** — no UI surface calls it yet. The shape is pinned now so the first real caller (likely a "user opened thread X" profile signal, or a "context this draft is replying to" lookup) doesn't have to discover it the hard way. Raw JSON-RPC over HTTP today; migrate to `@modelcontextprotocol/sdk/client/streamableHttp` when concurrent calls or session resumption matter.
+
+Work items 11 and 12 in the plan were already partially built in Phase 0 (the discovery URN schema reserved `memoryBackendUrl`; `IARSMA_MEMORY_BACKEND_URL` is already read by `mcp-server/src/agent-context.ts` and `token-exchange/src/discovery.ts`). Phase 5c added the end-to-end smoke test pinning that env → URN payload chain.
+
+**Why these choices, not the alternatives:**
+- Building from upstream rather than pulling a published image: there's no published OB1 image, and the K8s integration's Dockerfile is the authoritative recipe. Vendoring the Dockerfile into this repo would couple our release to upstream's, which is exactly what the pinning mechanism is designed to avoid.
+- Default Ollama rather than a Supabase-style cloud DB: the brief commits to self-hostability; making "first deploy needs a Supabase project" the default would contradict that.
+- Adapter as TS rather than via the WIT `MemoryBackend` component: the WIT contract today is only canonicalization functions. Extending it to cover HTTP storage means re-defining the host interface, regenerating Rust bindings, plus the cargo-component build dance — large surface area for a seam with zero callers. When the first caller arrives, lifting the TS adapter into a host-implemented WIT capability is a one-PR refactor.
+
+**How to apply:**
+- New OB1 versions: review the diff upstream, bump `OB1_REF` in `deployment/openbrain/.env.example`, rebuild. Don't pin in `docker-compose.yml` itself — keep it user-overridable.
+- New embedding models: if dimension changes, the init SQL has to change too. Document the alternative in `init/01-schema-<dim>.sql.example`; never let two dimensions land in one corpus.
+- First real caller of `memoryBackendUrl`: when wiring it in, check that the credential strategy (currently `getAuthToken: () => string | null`) actually has a token to return. The webmail does NOT store the OB1 `MCP_ACCESS_KEY` in IDB — the operator wires a per-session token through the same path used for the JMAP bearer.
+
+**Out of scope (follow-ups):**
+- A reverse proxy fronting OB1 with TLS — Phase 5c is the bring-up; production-grade exposure is operator-decided.
+- Per-principal isolation of thoughts — OB1 today is single-tenant from the agent's perspective; metadata-filter conventions for per-user isolation are a future OB1 upstream item.
+- Migrating the TS adapter into a WIT-backed `MemoryBackend` component — wait for the first real caller; refactor then.
+- Replacing the file-based pin with a Renovate / Dependabot rule — manual review of OB1 diffs is the right posture until the project stabilizes.
