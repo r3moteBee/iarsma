@@ -119,4 +119,27 @@ describe('createIarsmaMcpServer URN advertisement', () => {
     expect(caps[AGENT_CONTEXT_URN]).toEqual(ctx);
     expect(caps['tools']).toBeDefined();
   });
+
+  it('Phase 5c smoke: env IARSMA_MEMORY_BACKEND_URL flows through to the advertised URN', () => {
+    // End-to-end: env → loadAgentContext → createIarsmaMcpServer → caps.
+    // Pins the chain so an OB1 deploy that sets the env var actually
+    // surfaces the URL in the discovery URN agents read.
+    const ctx = loadAgentContext({
+      IARSMA_WEBMAIL_MCP_URL: 'https://sw-mail.example.net/mcp',
+      IARSMA_MEMORY_BACKEND_URL: 'https://ob1.example.net/mcp',
+    });
+    expect(ctx).not.toBeNull();
+    const server = createIarsmaMcpServer({
+      tools: new Map(),
+      ...(ctx !== null ? { agentContext: ctx } : {}),
+    });
+    const caps = (server as unknown as { _capabilities: Record<string, unknown> })
+      ._capabilities;
+    const advertised = caps[AGENT_CONTEXT_URN] as {
+      webmailMcpUrl: string;
+      memoryBackendUrl?: string;
+    };
+    expect(advertised.webmailMcpUrl).toBe('https://sw-mail.example.net/mcp');
+    expect(advertised.memoryBackendUrl).toBe('https://ob1.example.net/mcp');
+  });
 });
