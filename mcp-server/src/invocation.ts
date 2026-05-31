@@ -30,6 +30,11 @@ export type InvocationOptions = {
   /** Per-agent Stalwart API key override. When set, handlers use this
    *  instead of the shared IARSMA_AGENT_TOKEN for JMAP calls. */
   readonly bearerToken?: string;
+  /** Stable agent identifier (tokenId). Surfaced to handlers that need
+   *  to attribute side-effects — e.g. approval records. */
+  readonly agentId?: string;
+  /** Human-readable agent label. */
+  readonly agentName?: string;
 };
 
 export type InvocationResult =
@@ -60,7 +65,13 @@ export type DispatcherDeps = {
 
 export type ToolHandler = (
   input: unknown,
-  ctx: { readonly dryRun: boolean; readonly scopes: ScopeSet; readonly bearerToken?: string },
+  ctx: {
+    readonly dryRun: boolean;
+    readonly scopes: ScopeSet;
+    readonly bearerToken?: string;
+    readonly agentId?: string;
+    readonly agentName?: string;
+  },
 ) => Promise<unknown>;
 
 export function createDispatcher(deps: DispatcherDeps): Dispatcher {
@@ -105,6 +116,8 @@ export function createDispatcher(deps: DispatcherDeps): Dispatcher {
           dryRun,
           scopes: callerScopes,
           ...(options.bearerToken !== undefined ? { bearerToken: options.bearerToken } : {}),
+          ...(options.agentId !== undefined ? { agentId: options.agentId } : {}),
+          ...(options.agentName !== undefined ? { agentName: options.agentName } : {}),
         });
         return dryRun ? { kind: 'preview', preview: output } : { kind: 'ok', output };
       } catch (e) {

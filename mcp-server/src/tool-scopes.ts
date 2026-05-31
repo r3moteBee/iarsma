@@ -31,6 +31,9 @@ export const TOOL_SCOPES: Readonly<Record<string, string>> = {
   'mail.send': 'mail:send',
   'mail.modify': 'mail:modify',
   'mail.delete': 'mail:delete',
+  'files.list': 'files:read',
+  'files.read': 'files:read',
+  'files.propose_write': 'files:write',
 } as const;
 
 /**

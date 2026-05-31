@@ -406,3 +406,24 @@ The persistent store is encrypted because the params often carry mailbox + threa
 **Date:** 2026-04-26
 **Decision:** The project is named **Iarsma** (Irish, "EER-sma" — *relic, artifact, durable remnant*). Domains owned: `iarsma.com` (primary user-facing) and `iarsma.io` (developer-facing). The `.ai` TLD was deliberately *not* purchased — Iarsma is communication infrastructure, not an AI product, and the `.ai` framing would mis-position it. Use `Iarsma` as the proper noun in prose and titles; `iarsma` as the lowercase identifier in package names, URNs (`urn:iarsma:agent-context`), and component namespaces (`iarsma:jmap-client@0.0.0`).
 **Why:** Lugh was eliminated by a Microsoft AI-agent project conflict plus pronunciation gate. Tessera was eliminated by parallel conflicts with a Rust UI framework and a Python AI-agent context tool. Iarsma came up clean across every surface — `.com` at standard pricing (strongest no-squatter signal), `github.com/iarsma` available, npm + crates.io packages free, no software-search collisions. The metaphor — "the durable artifact that carries meaning across time" — describes what mail actually is, and the Irish root preserves ecosystem coherence with `tuatha` (the agent harness, also Irish mythology). Brent's framing — "durable message" is a sharper metaphor than security-token — guided the search.
+
+## D-053 — Files MCP tools: server proposes, browser commits
+**Date:** 2026-05-31
+**Decision:** Phase 5b's `files.*` MCP tools split GitHub access across two configs that never share write credentials:
+
+- **MCP server (Node)** holds a read-only GitHub PAT, loaded from `IARSMA_GITHUB_TOKEN/OWNER/REPO/BRANCH` env vars or `run/github-config.json`. The server can `files.list` and `files.read` from GitHub, but `files.propose_write` never touches the GitHub API — it appends a pending approval to the user's JMAP `Approvals` mailbox using the agent's per-token `stalwartApiKey` (D-049 / Phase 3a).
+- **Browser (shell)** holds the human's existing IDB-stored PAT (Phase 5a, D-029-adjacent). When the user clicks Approve in the Approvals view, the browser dispatches by `toolName` and executes the actual GitHub commit through the existing `githubClient.write()` — passing along the `baseSha` captured at proposal time so concurrent edits surface as a conflict.
+
+**Why:** A single co-located write credential would have been simpler to wire, but it concentrates the highest-risk authority (push to any branch) in two places — the human's browser AND the always-on MCP server agents connect to. Splitting the credential along the read/write axis matches the brief's threat model: agents can propose freely (low blast radius), but the act that turns a proposal into a commit always happens with a credential the human controls. It also removes a class of bug: an MCP server bug or compromise can leak read access but cannot push.
+
+Holding the human-approved commit in the browser also makes the approval card the natural failure boundary for "concurrent edit caught by GitHub" — the browser sees the 409, surfaces it in the same UI where the human clicked, and can re-render with the up-to-date base SHA. A server-side committer would have to either poll for approval (extra moving parts) or expose a webhook (extra attack surface) to know when to act.
+
+**How to apply:**
+- New `files.*` tools that need write access follow the same split: dry-run is read-only against the server-side PAT; commit appends an approval. The browser executor dispatches by tool name (see `executeApprovedAction` in `shell/src/App.tsx`).
+- New approve-able tools — file-level OR mail/calendar/contacts — must add an explicit case to `executeApprovedAction`. The dispatch is deliberately not a registry so the auth posture for each new executor is reviewed individually before it lands. A missing case throws.
+- The MCP server NEVER caches an authorization decision: every commit goes through the approval mailbox round-trip even when the same agent has previously had similar writes approved. The audit trail (D-052) and the friction are both load-bearing.
+
+**Out of scope (follow-ups):**
+- OAuth App auth replacing PAT — Phase 5c (work items 10–12) when OpenBrain co-deploy lands and a real OAuth callback infrastructure already exists.
+- Cross-machine approval (proposal on host A, approval on host B) — needs JMAP push subscriptions, which Phase 5b deliberately leaves to the existing manual-refresh path in Approvals.
+- Conflict-resolution UI when GitHub returns 409 on commit — Phase 5b surfaces the raw error in the approval card; richer "rebase preview" lands with the Tier 2 (gitoxide) backend in a later phase.

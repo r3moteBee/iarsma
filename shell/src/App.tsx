@@ -45,6 +45,11 @@ import { githubClient, type GitHubConfig } from './runtime/github-client.js';
 import { indexedDbGitHubConfigStore, inMemoryGitHubConfigStore, type GitHubStoredConfig } from './runtime/github-config-store.js';
 import { ActivityView } from './views/activity-view.js';
 import { ApprovalsView } from './views/approvals-view.js';
+import {
+  jmapApprovalStore,
+  type ApprovalRequest,
+  type ApprovalStore,
+} from './runtime/approval-store.js';
 import { CalendarView } from './views/calendar-view.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { SignedOutView } from './views/signed-out-view.js';
@@ -199,6 +204,106 @@ function Shell({ config }: { readonly config: ShellConfig }) {
   return (
     <SignedInShell config={config} resolvedTheme={resolvedTheme} />
   );
+}
+
+/**
+ * Map a JMAP `ApprovalRequest` to the `ApprovalCardData` the view expects.
+ * The summary is a one-line human-readable description of what the agent
+ * is asking for — derived from the tool name + params.
+ */
+function toApprovalCard(req: ApprovalRequest): {
+  readonly id: string;
+  readonly toolName: string;
+  readonly agentName: string;
+  readonly summary: string;
+  readonly requestedAt: string;
+  readonly status: 'pending' | 'approved' | 'denied';
+  readonly preview: unknown;
+  readonly params: unknown;
+} {
+  return {
+    id: req.id,
+    toolName: req.toolName,
+    agentName: req.requestingAgentName || req.requestingAgentId,
+    summary: summarizeApproval(req),
+    requestedAt: req.requestedAt,
+    status: req.status,
+    preview: req.preview,
+    params: req.params,
+  };
+}
+
+function summarizeApproval(req: ApprovalRequest): string {
+  switch (req.toolName) {
+    case 'files.propose_write': {
+      const p = req.params as { path?: unknown; message?: unknown };
+      if (typeof p.path === 'string' && typeof p.message === 'string') {
+        return `${p.path}: ${p.message}`;
+      }
+      return req.toolName;
+    }
+    default:
+      return req.toolName;
+  }
+}
+
+/**
+ * Dispatch an approved action by tool name (Phase 5b, D-053).
+ *
+ * The MCP server appends pending approvals but never executes destructive
+ * GitHub writes — the browser holds those credentials. When the human
+ * approves, this function runs the underlying action using the user's
+ * IDB-backed GitHub PAT, then the caller flips the approval keyword to
+ * `$approval_approved` via the JMAP store.
+ *
+ * Per-tool dispatch is intentionally explicit (no registry of executors)
+ * so the auth posture for each new approve-able tool is reviewed
+ * individually before it lands.
+ */
+async function executeApprovedAction(
+  approval: ApprovalRequest,
+  gh: ReturnType<typeof githubClient> | null,
+): Promise<void> {
+  switch (approval.toolName) {
+    case 'files.propose_write': {
+      if (gh === null) {
+        throw new Error(
+          'Cannot execute files.propose_write — GitHub is not connected in the browser. ' +
+            'Connect under Settings → GitHub Files before approving.',
+        );
+      }
+      const params = approval.params as {
+        path?: unknown;
+        content?: unknown;
+        message?: unknown;
+      };
+      const preview = approval.preview as {
+        diff?: { baseSha?: unknown; isCreate?: unknown };
+      };
+      if (
+        typeof params.path !== 'string' ||
+        typeof params.content !== 'string' ||
+        typeof params.message !== 'string'
+      ) {
+        throw new Error('files.propose_write approval is missing path/content/message.');
+      }
+      const baseSha =
+        typeof preview.diff?.baseSha === 'string' && preview.diff.baseSha.length > 0
+          ? preview.diff.baseSha
+          : undefined;
+      await gh.write(
+        params.path,
+        params.content,
+        params.message,
+        ...(baseSha !== undefined ? [baseSha] : []),
+      );
+      return;
+    }
+    default:
+      throw new Error(
+        `Approval execution for tool '${approval.toolName}' is not wired in this browser build.`,
+      );
+  }
 }
 
 /**
@@ -377,6 +482,19 @@ function SignedInShell({
     };
   }, []);
 
+  // ─── Approval queue state ───────────────────────────────────────
+  // The store reads from a dedicated "Approvals" JMAP mailbox the MCP
+  // server appends to via `files.propose_write` (Phase 5b, D-053).
+  const approvalStore = useMemo<ApprovalStore>(
+    () =>
+      jmapApprovalStore({
+        baseUrl: config.jmapBaseUrl ?? config.oidcIssuer,
+        getAuthToken: () => authStorage.loadTokens()?.accessToken ?? null,
+      }),
+    [config],
+  );
+  const [approvals, setApprovals] = useState<readonly ApprovalRequest[]>([]);
+
   // ─── GitHub Files state ─────────────────────────────────────────
   const githubConfigStore = useMemo(
     () =>
@@ -402,6 +520,22 @@ function SignedInShell({
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [githubConfigStore]);
+
+  // Refresh the approval list every time the user opens the Approvals view.
+  // Polling is intentionally manual — push subscriptions land in a later
+  // phase. For Phase 5b the user navigates to the view to see new approvals.
+  useEffect(() => {
+    if (activeView !== 'approvals') return;
+    let cancelled = false;
+    approvalStore.list({ status: 'pending' })
+      .then((list) => {
+        if (!cancelled) setApprovals(list);
+      })
+      .catch(() => {
+        if (!cancelled) setApprovals([]);
+      });
+    return () => { cancelled = true; };
+  }, [activeView, approvalStore, crudRefresh]);
 
   const gh = useMemo(() => {
     if (githubConfig === null) return null;
@@ -770,9 +904,18 @@ function SignedInShell({
           />
         ) : activeView === 'approvals' ? (
           <ApprovalsView
-            approvals={[]}
-            onApprove={async () => {}}
-            onDeny={async () => {}}
+            approvals={approvals.map(toApprovalCard)}
+            onApprove={async (id) => {
+              const approval = approvals.find((a) => a.id === id);
+              if (approval === undefined) return;
+              await executeApprovedAction(approval, gh);
+              await approvalStore.approve(id);
+              setCrudRefresh((n) => n + 1);
+            }}
+            onDeny={async (id) => {
+              await approvalStore.deny(id);
+              setCrudRefresh((n) => n + 1);
+            }}
           />
         ) : activeView === 'activity' ? (
           <ActivityView
