@@ -44,14 +44,23 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { tokensAtom } from '../auth-state.js';
+import { Button } from '../components/button.js';
 import { EmptyState } from '../components/empty-state.js';
 import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
 import { selectedThreadIdAtom } from '../mail-state.js';
 import { useThreadGet } from '../generated/capabilities/thread-get.js';
+import { useInvoker } from '../runtime/invoker.js';
 import { sanitizeHtml } from '../runtime/sanitizer.js';
 import type { EmailFull } from '../runtime/jmap-client.js';
+import {
+  classifySender,
+  colorFor,
+  initialsFor,
+  type SenderKind,
+} from '../runtime/sender-color.js';
 import { buildReplyPrefill, type ReplyMode } from './reply-prefill.js';
+import styles from './thread-view.module.css';
 
 export function ThreadView() {
   const threadId = useAtomValue(selectedThreadIdAtom);
@@ -69,25 +78,27 @@ export function ThreadView() {
 }
 
 function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
-  const { data, error, isLoading } = useThreadGet({ threadId });
+  const { data, error, isLoading, refetch } = useThreadGet({ threadId });
 
   if (isLoading) {
     return (
-      <section aria-label="Thread" aria-busy="true">
+      <section aria-label="Thread" aria-busy="true" className={styles['pane']}>
         <ThreadLoadingSkeleton />
       </section>
     );
   }
   if (error !== undefined) {
     return (
-      <section aria-label="Thread">
-        <p role="alert">Failed to load thread: {error.message}</p>
+      <section aria-label="Thread" className={styles['pane']}>
+        <p role="alert" className={styles['error']}>
+          Failed to load thread: {error.message}
+        </p>
       </section>
     );
   }
   if (data === undefined || data.emails.length === 0) {
     return (
-      <section aria-label="Thread">
+      <section aria-label="Thread" className={styles['pane']}>
         <EmptyState
           title="This thread is empty"
           description="The conversation has no messages to display."
@@ -96,16 +107,24 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
     );
   }
 
-  return <ThreadViewLoaded emails={data.emails as ReadonlyArray<EmailFull>} />;
+  return (
+    <ThreadViewLoaded
+      emails={data.emails as ReadonlyArray<EmailFull>}
+      refetch={refetch}
+    />
+  );
 }
 
 function ThreadViewLoaded({
   emails,
+  refetch,
 }: {
   readonly emails: ReadonlyArray<EmailFull>;
+  readonly refetch: () => Promise<void>;
 }) {
   const tokens = useAtomValue(tokensAtom);
   const setComposeState = useSetAtom(composeStateAtom);
+  const invoker = useInvoker();
   const userEmail = tokens?.email ?? 'unknown@example.invalid';
   // Latest message is auto-expanded; older messages start collapsed.
   // Selection is keyed by index — emails are immutable per render so
@@ -154,9 +173,13 @@ function ThreadViewLoaded({
     [emails.length],
   );
 
-  const replyToFocused = useCallback(
+  // Reply / Reply-all / Forward — handlers used by both the keyboard
+  // model (r / R) and the sticky reply bar below. The user replies to
+  // the *focused* message (which defaults to the latest), so the
+  // shortcut and the bar click stay aligned.
+  const replyTo = useCallback(
     (mode: ReplyMode) => {
-      const target = emails[focusedIndex];
+      const target = emails[focusedIndex] ?? emails[emails.length - 1];
       if (target === undefined) return;
       setComposeState({
         kind: 'open',
@@ -188,39 +211,69 @@ function ThreadViewLoaded({
           // reply-all. We branch on the literal key value so the
           // shifted key is detected reliably across layouts.
           event.preventDefault();
-          replyToFocused('reply');
+          replyTo('reply');
           break;
         case 'R':
           event.preventDefault();
-          replyToFocused('reply-all');
+          replyTo('reply-all');
           break;
       }
     },
-    [moveFocus, expandAll, replyToFocused],
+    [moveFocus, expandAll, replyTo],
   );
 
+  // Whole-thread mark-read/unread toggle. JMAP supports patching many
+  // emailIds in one mail.modify call, so the whole thread flips in a
+  // single round-trip. `seen` is derived from the LATEST email — that
+  // matches mail-client convention (a thread is "unread" iff its
+  // newest message is unread). After the modify, refetch() so the
+  // header re-renders with the new derived state.
+  const threadSeen =
+    emails[emails.length - 1]?.keywords.find((k) => k.name === '$seen')?.value ?? false;
+  const toggleThreadSeen = useCallback(() => {
+    const next = !threadSeen;
+    void (async () => {
+      try {
+        await invoker.invoke('mail.modify', {
+          emailIds: emails.map((e) => e.id),
+          patch: { 'keywords/$seen': next ? true : null },
+        });
+        await refetch();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] mail.modify $seen failed:', e);
+      }
+    })();
+  }, [invoker, refetch, emails, threadSeen]);
+
+  const subject = emails[emails.length - 1]?.subject ?? '(no subject)';
+  const messageCountLabel = `${emails.length} ${emails.length === 1 ? 'message' : 'messages'}`;
+
   return (
-    // onKeyDown lives on the outer section so that DOM events from
-    // any focused message bubble up to a single handler. Tests fire
-    // keyDown on this region; production focus is on a message
-    // article's tabIndex=0 root.
-    <section aria-label="Thread" onKeyDown={onKeyDown}>
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'baseline',
-          marginBottom: '0.5em',
-        }}
-      >
-        <h2 style={{ margin: 0 }}>
-          {emails[emails.length - 1]?.subject ?? '(no subject)'}
-        </h2>
-        <span aria-live="polite">
-          {emails.length} {emails.length === 1 ? 'message' : 'messages'}
-        </span>
+    // onKeyDown lives on the outer section so DOM events from any
+    // focused message bubble to a single handler.
+    <section aria-label="Thread" onKeyDown={onKeyDown} className={styles['pane']}>
+      <header className={styles['header']}>
+        <div className={styles['titleRow']}>
+          <h2 className={styles['title']}>{subject}</h2>
+          <span className={styles['sub']} aria-live="polite">
+            {messageCountLabel}
+          </span>
+        </div>
+        <div className={styles['actions']} aria-label="Thread actions">
+          <button
+            type="button"
+            className={styles['iconBtn']}
+            onClick={toggleThreadSeen}
+            aria-label={threadSeen ? 'Mark thread unread' : 'Mark thread read'}
+            aria-pressed={!threadSeen}
+            title={threadSeen ? 'Mark unread' : 'Mark read'}
+          >
+            {threadSeen ? <MarkUnreadIcon /> : <MarkReadIcon />}
+          </button>
+        </div>
       </header>
-      <div>
+      <div className={styles['msgs']}>
         {emails.map((email, index) => (
           <MessageView
             key={email.id}
@@ -234,7 +287,37 @@ function ThreadViewLoaded({
           />
         ))}
       </div>
+      <div className={styles['replyBar']} role="group" aria-label="Reply actions">
+        <Button variant="primary" onClick={() => replyTo('reply')}>
+          Reply
+        </Button>
+        <Button variant="secondary" onClick={() => replyTo('reply-all')}>
+          Reply all
+        </Button>
+        <Button variant="ghost" onClick={() => replyTo('forward')}>
+          Forward
+        </Button>
+      </div>
     </section>
+  );
+}
+
+// ── Inline SVG icons ──────────────────────────────────────────────
+
+function MarkReadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </svg>
+  );
+}
+
+function MarkUnreadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M22 7l-10 7L2 7" />
+    </svg>
   );
 }
 
@@ -256,9 +339,21 @@ function MessageView(props: {
     return sanitizeHtml(email.bodyHtml, externalContentAllowed);
   }, [email.bodyHtml, externalContentAllowed]);
 
-  const sender = formatAddress(email.from?.[0]);
+  const fromAddress = email.from?.[0];
+  const senderName = fromAddress?.name ?? fromAddress?.email ?? '(no sender)';
+  const senderEmail = fromAddress?.email ?? '';
   const recipients = formatRecipients(email);
   const date = formatDate(email.receivedAt);
+
+  // Sender avatar — reuses the rule from sender-color.ts. Agent
+  // detection isn't wired here yet (Phase 4 reserved for the
+  // provenance layer); humans + system are classified by the
+  // address/display-name heuristic.
+  const kind: SenderKind = senderEmail !== ''
+    ? classifySender(senderEmail, fromAddress?.name)
+    : 'human';
+  const initials = initialsFor(fromAddress?.name, senderEmail);
+  const avatarColor = colorFor(senderEmail || senderName, kind);
 
   // Whether the original html had any URL-bearing image src that the
   // default-off sanitizer would strip — used to decide whether to
@@ -276,154 +371,84 @@ function MessageView(props: {
       aria-expanded={isExpanded}
       tabIndex={isFocused ? 0 : -1}
       data-message-id={email.id}
-      style={{
-        border: '1px solid var(--surface-3)',
-        borderRadius: 4,
-        marginBottom: '0.5em',
-        background: 'var(--surface-1)',
-        color: 'var(--text-1)',
-        outline: 'inherit',
-      }}
+      className={styles['msgCard']}
     >
-      <header
-        // Header is clickable to toggle. Implemented as a button so
-        // a11y tools see the affordance and Enter/Space activate it.
-        style={{ padding: '0.5em 0.75em' }}
+      {/* Clickable header — toggles expanded state. Implemented as a
+       * single <button> for a11y so Enter/Space activate it. */}
+      <button
+        type="button"
+        onClick={onToggleExpand}
+        aria-expanded={isExpanded}
+        aria-controls={`message-body-${email.id}`}
+        className={styles['msgHead']}
       >
-        <button
-          type="button"
-          onClick={onToggleExpand}
-          aria-expanded={isExpanded}
-          aria-controls={`message-body-${email.id}`}
-          style={{
-            display: 'block',
-            width: '100%',
-            textAlign: 'left',
-            background: 'none',
-            border: 'none',
-            padding: 0,
-            font: 'inherit',
-            color: 'inherit',
-            cursor: 'pointer',
-          }}
+        <span
+          className={styles['msgAvatar']}
+          style={{ background: avatarColor }}
+          aria-hidden="true"
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5em' }}>
-            <strong>{sender}</strong>
-            <span style={{ flex: '0 0 auto', color: 'var(--text-2)' }}>{date}</span>
-          </div>
-          {!isExpanded && email.preview !== undefined ? (
-            <div
-              style={{
-                color: 'var(--text-2)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                marginTop: '0.25em',
-              }}
-            >
-              {email.preview}
-            </div>
+          {initials}
+        </span>
+        <span className={styles['msgWho']}>
+          <span className={styles['msgName']}>{senderName}</span>
+          {senderEmail !== '' && senderEmail !== senderName ? (
+            <span className={styles['msgEmail']}>{senderEmail}</span>
           ) : null}
-          {isExpanded && recipients !== null ? (
-            <div style={{ color: 'var(--text-2)', marginTop: '0.25em', fontSize: '0.9em' }}>
-              {recipients}
-            </div>
-          ) : null}
-        </button>
-      </header>
+        </span>
+        <span className={styles['msgDate']}>{date}</span>
+      </button>
+      {!isExpanded && email.preview !== undefined && email.preview.length > 0 ? (
+        <div className={styles['msgPreview']}>{email.preview}</div>
+      ) : null}
+      {isExpanded && recipients !== null ? (
+        <div className={styles['msgRecip']}>{recipients}</div>
+      ) : null}
       {isExpanded ? (
-        <div
-          id={`message-body-${email.id}`}
-          role="region"
-          aria-label="Message body"
-          style={{ padding: '0 0.75em 0.75em' }}
-        >
+        <>
           {hasExternalImages && !externalContentAllowed ? (
-            <p
-              style={{
-                background: 'var(--surface-2)',
-                padding: '0.5em',
-                borderRadius: 4,
-                margin: '0 0 0.75em',
-                color: 'var(--text-2)',
-              }}
-            >
-              External images are blocked.{' '}
-              <button
-                type="button"
+            <div className={styles['notice']} role="status">
+              <span className={styles['noticeText']}>External images are blocked.</span>
+              <Button
+                size="sm"
+                variant="ghost"
                 onClick={() => setExternalContentAllowed(true)}
-                aria-label={`Show external images in this message from ${sender}`}
+                aria-label={`Show external images in this message from ${senderName}`}
               >
                 Show
-              </button>
-            </p>
+              </Button>
+            </div>
           ) : null}
-          {sanitized !== null ? (
-            <div
-              data-testid="message-html-body"
-              // sanitizeHtml ran above. The output is the security
-              // boundary — never bypass it for sender-controlled bytes.
-              // eslint-disable-next-line react/no-danger
-              dangerouslySetInnerHTML={{ __html: sanitized }}
-            />
-          ) : email.bodyText !== undefined && email.bodyText.length > 0 ? (
-            <pre
-              data-testid="message-text-body"
-              style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 }}
-            >
-              {email.bodyText}
-            </pre>
-          ) : (
-            <p style={{ color: 'var(--text-3)' }}>(empty body)</p>
-          )}
-          {email.attachments.length > 0 ? (
-            <Attachments email={email} />
-          ) : null}
-          <ReplyActions email={email} />
-        </div>
+          <div
+            id={`message-body-${email.id}`}
+            role="region"
+            aria-label="Message body"
+            className={styles['msgBody']}
+          >
+            {sanitized !== null ? (
+              <div
+                data-testid="message-html-body"
+                // sanitizeHtml ran above. The output is the security
+                // boundary — never bypass it for sender-controlled bytes.
+                // eslint-disable-next-line react/no-danger
+                dangerouslySetInnerHTML={{ __html: sanitized }}
+              />
+            ) : email.bodyText !== undefined && email.bodyText.length > 0 ? (
+              <pre data-testid="message-text-body">{email.bodyText}</pre>
+            ) : (
+              <p className={styles['msgEmpty']}>(empty body)</p>
+            )}
+          </div>
+          {email.attachments.length > 0 ? <Attachments email={email} /> : null}
+        </>
       ) : null}
     </article>
   );
 }
 
-/**
- * Reply / Reply All / Forward action row — appears under the body of
- * each expanded message. Click → buildReplyPrefill → composeStateAtom
- * flips to `'open'` with the prefilled fields. The keyboard model
- * (`r`, `R`) wires the same actions globally on the focused message.
- */
-function ReplyActions({ email }: { readonly email: EmailFull }) {
-  const tokens = useAtomValue(tokensAtom);
-  const setComposeState = useSetAtom(composeStateAtom);
-  const userEmail = tokens?.email ?? 'unknown@example.invalid';
-  const open = (mode: ReplyMode) => {
-    setComposeState({
-      kind: 'open',
-      prefill: buildReplyPrefill({ email, mode, userEmail }),
-    });
-  };
-  return (
-    <div
-      style={{
-        display: 'flex',
-        gap: '0.5em',
-        marginTop: '0.75em',
-        paddingTop: '0.5em',
-        borderTop: '1px solid var(--surface-3)',
-      }}
-    >
-      <button type="button" onClick={() => open('reply')}>
-        Reply
-      </button>
-      <button type="button" onClick={() => open('reply-all')}>
-        Reply all
-      </button>
-      <button type="button" onClick={() => open('forward')}>
-        Forward
-      </button>
-    </div>
-  );
-}
+/* PR 5: per-message ReplyActions deleted — Reply / Reply all / Forward
+ * now live in the sticky bar at the bottom of the pane (see
+ * ThreadViewLoaded). The keyboard shortcuts (`r`, `R`) still target
+ * the focused message via the parent's `replyTo`. */
 
 function Attachments({ email }: { readonly email: EmailFull }) {
   // Inline (cid:-referenced) attachments are typically rendered inside
@@ -434,36 +459,15 @@ function Attachments({ email }: { readonly email: EmailFull }) {
   );
   if (visible.length === 0) return null;
   return (
-    <section aria-label="Attachments" style={{ marginTop: '0.75em' }}>
-      <h3 style={{ fontSize: '0.95em', margin: '0 0 0.25em' }}>
-        Attachments ({visible.length})
-      </h3>
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-        {visible.map((a) => (
-          <li
-            key={a.id}
-            style={{
-              display: 'flex',
-              gap: '0.5em',
-              padding: '0.25em 0',
-              borderTop: '1px solid var(--surface-3)',
-            }}
-          >
-            <span style={{ flex: '1 1 auto' }}>{a.name ?? '(unnamed)'}</span>
-            <span style={{ flex: '0 0 auto', color: 'var(--text-2)' }}>{a.type}</span>
-            <span style={{ flex: '0 0 auto', color: 'var(--text-2)', fontVariantNumeric: 'tabular-nums' }}>
-              {formatBytes(a.size)}
-            </span>
-          </li>
-        ))}
-      </ul>
+    <section aria-label="Attachments" className={styles['attach']}>
+      {visible.map((a) => (
+        <span key={a.id} className={styles['attachItem']}>
+          <span>{a.name ?? '(unnamed)'}</span>
+          <span className={styles['attachSize']}>{formatBytes(a.size)}</span>
+        </span>
+      ))}
     </section>
   );
-}
-
-function formatAddress(a: { name?: string; email: string } | undefined): string {
-  if (a === undefined) return '(no sender)';
-  return a.name !== undefined ? `${a.name} <${a.email}>` : a.email;
 }
 
 function formatRecipients(email: EmailFull): string | null {
