@@ -6,15 +6,30 @@
  * its own pure module so it's trivially testable + reusable from
  * future consumers (calendar/contacts have similar parent-child
  * hierarchies in JMAP per RFC 8621).
+ *
+ * PR 3.5: generalized to accept any record shape carrying the four
+ * fields the fold cares about (id, name, parentId?, sortOrder?). The
+ * sidebar's slimmer `MailboxEntry` shape flows through alongside the
+ * full JMAP `Mailbox`; missing `sortOrder` defaults to 0 so unsorted
+ * input falls back to alphabetical by name.
  */
 
-import type { Mailbox } from '../runtime/jmap-client.js';
+/**
+ * Minimal shape `foldMailboxTree` consumes. Both `Mailbox` (the JMAP
+ * type) and `MailboxEntry` (the sidebar's projection) satisfy it.
+ */
+export type MailboxLike = {
+  readonly id: string;
+  readonly name: string;
+  readonly parentId?: string | null;
+  readonly sortOrder?: number;
+};
 
-export type MailboxTreeNode = {
-  readonly mailbox: Mailbox;
+export type MailboxTreeNode<T extends MailboxLike = MailboxLike> = {
+  readonly mailbox: T;
   /** Depth from the root (0 = top-level). */
   readonly depth: number;
-  readonly children: ReadonlyArray<MailboxTreeNode>;
+  readonly children: ReadonlyArray<MailboxTreeNode<T>>;
 };
 
 /**
@@ -32,24 +47,28 @@ export type MailboxTreeNode = {
  * **Cycles** (rare; would imply a server bug) are broken by treating
  * any node revisited during the depth walk as a top-level entry.
  */
-export function foldMailboxTree(flat: ReadonlyArray<Mailbox>): MailboxTreeNode[] {
+export function foldMailboxTree<T extends MailboxLike>(
+  flat: ReadonlyArray<T>,
+): MailboxTreeNode<T>[] {
   if (flat.length === 0) return [];
 
   // Index by id for O(1) parent lookup.
-  const byId = new Map<string, Mailbox>();
+  const byId = new Map<string, T>();
   for (const m of flat) byId.set(m.id, m);
 
   // Group children under each parent id. A `null` key holds top-level
   // mailboxes plus any orphan / cycle-broken nodes (see below).
-  const childrenOf = new Map<string | null, Mailbox[]>();
-  function addChild(parent: string | null, child: Mailbox): void {
+  const childrenOf = new Map<string | null, T[]>();
+  function addChild(parent: string | null, child: T): void {
     const list = childrenOf.get(parent);
     if (list === undefined) childrenOf.set(parent, [child]);
     else list.push(child);
   }
 
   for (const m of flat) {
-    if (m.parentId === undefined) {
+    // Treat both `undefined` and `null` parentId as top-level (the JMAP
+    // type uses undefined; the sidebar's MailboxEntry uses null).
+    if (m.parentId === undefined || m.parentId === null) {
       addChild(null, m);
       continue;
     }
@@ -69,7 +88,7 @@ export function foldMailboxTree(flat: ReadonlyArray<Mailbox>): MailboxTreeNode[]
 
   const visited = new Set<string>();
 
-  function buildNode(m: Mailbox, depth: number): MailboxTreeNode {
+  function buildNode(m: T, depth: number): MailboxTreeNode<T> {
     visited.add(m.id);
     const rawChildren = childrenOf.get(m.id) ?? [];
     const children = sortRows(rawChildren)
@@ -87,12 +106,12 @@ export function foldMailboxTree(flat: ReadonlyArray<Mailbox>): MailboxTreeNode[]
  * state. Used by the keyboard handler to compute next/previous focus
  * targets without re-walking the tree on every keypress.
  */
-export function flattenVisible(
-  tree: ReadonlyArray<MailboxTreeNode>,
+export function flattenVisible<T extends MailboxLike>(
+  tree: ReadonlyArray<MailboxTreeNode<T>>,
   isExpanded: (id: string) => boolean,
-): MailboxTreeNode[] {
-  const out: MailboxTreeNode[] = [];
-  function walk(node: MailboxTreeNode): void {
+): MailboxTreeNode<T>[] {
+  const out: MailboxTreeNode<T>[] = [];
+  function walk(node: MailboxTreeNode<T>): void {
     out.push(node);
     if (node.children.length === 0) return;
     if (!isExpanded(node.mailbox.id)) return;
@@ -102,9 +121,11 @@ export function flattenVisible(
   return out;
 }
 
-function sortRows(rows: ReadonlyArray<Mailbox>): Mailbox[] {
+function sortRows<T extends MailboxLike>(rows: ReadonlyArray<T>): T[] {
   return [...rows].sort((a, b) => {
-    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    const ao = a.sortOrder ?? 0;
+    const bo = b.sortOrder ?? 0;
+    if (ao !== bo) return ao - bo;
     return a.name.localeCompare(b.name);
   });
 }

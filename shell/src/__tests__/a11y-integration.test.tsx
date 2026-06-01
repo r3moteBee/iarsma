@@ -57,7 +57,7 @@ vi.mock('@tanstack/react-virtual', () => ({
 import { selectedMailboxIdAtom } from '../mail-state.js';
 import { IarsmaProvider, mockInvoker } from '../runtime/index.js';
 import type { Invoker } from '../runtime/index.js';
-import { MailboxList } from '../views/mailbox-list.js';
+import { MailboxTreeView, type MailboxRow } from '../components/mailbox-tree-view.js';
 import { ThreadList } from '../views/thread-list.js';
 import { ThreadView } from '../views/thread-view.js';
 import { runAxe } from './util/axe.js';
@@ -103,6 +103,13 @@ const MAILBOX_FIXTURES = [
     unreadThreads: 0,
     myRights: RIGHTS,
   },
+];
+
+// MailboxTreeView is props-driven — give it the slim row shape directly
+// instead of routing through the `mailbox.list` invoker mock.
+const MAILBOX_ROWS: ReadonlyArray<MailboxRow> = [
+  { id: 'Mb01', name: 'Inbox', role: 'inbox', unreadCount: 1, sortOrder: 0 },
+  { id: 'Mb02', name: 'Sent', role: 'sent', unreadCount: 0, sortOrder: 1 },
 ];
 
 const THREAD_LIST_FIXTURES = {
@@ -193,7 +200,11 @@ function SignedInHarness() {
           </span>
         </header>
         <aside aria-label="Mailbox sidebar">
-          <MailboxList />
+          <MailboxTreeView
+            mailboxes={MAILBOX_ROWS}
+            selectedId="Mb01"
+            onSelect={(id) => setSelectedMailboxId(id)}
+          />
         </aside>
         <section aria-label="Selected mailbox">
           <ThreadList />
