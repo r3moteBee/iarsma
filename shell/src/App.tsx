@@ -51,11 +51,13 @@ import {
   type ApprovalStore,
 } from './runtime/approval-store.js';
 import { CalendarView } from './views/calendar-view.js';
+import { CommandPalette, type CommandItem } from './components/command-palette.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { SignedOutView } from './views/signed-out-view.js';
 import { ThreadList } from './views/thread-list.js';
 import { ThreadView } from './views/thread-view.js';
 import layoutStyles from './styles/layout.module.css';
+import mailLayoutStyles from './styles/mail-layout.module.css';
 
 type Phase =
   | { kind: 'loading' }
@@ -327,6 +329,7 @@ function SignedInShell({
   const [themePreference, setThemePreference] = useAtom(themePreferenceAtom);
   const setCompose = useSetAtom(composeStateAtom);
   const openCompose = useCallback(() => setCompose({ kind: 'open', prefill: {} }), [setCompose]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const session = useSessionGet({});
   const tokens = useAtomValue(tokensAtom);
   const bumpAuth = useSetAtom(authVersionAtom);
@@ -661,6 +664,34 @@ function SignedInShell({
     })();
   }, [config, bumpAuth]);
 
+  // Command palette (⌘K / Ctrl-K). Items navigate the shell + cover the
+  // commands the user most often reaches via clicks. The palette closes
+  // itself before invoking each item's action, so navigation is single-tick.
+  const paletteItems = useMemo<readonly CommandItem[]>(() => [
+    { id: 'go-mail', label: 'Go to Mail', hint: 'Inbox', action: () => setActiveView('mail') },
+    { id: 'go-calendar', label: 'Go to Calendar', action: () => setActiveView('calendar') },
+    { id: 'go-contacts', label: 'Go to Contacts', action: () => setActiveView('contacts') },
+    { id: 'go-files', label: 'Go to Files', action: () => setActiveView('files') },
+    { id: 'go-approvals', label: 'Go to Approvals', action: () => setActiveView('approvals') },
+    { id: 'go-activity', label: 'Go to Activity', action: () => setActiveView('activity') },
+    { id: 'go-settings', label: 'Go to Settings', action: () => setActiveView('settings') },
+    { id: 'compose', label: 'Compose new message', hint: 'c', action: openCompose },
+    { id: 'sign-out', label: 'Sign out', action: onSignOut },
+  ], [setActiveView, openCompose, onSignOut]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      // ⌘K on Mac, Ctrl-K everywhere else. Toggling (vs. open-only) lets
+      // the same shortcut close the palette without reaching for Escape.
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Agent token management (settings view)
   const metadataStore = useMemo(
     () =>
@@ -972,9 +1003,7 @@ function SignedInShell({
               onDisconnect: handleFilesDisconnect,
             }}
           />
-        ) : (
-          <PlaceholderView name="Unknown" />
-        )}
+        ) : null /* activeView is a closed union — every case is handled above */}
       </div>
 
       {/* Mobile: Bottom nav */}
@@ -988,6 +1017,11 @@ function SignedInShell({
 
       <KeyboardHelpOverlay />
       <ComposeView />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        items={paletteItems}
+      />
     </main>
   );
 }
@@ -1005,16 +1039,19 @@ function MailLayout({
   readonly error?: { message: string } | undefined;
   readonly layout: MailLayoutType;
 }) {
-  const gridClass =
+  // PR 3: pane structure mirrors contacts-view.module.css. Each pane
+  // owns its own scroll region; no 70vh magic, no page-level scrolling
+  // for thread content. See styles/mail-layout.module.css.
+  const containerClass =
     layout === 'stacked'
-      ? `${layoutStyles.mailGrid} ${layoutStyles.mailGridStacked}`
-      : `${layoutStyles.mailGrid} ${layoutStyles.mailGridSide}`;
+      ? `${mailLayoutStyles['container']} ${mailLayoutStyles['containerStacked']}`
+      : mailLayoutStyles['container'];
 
   return (
-    <div className={gridClass}>
+    <div className={containerClass}>
       <section
         aria-label="Selected mailbox"
-        className={layout === 'stacked' ? layoutStyles.mailThreadColStacked : undefined}
+        className={`${mailLayoutStyles['pane']} ${mailLayoutStyles['listPane']}`}
       >
         {isLoading ? <p>Loading session...</p> : null}
         {error !== undefined ? (
@@ -1024,19 +1061,10 @@ function MailLayout({
       </section>
       <section
         aria-label="Selected thread"
-        className={layout === 'stacked' ? layoutStyles.mailViewColStacked : undefined}
+        className={`${mailLayoutStyles['pane']} ${mailLayoutStyles['readPane']}`}
       >
         <ThreadView />
       </section>
-    </div>
-  );
-}
-
-/** Placeholder view for Calendar and Contacts (Phase 4 stubs). */
-function PlaceholderView({ name }: { readonly name: string }) {
-  return (
-    <div style={{ padding: '2em', color: 'var(--text-3)' }}>
-      {name} — coming soon
     </div>
   );
 }

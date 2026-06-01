@@ -34,33 +34,7 @@
   }
 }
 
-/* ── Mail layout variants ─────────────────────────────────── */
-
-.mailGrid {
-  display: grid;
-  gap: 1em;
-  align-items: start;
-  flex: 1;
-}
-
-.mailGridSide {
-  grid-template-columns: 22em minmax(0, 1fr);
-}
-
-.mailGridStacked {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto;
-}
-
-.mailThreadColStacked {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.mailViewColStacked {
-  grid-column: 1;
-  grid-row: 2;
-}
+/* Mail layout variants moved to styles/mail-layout.module.css (PR 3). */
 
 /* ── Layout toggle buttons ───────────────────────────────── */
 
@@ -110,16 +84,6 @@
     /* top-bar + bottom nav */
     padding-top: 48px;
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
-  }
-
-  /* Force stacked on mobile regardless of preference */
-  .mailGrid {
-    grid-template-columns: 1fr !important;
-  }
-
-  .mailThreadColStacked,
-  .mailViewColStacked {
-    grid-column: 1;
   }
 
   .layoutToggle {
