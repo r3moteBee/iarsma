@@ -1,67 +1,121 @@
 @import 'open-props/style';
 @import 'open-props/normalize';
 
-/* ── Design Tokens ───────────────────────────────────────────── */
+/* ──────────────────────────────────────────────────────────────────
+ * Design Tokens — PR 1 of the UI redesign (UI-Design/iarsma-ux-analysis.md).
+ *
+ * Lifted from UI-Design/mockups/iarsma-redesign.html (the visual target).
+ * Derivable accent (H/S/L roots → hover/active/subtle via color math),
+ * --density multiplier feeds spacing + row heights, named borders, an
+ * extended type scale, and a --badge-system neutral for the avatar
+ * color-by-meaning rule (§7.3.1). The accent picker + density selector
+ * land in a later PR and just write the H/S/L + --density values onto
+ * document.documentElement — no token changes needed for that work.
+ * ────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Surface hierarchy */
+  /* Surface hierarchy (warmer neutrals than before — see UI-Design §9.5). */
   --surface-1: #ffffff;
-  --surface-2: #f5f5f5;
-  --surface-3: #ebebeb;
+  --surface-2: #f6f5f3;
+  --surface-3: #ebeae7;
 
   /* Text hierarchy */
   --text-1: #1a1a1a;
   --text-2: #6b6b6b;
   --text-3: #a0a0a0;
 
-  /* Accent colors — warm orange palette */
-  --accent: #ff6b35;
-  --accent-hover: #ff9d23;
-  --accent-subtle: rgba(255, 107, 53, 0.1);
-  --destructive: var(--red-6);
-  --success: var(--green-6);
-  --warning: var(--yellow-5);
+  /* Accent — ONE source of truth, everything derived (§5.1). Today's
+   * default is Ember (orange). Hover/active stay on the same hue so the
+   * button looks like the *same* color pressed, not a different swatch. */
+  --accent-h: 18;
+  --accent-s: 100%;
+  --accent-l: 60%;
+  --accent:        hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --accent-hover:  hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 8%));
+  --accent-active: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 14%));
+  --accent-subtle: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-on: #ffffff;
 
-  /* Spacing (4px grid) */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
+  /* Intent colors */
+  --destructive: #d64545;
+  --success: #2f9e44;
+  --warning: #e8a317;
 
-  /* Typography */
+  /* Avatar fill for automated/system senders — muted neutral grey, never
+   * accent. Used by the avatar color-by-meaning rule (§7.3.1). */
+  --badge-system: #969ba3;
+
+  /* Borders — name the concept so we stop hardcoding --surface-3 in
+   * border slots (§5.1). */
+  --border:        var(--surface-3);
+  --border-strong: color-mix(in srgb, var(--surface-3) 55%, var(--text-3));
+
+  /* Spacing — 4px grid scaled by --density. Touch targets are NOT
+   * multiplied (Button/Input keep their pointer:coarse 44px minimums). */
+  --density: 1;
+  --space-xs: calc(4px  * var(--density));
+  --space-sm: calc(8px  * var(--density));
+  --space-md: calc(16px * var(--density));
+  --space-lg: calc(24px * var(--density));
+  --space-xl: calc(32px * var(--density));
+
+  /* Row heights — derived from density so density flips don't reopen the
+   * row-overlap bug (§6.1). The virtualizer should switch to dynamic
+   * measureElement; this constant is the initial estimate. */
+  --row-mail: calc(72px * var(--density));
+
+  /* Typography — system stack, 15px base at Normal density. */
   --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  --text-base: 14px;
-  --text-sm: 0.857rem;   /* ~12px at 14px base */
-  --text-md: 1rem;        /* 14px */
-  --text-lg: 1.286rem;   /* ~18px */
-  --text-xl: 1.714rem;   /* ~24px */
+  --text-sm: 12.5px;
+  --text-base: 15px;
+  --text-md: 15px;
+  --text-lg: 19px;
+  --text-xl: 24px;
+  --text-2xl: 30px;
 
   /* Border radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 5px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.20);
 
   /* Transitions */
-  --transition-fast: 100ms ease;
+  --transition-fast: 110ms ease;
   --transition-normal: 200ms ease;
+
+  /* Layout widths */
+  --sidebar-w: 248px;
+  --list-w: 384px;
 }
 
-/* ── Dark mode ───────────────────────────────────────────────── */
+/* ── Dark mode ──────────────────────────────────────────────────── */
 
 [data-theme="dark"] {
-  --surface-1: #1a1a1a;
-  --surface-2: #242424;
-  --surface-3: #2e2e2e;
+  --surface-1: #16171a;
+  --surface-2: #1d1f23;
+  --surface-3: #2a2d33;
 
-  --text-1: #ececec;
-  --text-2: #a0a0a0;
-  --text-3: #6b6b6b;
+  --text-1: #ededed;
+  --text-2: #a3a3a3;
+  --text-3: #6d6f74;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  /* Border re-aliased explicitly because --surface-3 has a different
+   * meaning in dark mode (it's already darker than --surface-1). */
+  --border: #2a2d33;
+  --border-strong: color-mix(in srgb, #2a2d33 40%, var(--text-3));
+
+  /* Accent stays on the same hue; the text-on-accent flips to a dark
+   * brown so contrast remains AA against the orange fill. */
+  --accent-on: #1a1206;
+
+  --destructive: #e06a6a;
+  --badge-system: #565b63;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.60);
 }
