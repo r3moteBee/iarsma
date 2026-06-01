@@ -1,0 +1,112 @@
+/* ──────────────────────────────────────────────────────────────────
+ * Mail layout — pane structure for the inbox (list) + reading pane.
+ *
+ * PR 3 of the UI redesign (UI-Design/iarsma-ux-analysis.md §6.2).
+ * Lifted from UI-Design/mockups/iarsma-redesign.html — the .pane /
+ * .pane-list / .pane-read / .pane-head rules. Mirrors the structure
+ * the Contacts view already uses cleanly (contacts-view.module.css)
+ * so the eye reads two panes instead of one mushy region.
+ *
+ * Two scroll regions: the list pane scrolls its own body; the reading
+ * pane scrolls its own body. No 70vh magic and no page-level scrolling
+ * for thread content.
+ * ────────────────────────────────────────────────────────────────── */
+
+.container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  /* Without overflow:hidden, a sub-pane's overflow bubbles up to the
+   * window scrollbar instead of staying scoped to the pane. */
+  overflow: hidden;
+}
+
+.containerStacked {
+  flex-direction: column;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.listPane {
+  flex: 0 0 auto;
+  width: var(--list-w);
+  min-width: 260px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+}
+
+.containerStacked .listPane {
+  width: 100%;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  /* In stacked mode the list shrinks proportionally with viewport
+   * height; flex math handles the rest. */
+  flex: 1 1 40%;
+  max-height: 50vh;
+}
+
+.readPane {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-1);
+}
+
+.paneHead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.readPane .paneHead {
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+}
+
+.paneBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.paneTitleRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.paneTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.paneSub {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* On very narrow viewports, collapse the list-pane width minimum so
+ * touch users aren't squeezed. The bottom-nav layout in App.tsx
+ * already routes mobile users through the stacked variant; this
+ * tightens the desktop-narrow case. */
+@media (max-width: 879px) {
+  .listPane:not(.containerStacked .listPane) {
+    width: 320px;
+    min-width: 240px;
+  }
+}

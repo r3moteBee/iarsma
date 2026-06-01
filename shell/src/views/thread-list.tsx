@@ -31,6 +31,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
+  forwardRef,
   useCallback,
   useEffect,
   useMemo,
@@ -73,7 +74,12 @@ type ThreadListData = {
   readonly total?: number;
 };
 
-const ROW_HEIGHT_PX = 64;
+// Initial estimate only. The virtualizer's `measureElement` overrides this
+// with each row's actual rendered height on first paint — so future content
+// changes (e.g. adding an avatar that makes rows taller) won't reintroduce
+// the row-overlap bug fixed in PR 3. The value matches `--row-mail` at
+// density=1 so the initial frame doesn't reflow when measurement settles.
+const ROW_HEIGHT_PX = 72;
 
 export function ThreadList() {
   const mailboxId = useAtomValue(selectedMailboxIdAtom);
@@ -169,6 +175,10 @@ function ThreadListBody(props: {
     count: threads.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT_PX,
+    // Dynamic measurement (PR 3): the virtualizer reads each row's
+    // actual height on first paint and recomputes offsets, so the
+    // ESTIMATE → ACTUAL drift that caused the row-overlap bug is gone.
+    measureElement: (el) => el.getBoundingClientRect().height,
     overscan: 8,
   });
 
@@ -319,7 +329,17 @@ function ThreadListBody(props: {
   const totalHeight = virtualizer.getTotalSize();
 
   return (
-    <section aria-label="Threads">
+    <section
+      aria-label="Threads"
+      style={{
+        // PR 3: flex into the pane parent so the scroll region inside
+        // can `flex: 1; min-height: 0` and bound itself to the pane.
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      }}
+    >
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <h2 style={{ margin: 0 }}>Threads</h2>
         {total !== undefined ? (
@@ -331,8 +351,13 @@ function ThreadListBody(props: {
       <div
         ref={scrollRef}
         // Scroll container — virtualizer measures this for visible window.
+        // The new mail-layout (PR 3) gives this pane a flex column with
+        // min-height:0; the scroll region fills whatever's left under the
+        // sticky header. No more 70vh magic — content scrolls within the
+        // pane, not the page.
         style={{
-          height: '70vh',
+          flex: 1,
+          minHeight: 0,
           overflowY: 'auto',
           marginTop: '0.5em',
         }}
@@ -359,6 +384,7 @@ function ThreadListBody(props: {
             return (
               <ThreadRow
                 key={thread.id}
+                ref={virtualizer.measureElement}
                 index={vi.index}
                 thread={thread}
                 offsetTop={vi.start}
@@ -375,15 +401,19 @@ function ThreadListBody(props: {
   );
 }
 
-function ThreadRow(props: {
+type ThreadRowProps = {
   readonly index: number;
   readonly thread: import('../runtime/jmap-client.js').ThreadSummary;
   readonly offsetTop: number;
+  /** Initial min-height for the row. Virtualizer's `measureElement`
+   *  overrides the actual rendered height after first paint. */
   readonly rowHeight: number;
   readonly isSelected: boolean;
   readonly isFocused: boolean;
   readonly onClick: () => void;
-}) {
+};
+
+const ThreadRow = forwardRef<HTMLDivElement, ThreadRowProps>(function ThreadRow(props, ref) {
   const { index, thread, offsetTop, rowHeight, isSelected, isFocused, onClick } = props;
   const e = thread.latestEmail;
   const seen = e.keywords.find((k) => k.name === '$seen')?.value ?? false;
@@ -393,9 +423,11 @@ function ThreadRow(props: {
 
   return (
     <div
+      ref={ref}
       id={`thread-row-${thread.id}`}
       data-thread-id={thread.id}
       data-thread-index={index}
+      data-index={index}
       role="option"
       aria-selected={isSelected}
       tabIndex={isFocused ? 0 : -1}
@@ -405,10 +437,15 @@ function ThreadRow(props: {
         top: `${offsetTop}px`,
         left: 0,
         right: 0,
-        height: `${rowHeight}px`,
+        /* PR 3 row-overlap fix: row height is content-driven via
+         * minHeight; the virtualizer reads the actual rendered height
+         * through `measureElement` and recomputes offsets. Replacing
+         * the fixed height with minHeight is what stops the next row
+         * from overlapping when content exceeds the initial estimate. */
+        minHeight: `${rowHeight}px`,
         padding: '0.5em 0.75em',
         boxSizing: 'border-box',
-        borderBottom: '1px solid var(--surface-3)',
+        borderBottom: '1px solid var(--border)',
         cursor: 'pointer',
         background: isSelected ? 'var(--surface-2)' : 'transparent',
         color: 'var(--text-1)',
@@ -477,7 +514,7 @@ function ThreadRow(props: {
       </span>
     </div>
   );
-}
+});
 
 function formatSender(
   from: ReadonlyArray<{ name?: string; email: string }> | undefined,
