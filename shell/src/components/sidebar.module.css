@@ -182,6 +182,42 @@
   max-height: 40vh;
 }
 
+/* PR 3.5: Mail nav row pairs the nav button with a section-collapse
+ * caret button. The two are independent controls (each focusable, each
+ * with its own aria label), but they share a row visually so the
+ * sidebar still reads as a single column of nav items. */
+.mailNavRow {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.mailNavRow > .navItem {
+  flex: 1;
+  min-width: 0;
+}
+
+.mailSectionToggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.mailSectionToggle:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
 .mailboxSectionLabel {
   font-size: var(--text-sm);
   font-weight: 600;

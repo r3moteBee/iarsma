@@ -10,10 +10,31 @@
  * tree (mail view only), user info, sign-out, and theme toggle.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { ActiveView } from '../nav-state.js';
 import type { ThemePreference } from '../runtime/theme.js';
+import { MailboxTreeView } from './mailbox-tree-view.js';
 import styles from './sidebar.module.css';
+
+const MAIL_SECTION_KEY = 'iarsma-mail-section-collapsed';
+
+function loadMailSectionCollapsed(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    return localStorage.getItem(MAIL_SECTION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveMailSectionCollapsed(value: boolean): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(MAIL_SECTION_KEY, value ? '1' : '0');
+  } catch {
+    // Quota / private mode — non-fatal.
+  }
+}
 
 // ── SVG icon paths ──────────────────────────────────────────────
 
@@ -169,72 +190,6 @@ const NAV_ITEMS: readonly NavDef[] = [
   { view: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
-// ── Mailbox tree helpers ────────────────────────────────────────
-
-type MailboxNode = MailboxEntry & { readonly children: readonly MailboxNode[] };
-
-function buildMailboxTree(mailboxes: readonly MailboxEntry[]): readonly MailboxNode[] {
-  const childMap = new Map<string | null, MailboxEntry[]>();
-  for (const mb of mailboxes) {
-    const parentKey = mb.parentId ?? null;
-    const existing = childMap.get(parentKey);
-    if (existing !== undefined) {
-      existing.push(mb);
-    } else {
-      childMap.set(parentKey, [mb]);
-    }
-  }
-
-  function buildChildren(parentId: string | null): readonly MailboxNode[] {
-    const children = childMap.get(parentId) ?? [];
-    return children.map((mb) => ({
-      ...mb,
-      children: buildChildren(mb.id),
-    }));
-  }
-
-  return buildChildren(null);
-}
-
-function MailboxTreeItem({
-  node,
-  depth,
-  selectedId,
-  onSelect,
-}: {
-  readonly node: MailboxNode;
-  readonly depth: number;
-  readonly selectedId?: string | undefined;
-  readonly onSelect?: ((id: string) => void) | undefined;
-}) {
-  const isSelected = selectedId === node.id;
-  return (
-    <>
-      <button
-        type="button"
-        className={`${styles.mailboxItem} ${isSelected ? styles.mailboxItemSelected : ''}`}
-        style={{ paddingLeft: `${8 + depth * 16}px` }}
-        onClick={() => onSelect?.(node.id)}
-        aria-current={isSelected ? 'true' : undefined}
-      >
-        <span className={styles.mailboxName}>{node.name}</span>
-        {node.unreadCount > 0 && (
-          <span className={styles.mailboxUnread}>{node.unreadCount}</span>
-        )}
-      </button>
-      {node.children.map((child) => (
-        <MailboxTreeItem
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          selectedId={selectedId}
-          onSelect={onSelect}
-        />
-      ))}
-    </>
-  );
-}
-
 // ── Component ───────────────────────────────────────────────────
 
 export function Sidebar({
@@ -251,7 +206,16 @@ export function Sidebar({
   isOpen,
   onClose,
 }: SidebarProps) {
-  const tree = mailboxes !== undefined ? buildMailboxTree(mailboxes) : [];
+  const hasMailboxes = mailboxes !== undefined && mailboxes.length > 0;
+
+  // Section-level collapse: the user can hide the whole folder list to
+  // reclaim sidebar space. Per-parent collapse lives inside MailboxTreeView.
+  const [mailSectionCollapsed, setMailSectionCollapsed] = useState<boolean>(
+    () => loadMailSectionCollapsed(),
+  );
+  useEffect(() => {
+    saveMailSectionCollapsed(mailSectionCollapsed);
+  }, [mailSectionCollapsed]);
 
   const handleNavClick = (view: ActiveView) => {
     onNavigate(view);
@@ -292,8 +256,8 @@ export function Sidebar({
 
         {/* Navigation items with mailboxes nested under Mail */}
         <nav className={styles.nav} aria-label="Views">
-          {NAV_ITEMS.map(({ view, label, icon: Icon }) => (
-            <React.Fragment key={view}>
+          {NAV_ITEMS.map(({ view, label, icon: Icon }) => {
+            const navButton = (
               <button
                 type="button"
                 className={`${styles.navItem} ${activeView === view ? styles.navItemActive : ''}`}
@@ -304,21 +268,41 @@ export function Sidebar({
                 <span className={styles.navIcon}><Icon /></span>
                 {label}
               </button>
-              {view === 'mail' && activeView === 'mail' && tree.length > 0 && (
-                <div className={styles.mailboxInline}>
-                  {tree.map((node) => (
-                    <MailboxTreeItem
-                      key={node.id}
-                      node={node}
-                      depth={1}
-                      selectedId={selectedMailboxId}
-                      onSelect={(id) => { onMailboxSelect?.(id); onClose?.(); }}
-                    />
-                  ))}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
+            );
+            // Mail gets a paired section-collapse caret when mailboxes
+            // are loaded — independent button, real aria-expanded, real
+            // aria-label, persisted state.
+            if (view === 'mail' && hasMailboxes) {
+              return (
+                <React.Fragment key={view}>
+                  <div className={styles.mailNavRow}>
+                    {navButton}
+                    <button
+                      type="button"
+                      className={styles.mailSectionToggle}
+                      aria-expanded={!mailSectionCollapsed}
+                      aria-controls="sidebar-mailbox-tree"
+                      aria-label={mailSectionCollapsed ? 'Show mailbox folders' : 'Hide mailbox folders'}
+                      onClick={() => setMailSectionCollapsed((c) => !c)}
+                      data-testid="nav-mail-toggle"
+                    >
+                      {mailSectionCollapsed ? '▸' : '▾'}
+                    </button>
+                  </div>
+                  {activeView === 'mail' && !mailSectionCollapsed && mailboxes !== undefined ? (
+                    <div className={styles.mailboxInline} id="sidebar-mailbox-tree">
+                      <MailboxTreeView
+                        mailboxes={mailboxes}
+                        {...(selectedMailboxId !== undefined ? { selectedId: selectedMailboxId } : {})}
+                        onSelect={(id) => { onMailboxSelect?.(id); onClose?.(); }}
+                      />
+                    </div>
+                  ) : null}
+                </React.Fragment>
+              );
+            }
+            return <React.Fragment key={view}>{navButton}</React.Fragment>;
+          })}
         </nav>
 
         {/* Footer: user info + theme */}
