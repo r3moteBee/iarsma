@@ -115,21 +115,61 @@
   color: var(--destructive);
 }
 
-/* ── Row ──────────────────────────────────────────────────────── */
+/* ── List + row containers ────────────────────────────────────
+ *
+ * PR 4.5: dropped the listbox/option roles. Outer is now a <ul>
+ * with onKeyDown for j/k/arrow nav; each row is an <li> wrapper
+ * around a primary <button> (the click + focus target) and a
+ * sibling <div role="group"> for per-row Flag + Mark-read buttons.
+ *
+ * The per-row buttons are DOM siblings of the row button — they
+ * are not nested inside it — so axe-core's nested-interactive
+ * rule is satisfied while keeping the row visually feel like
+ * "one tappable thing with edge affordances."
+ */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
 
+/* The <li> wrapper. The virtualizer sets `position: absolute` and
+ * `top: ${vi.start}px` inline; this class supplies the rest. */
+.rowLi {
+  list-style: none;
+  border-bottom: 1px solid var(--border);
+  /* Establishes the positioning context for the .rowActions overlay
+   * inside; the virtualizer overrides this with `position: absolute`
+   * via inline styles. */
+  position: relative;
+  /* Selected state lives on the <li> so the accent rail can stretch
+   * full-width regardless of where focus sits inside the row. */
+}
+
+.rowLiSelected {
+  background: var(--accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* The primary row button — fills the <li>, hosts the click + focus.
+ * Visually it IS the row; structurally it's a regular <button>. */
 .row {
   display: grid;
   grid-template-columns: auto 40px 1fr auto;
   grid-template-areas: 'dot av main meta';
   align-items: center;
   gap: 0 var(--space-sm);
+  width: 100%;
   min-height: var(--row-mail);
   padding: var(--space-sm) var(--space-md);
-  border-bottom: 1px solid var(--border);
+  border: none;
+  background: transparent;
   cursor: pointer;
-  position: relative;
-  transition: background var(--transition-fast);
+  text-align: left;
   color: var(--text-1);
+  font: inherit;
+  transition: background var(--transition-fast);
 }
 
 .row:hover {
@@ -141,13 +181,9 @@
   outline-offset: -2px;
 }
 
-.rowSelected {
-  background: var(--accent-subtle);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.rowSelected:hover {
-  background: var(--accent-subtle);
+.rowLiSelected .row:hover {
+  /* Selected row keeps its own subtle tint when hovered. */
+  background: transparent;
 }
 
 /* Unread dot — orange pip at the leading edge. 8px is a deliberate
@@ -162,7 +198,7 @@
   opacity: 0;
 }
 
-.rowUnread .udot {
+.rowLiUnread .udot {
   opacity: 1;
 }
 
@@ -199,7 +235,7 @@
   white-space: nowrap;
 }
 
-.rowUnread .sender {
+.rowLiUnread .sender {
   font-weight: 750;
 }
 
@@ -212,7 +248,7 @@
   margin-top: 1px;
 }
 
-.rowUnread .subject {
+.rowLiUnread .subject {
   font-weight: 650;
 }
 
@@ -244,7 +280,7 @@
   white-space: nowrap;
 }
 
-.rowUnread .date {
+.rowLiUnread .date {
   color: var(--accent-active);
   font-weight: 650;
 }
@@ -266,8 +302,8 @@
   z-index: 1;
 }
 
-.row:hover .rowActions,
-.row:focus-within .rowActions {
+.rowLi:hover .rowActions,
+.rowLi:focus-within .rowActions {
   display: flex;
 }
 
@@ -281,14 +317,13 @@
   height: 15px;
 }
 
-/* Mobile / touch — no hover. Always show the row actions when the
- * row is selected so touch users can reach them; rely on
- * pointer:fine breakpoint to know hover-reveal is OK. */
+/* Mobile / touch — no hover. Show row actions on the selected row so
+ * touch users can reach them. */
 @media (pointer: coarse) {
-  .row .rowActions {
+  .rowLi .rowActions {
     display: none;
   }
-  .rowSelected .rowActions {
+  .rowLiSelected .rowActions {
     display: flex;
   }
 }

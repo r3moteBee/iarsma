@@ -161,7 +161,7 @@ async function waitForList(): Promise<void> {
   // focusedIndex, and our `focusedIndex ?? -1` path moves to 0 (T1)
   // instead of the expected "j from T1 → T2".
   await waitFor(() => {
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const listbox = screen.getByRole('list', { name: 'Threads' });
     expect(listbox).toBeInTheDocument();
     expect(listbox.querySelector('[tabindex="0"]')).not.toBeNull();
   });
@@ -175,7 +175,7 @@ describe('ThreadList — placeholder states', () => {
   it('shows the no-mailbox EmptyState when no mailbox is selected', () => {
     renderThreadList({ mailboxId: null });
     expect(screen.getByText(/no mailbox selected/i)).toBeInTheDocument();
-    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Threads' })).toBeNull();
   });
 
   it('shows "no threads" empty state when the mailbox has zero threads', async () => {
@@ -200,12 +200,15 @@ describe('ThreadList — placeholder states', () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe('ThreadList — ARIA + content', () => {
-  it('renders the listbox with one option per thread', async () => {
+  it('renders the list with one listitem per thread', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
-    const options = within(listbox).getAllByRole('option');
-    expect(options).toHaveLength(3);
+    const list = screen.getByRole('list', { name: 'Threads' });
+    // PR 4.5: rows became <li>s (listitem role). The primary click
+    // target inside each <li> is a <button>; the listbox/option
+    // pattern was incompatible with per-row action buttons.
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
   });
 
   it('renders subject, sender, and preview for each row', async () => {
@@ -246,7 +249,7 @@ describe('ThreadList — keyboard nav', () => {
   it('j moves focus to the next thread', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const listbox = screen.getByRole('list', { name: 'Threads' });
     fireEvent.keyDown(listbox, { key: 'j' });
     await waitFor(() => {
       const focused = listbox.querySelector('[tabindex="0"]');
@@ -257,7 +260,7 @@ describe('ThreadList — keyboard nav', () => {
   it('k moves focus to the previous thread', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const listbox = screen.getByRole('list', { name: 'Threads' });
     // Move down to T2 first, then up.
     fireEvent.keyDown(listbox, { key: 'j' });
     fireEvent.keyDown(listbox, { key: 'k' });
@@ -270,7 +273,7 @@ describe('ThreadList — keyboard nav', () => {
   it('ArrowDown / ArrowUp work too (alongside j/k)', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const listbox = screen.getByRole('list', { name: 'Threads' });
     fireEvent.keyDown(listbox, { key: 'ArrowDown' });
     await waitFor(() => {
       const focused = listbox.querySelector('[tabindex="0"]');
@@ -278,22 +281,25 @@ describe('ThreadList — keyboard nav', () => {
     });
   });
 
-  it('Enter selects the focused thread (sets aria-selected=true)', async () => {
+  it('Enter selects the focused thread (sets aria-current=true on the row button)', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const listbox = screen.getByRole('list', { name: 'Threads' });
     fireEvent.keyDown(listbox, { key: 'j' });
     fireEvent.keyDown(listbox, { key: 'Enter' });
     await waitFor(() => {
-      const t2 = listbox.querySelector('[data-thread-id="T2"]');
-      expect(t2).toHaveAttribute('aria-selected', 'true');
+      // PR 4.5: selection moved from aria-selected on the row <li> to
+      // aria-current on the inner row <button> (the listbox pattern
+      // was incompatible with per-row action buttons — see PR body).
+      const t2 = listbox.querySelector('button[data-thread-id="T2"]');
+      expect(t2).toHaveAttribute('aria-current', 'true');
     });
   });
 
   it('End jumps to the last thread', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const listbox = screen.getByRole('list', { name: 'Threads' });
     fireEvent.keyDown(listbox, { key: 'End' });
     await waitFor(() => {
       const focused = listbox.querySelector('[tabindex="0"]');
@@ -304,7 +310,7 @@ describe('ThreadList — keyboard nav', () => {
   it('Home jumps to the first thread', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
+    const listbox = screen.getByRole('list', { name: 'Threads' });
     fireEvent.keyDown(listbox, { key: 'End' });
     fireEvent.keyDown(listbox, { key: 'Home' });
     await waitFor(() => {
@@ -319,14 +325,16 @@ describe('ThreadList — keyboard nav', () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe('ThreadList — click selection', () => {
-  it('clicking a row sets aria-selected', async () => {
+  it('clicking a row sets aria-current on the row button', async () => {
     renderThreadList();
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
-    const t3 = listbox.querySelector('[data-thread-id="T3"]')!;
+    const listbox = screen.getByRole('list', { name: 'Threads' });
+    // PR 4.5: click the inner row button, not the <li>. The button is
+    // the interactive element; clicking the li wouldn't fire onClick.
+    const t3 = listbox.querySelector<HTMLButtonElement>('button[data-thread-id="T3"]')!;
     fireEvent.click(t3);
     await waitFor(() => {
-      expect(t3).toHaveAttribute('aria-selected', 'true');
+      expect(t3).toHaveAttribute('aria-current', 'true');
     });
   });
 });
@@ -435,8 +443,9 @@ describe('ThreadList — drafts click path', () => {
     });
 
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
-    const t1 = listbox.querySelector('[data-thread-id="T1"]')!;
+    const listbox = screen.getByRole('list', { name: 'Threads' });
+    // PR 4.5: click the inner button, not the <li>.
+    const t1 = listbox.querySelector<HTMLButtonElement>('button[data-thread-id="T1"]')!;
     fireEvent.click(t1);
 
     await waitFor(() => {
@@ -462,12 +471,12 @@ describe('ThreadList — drafts click path', () => {
       mailboxes: [{ id: 'Mb01' /* no role */ }],
     });
     await waitForList();
-    const listbox = screen.getByRole('listbox', { name: 'Threads' });
-    fireEvent.click(listbox.querySelector('[data-thread-id="T1"]')!);
+    const listbox = screen.getByRole('list', { name: 'Threads' });
+    fireEvent.click(listbox.querySelector('button[data-thread-id="T1"]')!);
     await waitFor(() => {
       expect(
-        listbox.querySelector('[data-thread-id="T1"]'),
-      ).toHaveAttribute('aria-selected', 'true');
+        listbox.querySelector('button[data-thread-id="T1"]'),
+      ).toHaveAttribute('aria-current', 'true');
     });
   });
 });
@@ -536,7 +545,7 @@ describe('ThreadList — search mode', () => {
     ).toBeUndefined();
     await waitFor(() => {
       expect(
-        screen.getByRole('listbox', { name: 'Threads' }),
+        screen.getByRole('list', { name: 'Threads' }),
       ).toBeInTheDocument();
     });
   });

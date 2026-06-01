@@ -232,7 +232,7 @@ describe('a11y — signed-in shell integration', () => {
     // composition violations like duplicate landmarks.
     await waitFor(() => {
       expect(screen.getByRole('tree', { name: 'Mailboxes' })).toBeInTheDocument();
-      expect(screen.getByRole('listbox', { name: 'Threads' })).toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Threads' })).toBeInTheDocument();
     });
 
     const violations = await runAxe(container);

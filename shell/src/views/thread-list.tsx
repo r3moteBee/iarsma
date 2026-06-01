@@ -276,10 +276,14 @@ function ThreadListBody(props: {
       // requestAnimationFrame would be safer if we ever batch many
       // focus moves.
       queueMicrotask(() => {
-        const el = scrollRef.current?.querySelector<HTMLDivElement>(
+        // PR 4.5: focus target moved from the row <li> to the primary
+        // <button> inside it. The li wrapper carries the data-attr;
+        // its first <button> child is the row's clickable surface.
+        const li = scrollRef.current?.querySelector<HTMLLIElement>(
           `[data-thread-index="${next}"]`,
         );
-        el?.focus();
+        const btn = li?.querySelector<HTMLButtonElement>('button');
+        btn?.focus();
       });
     },
     [threads.length, virtualizer],
@@ -327,7 +331,7 @@ function ThreadListBody(props: {
   );
 
   const onKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
+    (event: KeyboardEvent<HTMLUListElement>) => {
       // `focusedIndex` starts null and is set to 0 by the
       // selection-sync useEffect. A keystroke that arrives *between*
       // the initial render and the effect commit would otherwise be a
@@ -366,6 +370,30 @@ function ThreadListBody(props: {
       }
     },
     [focusedIndex, moveFocus, onSelect, threads.length],
+  );
+
+  // Per-row mail.modify wire-up (PR 4.5). `refetch()` runs after a
+  // successful mutate so the row's $seen/$flagged reflects the new
+  // state without waiting for a push subscription (Phase 7+). The
+  // mail.modify contract uses the legacy `contract` export shape and
+  // doesn't have a generated React hook today — invoking via
+  // `useInvoker` is the same path the existing send/draft flows use.
+  const toggleKeyword = useCallback(
+    (emailId: string, keyword: '$seen' | '$flagged', set: boolean) => {
+      void (async () => {
+        try {
+          await invoker.invoke('mail.modify', {
+            emailIds: [emailId],
+            patch: { [`keywords/${keyword}`]: set ? true : null },
+          });
+          await refetch();
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`[iarsma] mail.modify ${keyword} failed:`, e);
+        }
+      })();
+    },
+    [invoker, refetch],
   );
 
   const items = virtualizer.getVirtualItems();
@@ -424,17 +452,14 @@ function ThreadListBody(props: {
   } else {
     body = (
       <div ref={scrollRef} className={styles['body']}>
-        <div
-          role="listbox"
+        <ul
           aria-label="Threads"
-          aria-multiselectable="false"
-          aria-activedescendant={
-            focusedIndex !== null ? `thread-row-${threads[focusedIndex]?.id}` : undefined
-          }
           onKeyDown={onKeyDown}
-          // Inner container is the listbox and carries keydown.
-          tabIndex={0}
-          style={{ position: 'relative', height: `${totalHeight}px` }}
+          className={styles['list']}
+          // The virtualizer needs a fixed-height container to compute
+          // scroll offsets against. The <ul> stays a normal block; its
+          // <li> children are absolute-positioned.
+          style={{ height: `${totalHeight}px` }}
         >
           {items.map((vi) => {
             const thread = threads[vi.index];
@@ -452,10 +477,12 @@ function ThreadListBody(props: {
                 isSelected={isSelected}
                 isFocused={isFocused}
                 onClick={() => onSelect(vi.index)}
+                onToggleFlag={(id, current) => toggleKeyword(id, '$flagged', !current)}
+                onToggleRead={(id, current) => toggleKeyword(id, '$seen', !current)}
               />
             );
           })}
-        </div>
+        </ul>
       </div>
     );
   }
@@ -488,10 +515,25 @@ type ThreadRowProps = {
   readonly isSelected: boolean;
   readonly isFocused: boolean;
   readonly onClick: () => void;
+  /** Per-row Flag toggle. `current` is the row's pre-click value so
+   *  the caller can compute the patch direction without re-reading
+   *  state. */
+  readonly onToggleFlag: (emailId: string, current: boolean) => void;
+  readonly onToggleRead: (emailId: string, current: boolean) => void;
 };
 
-const ThreadRow = forwardRef<HTMLDivElement, ThreadRowProps>(function ThreadRow(props, ref) {
-  const { index, thread, offsetTop, rowHeight, isSelected, isFocused, onClick } = props;
+const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(props, ref) {
+  const {
+    index,
+    thread,
+    offsetTop,
+    rowHeight,
+    isSelected,
+    isFocused,
+    onClick,
+    onToggleFlag,
+    onToggleRead,
+  } = props;
   const e = thread.latestEmail;
   const seen = e.keywords.find((k) => k.name === '$seen')?.value ?? false;
   const flagged = e.keywords.find((k) => k.name === '$flagged')?.value ?? false;
@@ -509,77 +551,117 @@ const ThreadRow = forwardRef<HTMLDivElement, ThreadRowProps>(function ThreadRow(
   const subject = e.subject ?? '(no subject)';
   const date = formatDate(e.receivedAt);
 
-  const rowClassName = [
-    styles['row'],
-    isSelected ? styles['rowSelected'] : '',
-    !seen ? styles['rowUnread'] : '',
+  const liClassName = [
+    styles['rowLi'],
+    isSelected ? styles['rowLiSelected'] : '',
+    !seen ? styles['rowLiUnread'] : '',
   ]
     .filter(Boolean)
     .join(' ');
 
+  // Compose a screen-reader-friendly label for the primary row button.
+  // Sighted users get the unread dot + accent-active date + flag icon;
+  // AT users get the same information through the aria-label below.
+  const ariaLabel = [
+    `${kindLabel(kind)} ${senderName}: ${subject}`,
+    seen ? null : 'unread',
+    flagged ? 'flagged' : null,
+    date,
+  ]
+    .filter((s): s is string => s !== null)
+    .join(', ');
+
   return (
-    <div
+    <li
       ref={ref}
-      id={`thread-row-${thread.id}`}
       data-thread-id={thread.id}
       data-thread-index={index}
       data-index={index}
-      role="option"
-      aria-selected={isSelected}
-      tabIndex={isFocused ? 0 : -1}
-      onClick={onClick}
-      className={rowClassName}
+      className={liClassName}
       style={{
         position: 'absolute',
         top: `${offsetTop}px`,
         left: 0,
         right: 0,
-        /* PR 3 row-overlap fix carried forward: minHeight + measureElement.
-         * The actual content height is read off the rendered row and the
-         * virtualizer recomputes offsets accordingly. */
+        /* PR 3 row-overlap fix carried forward: minHeight +
+         * measureElement. The actual rendered height drives the offset
+         * table; the initial estimate matches `--row-mail`. */
         minHeight: `${rowHeight}px`,
         boxSizing: 'border-box',
       }}
     >
-      <span className={styles['udot']} aria-hidden="true" />
-      <span
-        className={styles['avatar']}
-        style={{ background: avatarColor }}
-        aria-hidden="true"
-        title={kindLabel(kind)}
+      <button
+        type="button"
+        id={`thread-row-${thread.id}`}
+        // data-thread-id is duplicated from the <li> so tests that
+        // walk from [tabindex="0"] to the row identity keep working
+        // without an extra closest('li') step.
+        data-thread-id={thread.id}
+        data-thread-index={index}
+        className={styles['row']}
+        onClick={onClick}
+        tabIndex={isFocused ? 0 : -1}
+        aria-current={isSelected ? 'true' : undefined}
+        aria-label={ariaLabel}
       >
-        {initials}
-      </span>
-      <div className={styles['main']}>
-        <div className={styles['sender']}>{senderName}</div>
-        <div className={styles['subject']}>{subject}</div>
-        {e.preview !== undefined && e.preview.length > 0 ? (
-          <div className={styles['preview']}>{e.preview}</div>
-        ) : null}
+        <span className={styles['udot']} aria-hidden="true" />
+        <span
+          className={styles['avatar']}
+          style={{ background: avatarColor }}
+          aria-hidden="true"
+          title={kindLabel(kind)}
+        >
+          {initials}
+        </span>
+        <span className={styles['main']}>
+          <span className={styles['sender']}>{senderName}</span>
+          <span className={styles['subject']}>{subject}</span>
+          {e.preview !== undefined && e.preview.length > 0 ? (
+            <span className={styles['preview']}>{e.preview}</span>
+          ) : null}
+        </span>
+        <span className={styles['meta']}>
+          <span className={styles['date']}>{date}</span>
+          {flagged ? (
+            <span aria-label="Flagged" title="Flagged" style={{ color: 'var(--accent)' }}>
+              <FlagIcon filled />
+            </span>
+          ) : null}
+        </span>
+      </button>
+      {/* Per-row action buttons sit as DOM siblings of the row button
+       * inside the <li>. axe-core's nested-interactive rule is
+       * satisfied because the buttons aren't descendants of an
+       * interactive element. */}
+      <div className={styles['rowActions']} role="group" aria-label="Row actions">
+        <button
+          type="button"
+          className={`${styles['iconBtn']} ${flagged ? styles['iconBtnFlagged'] : ''}`}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            onToggleFlag(e.id, flagged);
+          }}
+          aria-label={flagged ? `Unflag: ${subject}` : `Flag: ${subject}`}
+          aria-pressed={flagged}
+          title={flagged ? 'Unflag' : 'Flag'}
+        >
+          <FlagIcon filled={flagged} />
+        </button>
+        <button
+          type="button"
+          className={styles['iconBtn']}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            onToggleRead(e.id, seen);
+          }}
+          aria-label={seen ? `Mark unread: ${subject}` : `Mark read: ${subject}`}
+          aria-pressed={!seen}
+          title={seen ? 'Mark unread' : 'Mark read'}
+        >
+          {seen ? <MarkUnreadIcon /> : <MarkReadIcon />}
+        </button>
       </div>
-      <div className={styles['meta']}>
-        <span className={styles['date']}>{date}</span>
-        {flagged ? (
-          <span aria-label="Flagged" title="Flagged" style={{ color: 'var(--accent)' }}>
-            <FlagIcon filled />
-          </span>
-        ) : null}
-      </div>
-
-      {/* Per-row Flag / Mark-read buttons are deferred to PR 4.5 — the
-       * row currently carries role="option" (listbox pattern) and inner
-       * <button> elements would trip axe-core's nested-interactive
-       * rule. PR 4.5 restructures the row to a non-interactive container
-       * with explicit "open thread" + per-row action buttons inside. */}
-
-      {/* Screen-reader-only summary covering read/flagged state. The
-       * visual unread dot + accent date color carry it for sighted
-       * users, but a11y tools shouldn't depend on those signals. */}
-      <span style={visuallyHidden}>
-        {kindLabel(kind)}, {seen ? 'read' : 'unread'}
-        {flagged ? ', flagged' : ''}
-      </span>
-    </div>
+    </li>
   );
 });
 
@@ -603,10 +685,22 @@ function FlagIcon({ filled }: { readonly filled: boolean }) {
   );
 }
 
-// MarkReadIcon / MarkUnreadIcon defined and removed in PR 4 — they
-// belong to the per-row action surface deferred to PR 4.5. Reinstate
-// (with the icons above) when the row interaction model is restructured
-// to avoid axe-core's nested-interactive rule.
+function MarkReadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+    </svg>
+  );
+}
+
+function MarkUnreadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M22 7l-10 7L2 7" />
+    </svg>
+  );
+}
 
 function formatSender(
   from: ReadonlyArray<{ name?: string; email: string }> | undefined,
@@ -631,18 +725,6 @@ function formatDate(iso: string): string {
   }
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
-
-const visuallyHidden = {
-  position: 'absolute',
-  width: '1px',
-  height: '1px',
-  padding: 0,
-  margin: '-1px',
-  overflow: 'hidden',
-  clip: 'rect(0,0,0,0)',
-  whiteSpace: 'nowrap',
-  border: 0,
-} as const;
 
 /**
  * Skeleton rows shown while the thread list is loading. Five rows feels
