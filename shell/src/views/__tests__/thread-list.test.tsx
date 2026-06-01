@@ -219,7 +219,10 @@ describe('ThreadList — ARIA + content', () => {
   it('shows the count badge with aria-live for screen readers', async () => {
     renderThreadList();
     await waitForList();
-    expect(screen.getByText('3 of 3')).toBeInTheDocument();
+    // PR 4 format: "1–N of M" (with optional "X unread · " prefix when
+    // the mailbox carries an unreadEmails count). The render harness
+    // doesn't seed mailbox metadata, so just the page-range half shows.
+    expect(screen.getByText(/1.{1,3}3 of 3/)).toBeInTheDocument();
   });
 
   it('uses (no subject) fallback when subject is absent', async () => {

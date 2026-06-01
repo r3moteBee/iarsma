@@ -1,0 +1,294 @@
+/* ──────────────────────────────────────────────────────────────────
+ * ThreadList visuals — PR 4 of the UI redesign.
+ *
+ * Lifted verbatim from UI-Design/mockups/iarsma-redesign.html (the
+ * .row / .toolbar / .iconbtn / .av cluster). The pane wrapper itself
+ * lives in mail-layout.module.css (PR 3) — these are just the
+ * row-and-toolbar specifics.
+ *
+ * Layout: a 4-column grid per row — [unread-dot | avatar | main | meta]
+ * — so the visual rhythm holds even if a row's sender name wraps or the
+ * preview text overflows. measureElement (PR 3) reads the actual
+ * rendered height so future content changes can't reintroduce the
+ * row-overlap bug.
+ * ────────────────────────────────────────────────────────────────── */
+
+/* ── Sticky pane header above the toolbar ──────────────────────── */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.toolbarSpacer {
+  flex: 1;
+}
+
+/* Icon-only square button — used for Refresh, per-row Flag, Mark
+ * read. Keep it 32×32 on coarse pointers? The touch-target rule for
+ * Button is 44px; this is intentionally tighter because users tap
+ * the row itself for select, not the icon button. The icon buttons
+ * are auxiliary affordances reachable via keyboard too. */
+.iconBtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.iconBtn:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.iconBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.iconBtn svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* The flag icon glows accent when set. */
+.iconBtnFlagged {
+  color: var(--accent);
+}
+
+.iconBtnFlagged:hover {
+  color: var(--accent-active);
+}
+
+/* ── Scrollable body that wraps the virtualizer ──────────────── */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.error {
+  padding: var(--space-md);
+  color: var(--destructive);
+}
+
+/* ── Row ──────────────────────────────────────────────────────── */
+
+.row {
+  display: grid;
+  grid-template-columns: auto 40px 1fr auto;
+  grid-template-areas: 'dot av main meta';
+  align-items: center;
+  gap: 0 var(--space-sm);
+  min-height: var(--row-mail);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--transition-fast);
+  color: var(--text-1);
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.rowSelected {
+  background: var(--accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rowSelected:hover {
+  background: var(--accent-subtle);
+}
+
+/* Unread dot — orange pip at the leading edge. 8px is a deliberate
+ * choice: small enough to look like punctuation, large enough to
+ * scan past at a glance. */
+.udot {
+  grid-area: dot;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+}
+
+.rowUnread .udot {
+  opacity: 1;
+}
+
+/* ── Avatar ───────────────────────────────────────────────────── */
+
+.avatar {
+  grid-area: av;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  /* Inline background-color is supplied by colorFor() at render time —
+   * deterministic-hue for humans, --accent for agents, --badge-system
+   * for automated/system mail. The visible value is the only signal
+   * to non-color users; aria-label on the row carries the kind too. */
+}
+
+/* ── Main column (sender / subject / preview) ─────────────────── */
+
+.main {
+  grid-area: main;
+  min-width: 0;
+}
+
+.sender {
+  font-size: var(--text-md);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowUnread .sender {
+  font-weight: 750;
+}
+
+.subject {
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.rowUnread .subject {
+  font-weight: 650;
+}
+
+.preview {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+/* ── Meta column (date + tags) ────────────────────────────────── */
+
+.meta {
+  grid-area: meta;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  align-self: start;
+  padding-top: 2px;
+}
+
+.date {
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rowUnread .date {
+  color: var(--accent-active);
+  font-weight: 650;
+}
+
+/* ── Per-row hover actions (§7.2) ─────────────────────────────── */
+
+.rowActions {
+  position: absolute;
+  right: var(--space-md);
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  gap: 2px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  box-shadow: var(--shadow-sm);
+  z-index: 1;
+}
+
+.row:hover .rowActions,
+.row:focus-within .rowActions {
+  display: flex;
+}
+
+.rowActions .iconBtn {
+  width: 28px;
+  height: 28px;
+}
+
+.rowActions .iconBtn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Mobile / touch — no hover. Always show the row actions when the
+ * row is selected so touch users can reach them; rely on
+ * pointer:fine breakpoint to know hover-reveal is OK. */
+@media (pointer: coarse) {
+  .row .rowActions {
+    display: none;
+  }
+  .rowSelected .rowActions {
+    display: flex;
+  }
+}

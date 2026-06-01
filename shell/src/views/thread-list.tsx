@@ -52,8 +52,49 @@ import {
 } from '../mail-state.js';
 import { useInvoker } from '../runtime/invoker.js';
 import type { EmailFull, ThreadGet } from '../runtime/jmap-client.js';
+import {
+  classifySender,
+  colorFor,
+  initialsFor,
+  kindLabel,
+  type SenderKind,
+} from '../runtime/sender-color.js';
 import type { ToolError } from '../runtime/types.js';
 import { buildDraftPrefill } from './draft-prefill.js';
+import styles from './thread-list.module.css';
+
+// Canonical English label for special-use mailboxes. Mirrors the map
+// in components/mailbox-tree-view.tsx — duplicated here rather than
+// extracted because the map is tiny, rarely changes, and a shared
+// helper module for 7 string constants is more code than the
+// duplication.
+const ROLE_LABEL: Record<string, string> = {
+  inbox: 'Inbox',
+  sent: 'Sent',
+  drafts: 'Drafts',
+  trash: 'Trash',
+  junk: 'Junk',
+  archive: 'Archive',
+  important: 'Important',
+};
+
+type MailboxLike = {
+  readonly id: string;
+  readonly name: string;
+  readonly role?: string;
+  readonly unreadEmails?: number;
+};
+
+function getMailboxLabel(
+  mailbox: MailboxLike | undefined,
+  fallback: string,
+): string {
+  if (mailbox === undefined) return fallback;
+  if (mailbox.role !== undefined && ROLE_LABEL[mailbox.role] !== undefined) {
+    return ROLE_LABEL[mailbox.role]!;
+  }
+  return mailbox.name;
+}
 
 type ThreadListData = {
   readonly threads: ReadonlyArray<{
@@ -107,10 +148,14 @@ export function ThreadList() {
 }
 
 function ThreadListSearchMode({ query }: { readonly query: string }) {
-  const { data, error, isLoading } = useThreadSearch({ query });
+  const { data, error, isLoading, refetch } = useThreadSearch({ query });
   // Search mode doesn't carry a mailboxId — `isDrafts` is forced
   // false. Future "search within Drafts only" could pass `inMailboxId`
   // and recompute, but item 9 ships search-everywhere.
+  const threadsLen = (data as ThreadListData | undefined)?.threads.length ?? 0;
+  const total = (data as ThreadListData | undefined)?.total;
+  const countText =
+    total !== undefined ? `${threadsLen} of ${total} for "${query}"` : null;
   return (
     <ThreadListBody
       data={data as ThreadListData | undefined}
@@ -119,27 +164,40 @@ function ThreadListSearchMode({ query }: { readonly query: string }) {
       isDrafts={false}
       emptyMessage={`No results for "${query}".`}
       mailboxId={null}
+      title={`Search: ${query}`}
+      countText={countText}
+      onRefresh={refetch}
     />
   );
 }
 
 function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
-  const { data, error, isLoading } = useThreadList({ mailboxId });
+  const { data, error, isLoading, refetch } = useThreadList({ mailboxId });
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
   const mailboxes = useMailboxList({});
 
-  const isDrafts = useMemo(() => {
-    const list = (mailboxes.data ?? []) as ReadonlyArray<{
-      id: string;
-      role?: string;
-    }>;
-    return list.some((m) => m.id === mailboxId && m.role === 'drafts');
+  const currentMailbox = useMemo(() => {
+    const list = (mailboxes.data ?? []) as ReadonlyArray<MailboxLike>;
+    return list.find((m) => m.id === mailboxId);
   }, [mailboxes.data, mailboxId]);
+
+  const isDrafts = currentMailbox?.role === 'drafts';
 
   // Reset thread selection when the mailbox changes.
   useEffect(() => {
     setSelectedThreadId(null);
   }, [mailboxId, setSelectedThreadId]);
+
+  const title = getMailboxLabel(currentMailbox, 'Mail');
+  const threadsLen = data?.threads.length ?? 0;
+  const total = data?.total;
+  const unread = currentMailbox?.unreadEmails ?? 0;
+  const countText =
+    total !== undefined
+      ? unread > 0
+        ? `${unread} unread · 1–${threadsLen} of ${total}`
+        : `1–${threadsLen} of ${total}`
+      : null;
 
   return (
     <ThreadListBody
@@ -149,6 +207,9 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
       isDrafts={isDrafts}
       emptyMessage="No threads in this mailbox."
       mailboxId={mailboxId}
+      title={title}
+      countText={countText}
+      onRefresh={refetch}
     />
   );
 }
@@ -160,15 +221,19 @@ function ThreadListBody(props: {
   readonly isDrafts: boolean;
   readonly emptyMessage: string;
   readonly mailboxId: string | null;
+  readonly title: string;
+  readonly countText: string | null;
+  readonly onRefresh: () => Promise<void> | void;
 }) {
-  const { data, error, isLoading, isDrafts, emptyMessage } = props;
+  const { data, error, isLoading, isDrafts, emptyMessage, title, countText, onRefresh } =
+    props;
+  const refetch = onRefresh;
   const selectedThreadId = useAtomValue(selectedThreadIdAtom);
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
   const setComposeState = useSetAtom(composeStateAtom);
   const invoker = useInvoker();
 
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
-  const total = data?.total;
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
@@ -303,65 +368,62 @@ function ThreadListBody(props: {
     [focusedIndex, moveFocus, onSelect, threads.length],
   );
 
-  if (isLoading) {
-    return (
-      <section aria-label="Threads" aria-busy="true">
-        <ThreadListLoadingSkeleton />
-      </section>
-    );
-  }
-  if (error !== undefined) {
-    return (
-      <section aria-label="Threads">
-        <p role="alert">Failed to load threads: {error.message}</p>
-      </section>
-    );
-  }
-  if (threads.length === 0) {
-    return (
-      <section aria-label="Threads">
-        <EmptyState title="Nothing here yet" description={emptyMessage} />
-      </section>
-    );
-  }
-
   const items = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
 
-  return (
-    <section
-      aria-label="Threads"
-      style={{
-        // PR 3: flex into the pane parent so the scroll region inside
-        // can `flex: 1; min-height: 0` and bound itself to the pane.
-        display: 'flex',
-        flexDirection: 'column',
-        flex: 1,
-        minHeight: 0,
-      }}
-    >
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <h2 style={{ margin: 0 }}>Threads</h2>
-        {total !== undefined ? (
-          <span aria-live="polite">
-            {threads.length} of {total}
+  // Always render the header — even on loading/empty/error states —
+  // so the pane doesn't blink between "no chrome" and "header + body"
+  // when data lands. Only the inner body switches by state.
+  const headerEl = (
+    <header className={styles['header']}>
+      <div className={styles['titleRow']}>
+        <h2 className={styles['title']}>{title}</h2>
+        {countText !== null ? (
+          <span className={styles['sub']} aria-live="polite">
+            {countText}
           </span>
         ) : null}
-      </header>
-      <div
-        ref={scrollRef}
-        // Scroll container — virtualizer measures this for visible window.
-        // The new mail-layout (PR 3) gives this pane a flex column with
-        // min-height:0; the scroll region fills whatever's left under the
-        // sticky header. No more 70vh magic — content scrolls within the
-        // pane, not the page.
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          marginTop: '0.5em',
-        }}
-      >
+      </div>
+      <div className={styles['toolbar']} aria-label="Mailbox actions">
+        <button
+          type="button"
+          className={styles['iconBtn']}
+          onClick={() => void refetch()}
+          aria-label="Refresh"
+          title="Refresh"
+        >
+          <RefreshIcon />
+        </button>
+        <span className={styles['toolbarSpacer']} />
+        {/* Multi-select + bulk actions land in PR 4.5. */}
+      </div>
+    </header>
+  );
+
+  let body: React.ReactNode;
+  if (isLoading) {
+    body = (
+      <div className={styles['body']} aria-busy="true">
+        <ThreadListLoadingSkeleton />
+      </div>
+    );
+  } else if (error !== undefined) {
+    body = (
+      <div className={styles['body']}>
+        <p role="alert" className={styles['error']}>
+          Failed to load threads: {error.message}
+        </p>
+      </div>
+    );
+  } else if (threads.length === 0) {
+    body = (
+      <div className={styles['body']}>
+        <EmptyState title="Nothing here yet" description={emptyMessage} />
+      </div>
+    );
+  } else {
+    body = (
+      <div ref={scrollRef} className={styles['body']}>
         <div
           role="listbox"
           aria-label="Threads"
@@ -371,8 +433,6 @@ function ThreadListBody(props: {
           }
           onKeyDown={onKeyDown}
           // Inner container is the listbox and carries keydown.
-          // tabIndex 0 lets the user Tab into the list; arrow keys
-          // then move within it.
           tabIndex={0}
           style={{ position: 'relative', height: `${totalHeight}px` }}
         >
@@ -397,6 +457,23 @@ function ThreadListBody(props: {
           })}
         </div>
       </div>
+    );
+  }
+
+  return (
+    <section
+      aria-label={title}
+      style={{
+        // PR 3: flex into the pane parent so the body inside can
+        // flex: 1; min-height: 0 and bound itself to the pane.
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      }}
+    >
+      {headerEl}
+      {body}
     </section>
   );
 }
@@ -418,8 +495,27 @@ const ThreadRow = forwardRef<HTMLDivElement, ThreadRowProps>(function ThreadRow(
   const e = thread.latestEmail;
   const seen = e.keywords.find((k) => k.name === '$seen')?.value ?? false;
   const flagged = e.keywords.find((k) => k.name === '$flagged')?.value ?? false;
-  const sender = formatSender(e.from);
+  const from = e.from?.[0];
+  const senderName = formatSender(e.from);
+  const senderEmail = from?.email ?? '';
+  // Phase 4 ships human/system classification only; agent senders need
+  // an explicit signal from the provenance layer (deferred — see
+  // runtime/sender-color.ts).
+  const kind: SenderKind = senderEmail !== ''
+    ? classifySender(senderEmail, from?.name)
+    : 'human';
+  const initials = initialsFor(from?.name, senderEmail);
+  const avatarColor = colorFor(senderEmail || senderName, kind);
+  const subject = e.subject ?? '(no subject)';
   const date = formatDate(e.receivedAt);
+
+  const rowClassName = [
+    styles['row'],
+    isSelected ? styles['rowSelected'] : '',
+    !seen ? styles['rowUnread'] : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
@@ -432,89 +528,85 @@ const ThreadRow = forwardRef<HTMLDivElement, ThreadRowProps>(function ThreadRow(
       aria-selected={isSelected}
       tabIndex={isFocused ? 0 : -1}
       onClick={onClick}
+      className={rowClassName}
       style={{
         position: 'absolute',
         top: `${offsetTop}px`,
         left: 0,
         right: 0,
-        /* PR 3 row-overlap fix: row height is content-driven via
-         * minHeight; the virtualizer reads the actual rendered height
-         * through `measureElement` and recomputes offsets. Replacing
-         * the fixed height with minHeight is what stops the next row
-         * from overlapping when content exceeds the initial estimate. */
+        /* PR 3 row-overlap fix carried forward: minHeight + measureElement.
+         * The actual content height is read off the rendered row and the
+         * virtualizer recomputes offsets accordingly. */
         minHeight: `${rowHeight}px`,
-        padding: '0.5em 0.75em',
         boxSizing: 'border-box',
-        borderBottom: '1px solid var(--border)',
-        cursor: 'pointer',
-        background: isSelected ? 'var(--surface-2)' : 'transparent',
-        color: 'var(--text-1)',
-        fontWeight: seen ? 400 : 600,
-        outline: 'inherit',
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5em' }}>
-        <span
-          style={{
-            flex: '0 0 auto',
-            maxWidth: '12em',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {sender}
-        </span>
-        <span style={{ flex: '0 0 auto', fontVariantNumeric: 'tabular-nums', color: 'var(--text-2)' }}>
-          {date}
-        </span>
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: '0.5em',
-          alignItems: 'baseline',
-        }}
+      <span className={styles['udot']} aria-hidden="true" />
+      <span
+        className={styles['avatar']}
+        style={{ background: avatarColor }}
+        aria-hidden="true"
+        title={kindLabel(kind)}
       >
+        {initials}
+      </span>
+      <div className={styles['main']}>
+        <div className={styles['sender']}>{senderName}</div>
+        <div className={styles['subject']}>{subject}</div>
+        {e.preview !== undefined && e.preview.length > 0 ? (
+          <div className={styles['preview']}>{e.preview}</div>
+        ) : null}
+      </div>
+      <div className={styles['meta']}>
+        <span className={styles['date']}>{date}</span>
         {flagged ? (
-          <span aria-label="Flagged" title="Flagged" style={{ flex: '0 0 auto' }}>
-            ★
+          <span aria-label="Flagged" title="Flagged" style={{ color: 'var(--accent)' }}>
+            <FlagIcon filled />
           </span>
         ) : null}
-        <span
-          style={{
-            flex: '1 1 auto',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {e.subject ?? '(no subject)'}
-        </span>
       </div>
-      {e.preview !== undefined && e.preview.length > 0 ? (
-        <div
-          style={{
-            color: 'var(--text-2)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            fontWeight: 400,
-          }}
-        >
-          {e.preview}
-        </div>
-      ) : null}
-      {/* Screen-reader-only summary covering the read state, since
-          the visual fontWeight + ★ icon convey it but a11y tools
-          shouldn't depend on those. */}
+
+      {/* Per-row Flag / Mark-read buttons are deferred to PR 4.5 — the
+       * row currently carries role="option" (listbox pattern) and inner
+       * <button> elements would trip axe-core's nested-interactive
+       * rule. PR 4.5 restructures the row to a non-interactive container
+       * with explicit "open thread" + per-row action buttons inside. */}
+
+      {/* Screen-reader-only summary covering read/flagged state. The
+       * visual unread dot + accent date color carry it for sighted
+       * users, but a11y tools shouldn't depend on those signals. */}
       <span style={visuallyHidden}>
-        {seen ? 'read' : 'unread'}
+        {kindLabel(kind)}, {seen ? 'read' : 'unread'}
         {flagged ? ', flagged' : ''}
       </span>
     </div>
   );
 });
+
+// ── Inline SVG icons ──────────────────────────────────────────────
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+    </svg>
+  );
+}
+
+function FlagIcon({ filled }: { readonly filled: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+      <line x1="4" y1="22" x2="4" y2="15" />
+    </svg>
+  );
+}
+
+// MarkReadIcon / MarkUnreadIcon defined and removed in PR 4 — they
+// belong to the per-row action surface deferred to PR 4.5. Reinstate
+// (with the icons above) when the row interaction model is restructured
+// to avoid axe-core's nested-interactive rule.
 
 function formatSender(
   from: ReadonlyArray<{ name?: string; email: string }> | undefined,
