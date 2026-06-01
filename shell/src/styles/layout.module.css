@@ -91,12 +91,12 @@
 }
 
 .layoutToggleBtnActive {
-  background: var(--accent, #3b82f6);
+  background: var(--accent);
   color: #fff;
 }
 
 .layoutToggleBtnActive:hover {
-  background: var(--accent, #3b82f6);
+  background: var(--accent);
   color: #fff;
 }
 

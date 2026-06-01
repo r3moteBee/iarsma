@@ -44,7 +44,7 @@
 }
 
 .viewToggleBtnActive {
-  background: var(--accent, #3b82f6);
+  background: var(--accent);
   color: var(--surface-1);
   font-weight: 600;
 }
@@ -124,7 +124,7 @@
 }
 
 .dayCellToday {
-  background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .dayNumber {
@@ -135,7 +135,7 @@
 }
 
 .dayNumberToday {
-  background: var(--accent, #3b82f6);
+  background: var(--accent);
   color: var(--surface-1);
   border-radius: 50%;
   width: 1.6em;
@@ -156,7 +156,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent, #3b82f6);
+  background: var(--accent);
 }
 
 .eventDotMore {
@@ -260,7 +260,7 @@
   white-space: nowrap;
   cursor: pointer;
   background: var(--surface-1, #fff);
-  border-left: 3px solid var(--accent, #3b82f6);
+  border-left: 3px solid var(--accent);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   z-index: 1;
 }
@@ -309,7 +309,7 @@
 }
 
 .formInput:focus {
-  outline: 2px solid var(--accent, #3b82f6);
+  outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
@@ -325,7 +325,7 @@
 }
 
 .formSelect:focus {
-  outline: 2px solid var(--accent, #3b82f6);
+  outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
@@ -342,7 +342,7 @@
 }
 
 .formTextarea:focus {
-  outline: 2px solid var(--accent, #3b82f6);
+  outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 

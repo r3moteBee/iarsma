@@ -737,7 +737,7 @@ function EventBlock({
   const topOffset = (startMinute / 60) * 100;
   const heightPercent = (durationMinutes / 60) * 100;
 
-  const borderColor = event.calendarColor ?? 'var(--accent, #3b82f6)';
+  const borderColor = event.calendarColor ?? 'var(--accent)';
 
   return (
     <div
