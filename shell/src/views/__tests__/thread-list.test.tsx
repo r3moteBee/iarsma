@@ -172,11 +172,9 @@ async function waitForList(): Promise<void> {
 // ──────────────────────────────────────────────────────────────────────
 
 describe('ThreadList — placeholder states', () => {
-  it('shows "select a mailbox" placeholder when no mailbox is selected', () => {
+  it('shows the no-mailbox EmptyState when no mailbox is selected', () => {
     renderThreadList({ mailboxId: null });
-    expect(
-      screen.getByText(/select a mailbox/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/no mailbox selected/i)).toBeInTheDocument();
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 

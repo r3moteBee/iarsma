@@ -37,9 +37,14 @@
   position: relative;
 }
 
-.navButton:hover,
+.navButton:hover {
+  color: var(--accent-hover);
+}
+
 .navButtonActive {
   color: var(--accent);
+  /* Top rail = "you are here" on mobile, mirrors the sidebar's left rail. */
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 .navIcon {
@@ -65,7 +70,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--danger);
+  background: var(--destructive);
   color: white;
   border-radius: 8px;
   font-size: 10px;
@@ -129,5 +134,5 @@
 }
 
 .sheetItemDanger {
-  color: var(--danger);
+  color: var(--destructive);
 }

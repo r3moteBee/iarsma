@@ -173,15 +173,15 @@ function renderThreadView(opts: {
 // ──────────────────────────────────────────────────────────────────────
 
 describe('ThreadView — placeholder states', () => {
-  it('shows a "select a thread" placeholder when no thread is selected', () => {
+  it('shows the no-selection EmptyState when no thread is selected', () => {
     renderThreadView({ threadId: null });
-    expect(screen.getByText(/select a thread/i)).toBeInTheDocument();
+    expect(screen.getByText(/no conversation selected/i)).toBeInTheDocument();
   });
 
   it('renders an empty-thread message when the data has zero emails', async () => {
     renderThreadView({ emails: [] });
     await waitFor(() => {
-      expect(screen.getByText(/no messages/i)).toBeInTheDocument();
+      expect(screen.getByText(/this thread is empty/i)).toBeInTheDocument();
     });
   });
 

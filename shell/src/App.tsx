@@ -355,6 +355,23 @@ function SignedInShell({
       return entry;
     });
   }, [mailboxListResult.data]);
+
+  // Auto-select the Inbox the first time mailboxes load (§6.4 "no dead clicks").
+  // Without this, clicking Mail in the nav leaves both panes blank because
+  // `selectedMailboxIdAtom` defaults to null. Prefer `role: 'inbox'`; fall back
+  // to the first mailbox in display order. Only fires when nothing is selected
+  // yet — a deliberate later switch to a different mailbox is never overridden.
+  useEffect(() => {
+    if (selectedMailboxId !== null) return;
+    if (sidebarMailboxes === undefined || sidebarMailboxes.length === 0) return;
+    const inbox = sidebarMailboxes.find((m) => m.role === 'inbox');
+    const first = sidebarMailboxes[0];
+    const pick = inbox ?? first;
+    if (pick !== undefined) {
+      setSelectedMailboxId(pick.id);
+    }
+  }, [selectedMailboxId, setSelectedMailboxId, sidebarMailboxes]);
+
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleLayoutChange = useCallback(
