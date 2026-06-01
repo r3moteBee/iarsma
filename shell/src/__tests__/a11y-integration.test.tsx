@@ -270,8 +270,14 @@ describe('a11y — signed-in shell integration', () => {
         </IarsmaProvider>
       </JotaiProvider>,
     );
-    // One h1 (Iarsma), one h2 (Signed in).
+    // One h1 (Iarsma). h2s: "Signed in" (harness) + the ThreadList's
+    // mailbox-name pane title (PR 4). Multiple h2s at the same nesting
+    // level are correct heading structure for sibling sections — what
+    // we're checking is monotonic order (no level skipped) + a single
+    // top-level h1.
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { level: 2 }).length).toBeGreaterThanOrEqual(1);
+    // No level-1 → level-3 jumps.
+    expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
   });
 });
