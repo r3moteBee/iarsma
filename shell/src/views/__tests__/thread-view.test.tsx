@@ -487,7 +487,7 @@ describe('ThreadView — keyboard nav', () => {
 // ──────────────────────────────────────────────────────────────────────
 
 describe('ThreadView — attachments', () => {
-  it('lists non-inline attachments with name, type, and size', async () => {
+  it('lists non-inline attachments with name and size', async () => {
     renderThreadView({
       emails: [
         email({
@@ -509,8 +509,10 @@ describe('ThreadView — attachments', () => {
         screen.getByRole('region', { name: 'Attachments' }),
       ).toBeInTheDocument();
     });
+    // PR 5 chip layout: filename + formatted size. The raw MIME type
+    // (still on email.attachments[i].type) is no longer rendered as
+    // visible text — the mockup chip is intentionally compact.
     expect(screen.getByText('invoice.pdf')).toBeInTheDocument();
-    expect(screen.getByText('application/pdf')).toBeInTheDocument();
     expect(screen.getByText('12.1 KB')).toBeInTheDocument();
   });
 

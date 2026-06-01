@@ -1,0 +1,304 @@
+/* ──────────────────────────────────────────────────────────────────
+ * ThreadView visuals — PR 5 of the UI redesign.
+ *
+ * Lifted from UI-Design/mockups/iarsma-redesign.html (the .msgcard /
+ * .msg-head / .reply-bar / .notice cluster). The pane wrapper lives
+ * in mail-layout.module.css (PR 3); these are the in-pane structures.
+ *
+ * Layout: sticky header at top, scrollable .msgs region in the
+ * middle, sticky .replyBar at the bottom. Each message renders as a
+ * .msgCard inside the .msgs region.
+ * ────────────────────────────────────────────────────────────────── */
+
+/* ── Pane wrapper ─────────────────────────────────────────────── */
+
+/* The outer <section> the ThreadView renders. mail-layout.module.css
+ * gives the .readPane parent `display: flex; flex-direction: column;
+ * min-height: 0` — this wrapper inherits that so the sticky header
+ * stays put while .msgs scrolls. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Pane header (subject + actions row) ──────────────────────── */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.actions .spacer {
+  flex: 1;
+}
+
+/* Icon button shared with ThreadList — kept in this module because
+ * styling them identically across panes would otherwise require
+ * dragging the rules through a shared sheet. PR 6 may extract an
+ * `IconButton` component if a third caller arrives. */
+.iconBtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.iconBtn:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.iconBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.iconBtn svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ── Scrollable messages region ───────────────────────────────── */
+
+.msgs {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* ── Message card ─────────────────────────────────────────────── */
+
+.msgCard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  outline: inherit;
+}
+
+.msgCard:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+/* Header: an entire <button> row so the click target is generous. */
+.msgHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.msgHead:hover {
+  background: color-mix(in srgb, var(--accent) 3%, transparent);
+}
+
+.msgAvatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  flex: 0 0 auto;
+  /* Background filled inline per sender via colorFor() — see the
+   * sender-color rule shared with ThreadList (§7.3.1). */
+}
+
+.msgWho {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.msgName {
+  font-weight: 700;
+  font-size: var(--text-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msgEmail {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msgDate {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.msgPreview {
+  padding: 0 var(--space-md) var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msgRecip {
+  padding: 0 var(--space-md);
+  margin-top: -4px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.msgBody {
+  padding: var(--space-md);
+  padding-top: var(--space-sm);
+  font-size: var(--text-md);
+  line-height: 1.65;
+  color: var(--text-1);
+}
+
+.msgBody p {
+  margin: 0 0 0.9em;
+}
+
+.msgBody pre {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
+}
+
+.msgEmpty {
+  color: var(--text-3);
+  font-style: italic;
+  margin: 0;
+}
+
+/* ── Notice banner (external-images-blocked etc.) ─────────────── */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 var(--space-md) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.noticeText {
+  flex: 1;
+}
+
+/* ── Attachments ──────────────────────────────────────────────── */
+
+.attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  padding: 0 var(--space-md) var(--space-md);
+}
+
+.attachItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.attachSize {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Sticky reply bar ─────────────────────────────────────────── */
+
+.replyBar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  background: color-mix(in srgb, var(--surface-1) 90%, transparent);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+/* ── Empty thread (zero-emails edge case) ─────────────────────── */
+
+.emptyThread {
+  padding: var(--space-lg);
+}
+
+/* ── Error state ──────────────────────────────────────────────── */
+
+.error {
+  padding: var(--space-md);
+  color: var(--destructive);
+}
