@@ -44,6 +44,8 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { tokensAtom } from '../auth-state.js';
+import { EmptyState } from '../components/empty-state.js';
+import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
 import { selectedThreadIdAtom } from '../mail-state.js';
 import { useThreadGet } from '../generated/capabilities/thread-get.js';
@@ -56,7 +58,10 @@ export function ThreadView() {
   if (threadId === null) {
     return (
       <section aria-label="Thread">
-        <p>Select a thread to read.</p>
+        <EmptyState
+          title="No conversation selected"
+          description="Pick a message from the list to read it here."
+        />
       </section>
     );
   }
@@ -69,7 +74,7 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
   if (isLoading) {
     return (
       <section aria-label="Thread" aria-busy="true">
-        <p>Loading thread…</p>
+        <ThreadLoadingSkeleton />
       </section>
     );
   }
@@ -83,7 +88,10 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
   if (data === undefined || data.emails.length === 0) {
     return (
       <section aria-label="Thread">
-        <p>This thread has no messages.</p>
+        <EmptyState
+          title="This thread is empty"
+          description="The conversation has no messages to display."
+        />
       </section>
     );
   }
@@ -479,5 +487,36 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+/**
+ * Skeleton shown while a thread is being fetched. Apes the per-message
+ * card shape (header strip + a few preview lines) so the page doesn't
+ * reflow noticeably when real content lands.
+ */
+function ThreadLoadingSkeleton() {
+  return (
+    <div aria-hidden="true" style={{ padding: '1em', display: 'flex', flexDirection: 'column', gap: '1em' }}>
+      <Skeleton width="70%" height="22px" />
+      {Array.from({ length: 2 }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            padding: '1em',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          <Skeleton width="40%" height="14px" />
+          <Skeleton width="100%" height="13px" />
+          <Skeleton width="95%" height="13px" />
+          <Skeleton width="60%" height="13px" />
+        </div>
+      ))}
+    </div>
+  );
 }
 

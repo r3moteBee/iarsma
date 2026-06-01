@@ -38,6 +38,8 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import { EmptyState } from '../components/empty-state.js';
+import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useThreadList } from '../generated/capabilities/thread-list.js';
@@ -83,9 +85,15 @@ export function ThreadList() {
     return <ThreadListSearchMode query={searchQuery.trim()} />;
   }
   if (mailboxId === null) {
+    // After the auto-select effect in App.tsx, this state should be rare
+    // (mailboxes still loading on first paint). Keep an EmptyState
+    // anyway so the pane never goes blank.
     return (
       <section aria-label="Threads">
-        <p>Select a mailbox to view its threads.</p>
+        <EmptyState
+          title="No mailbox selected"
+          description="Pick a mailbox from the sidebar to see its threads."
+        />
       </section>
     );
   }
@@ -288,7 +296,7 @@ function ThreadListBody(props: {
   if (isLoading) {
     return (
       <section aria-label="Threads" aria-busy="true">
-        <p>Loading threads…</p>
+        <ThreadListLoadingSkeleton />
       </section>
     );
   }
@@ -302,7 +310,7 @@ function ThreadListBody(props: {
   if (threads.length === 0) {
     return (
       <section aria-label="Threads">
-        <p>{emptyMessage}</p>
+        <EmptyState title="Nothing here yet" description={emptyMessage} />
       </section>
     );
   }
@@ -506,3 +514,32 @@ const visuallyHidden = {
   whiteSpace: 'nowrap',
   border: 0,
 } as const;
+
+/**
+ * Skeleton rows shown while the thread list is loading. Five rows feels
+ * like "real content arriving" without being so many that a fast load
+ * causes a visible flash. Each row apes the three-line layout the real
+ * row uses so the loading state doesn't reflow into something taller.
+ */
+function ThreadListLoadingSkeleton() {
+  return (
+    <div aria-hidden="true" style={{ padding: '0.5em' }}>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            padding: '0.5em 0.75em',
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
+          <Skeleton width="40%" height="13px" />
+          <Skeleton width="80%" height="15px" />
+          <Skeleton width="65%" height="12px" />
+        </div>
+      ))}
+    </div>
+  );
+}

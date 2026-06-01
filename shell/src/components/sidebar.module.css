@@ -129,9 +129,12 @@
 }
 
 .navItemActive {
-  background: var(--surface-3);
+  background: var(--accent-subtle);
   color: var(--text-1);
   font-weight: 600;
+  /* Accent rail = "you are here". The 3px inset shadow doubles as the
+   * left border without affecting layout, so it can't shift other items. */
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .navIcon {
