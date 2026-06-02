@@ -26,9 +26,10 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type KeyboardEvent,
 } from 'react';
 import { tokensAtom } from '../auth-state.js';
+import { Button } from '../components/button.js';
+import { Dialog } from '../components/dialog.js';
 import { composeStateAtom, type ComposePrefill } from '../compose-state.js';
 import { useMailDraft } from '../generated/capabilities/mail-draft.js';
 import { useIdentityList } from '../generated/capabilities/identity-list.js';
@@ -46,6 +47,9 @@ import {
   type ParsedRecipient,
 } from './recipient-parser.js';
 import { Composer } from './composer.js';
+import styles from './compose-view.module.css';
+
+const COMPOSE_FORM_ID = 'compose-form';
 
 /** Debounce window before save-on-blur fires mail.draft.commit. */
 const SAVE_DEBOUNCE_MS = 500;
@@ -208,30 +212,10 @@ function ComposeModal(props: {
     parsedBcc.errors.length > 0;
   const hasAtLeastOneRecipient = parsedTo.recipients.length > 0;
 
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    previouslyFocusedRef.current =
-      typeof document !== 'undefined'
-        ? (document.activeElement as HTMLElement | null)
-        : null;
-    dialogRef.current?.focus();
-    return () => {
-      previouslyFocusedRef.current?.focus();
-    };
-  }, []);
-
-  // Esc closes (matches the keyboard help overlay pattern).
-  const onDialogKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    },
-    [onClose],
-  );
+  // PR 5.5: focus trap, Escape handling, backdrop click — all handled
+  // by the shared <Dialog> component now (native <dialog> + showModal).
+  // The old dialogRef + previouslyFocusedRef + onDialogKeyDown
+  // bookkeeping is gone; showModal saves/restores focus on its own.
 
   // Save-on-blur: debounced commit through useMailDraft. Phase 2 item 4
   // creates a fresh draft each save (mail.draft only supports create
@@ -449,166 +433,162 @@ function ComposeModal(props: {
     onClose,
   ]);
 
+  // Discard draft (PR 5.5): if the user saved a draft at any point
+  // during this session, delete it via mail.delete; then close. If
+  // nothing was ever saved, the destructive button is hidden so the
+  // user can't "discard" something that doesn't exist on the server.
+  const hasSavedDraft = lastDraftIdRef.current !== null;
+  const onDiscard = useCallback(() => {
+    const id = lastDraftIdRef.current;
+    if (id === null) {
+      onClose();
+      return;
+    }
+    void (async () => {
+      try {
+        await invoker.invoke('mail.delete', { emailIds: [id] });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] discard draft (mail.delete) failed:', e);
+      } finally {
+        onClose();
+      }
+    })();
+  }, [invoker, onClose]);
+
+  const title = prefill.inReplyTo !== undefined ? 'Reply' : 'New message';
+  const sendDisabled =
+    !hasAtLeastOneRecipient ||
+    hasRecipientErrors ||
+    sentMailboxId === null ||
+    selectedIdentity === null ||
+    uploadsInFlight > 0;
+
   return (
     <>
-      <div
-        role="presentation"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.4)',
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'center',
-          padding: '4em 1em',
-          zIndex: 900,
-        }}
-      >
-        <div
-          ref={dialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="compose-title"
-          tabIndex={-1}
-          onKeyDown={onDialogKeyDown}
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            background: 'var(--surface-1)',
-            color: 'var(--text-1)',
-            maxWidth: '40em',
-            width: '100%',
-            maxHeight: '85vh',
-            overflow: 'auto',
-            padding: '1.25em',
-            borderRadius: 8,
-            boxShadow: 'var(--shadow-md)',
-          }}
-        >
-          <header
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              marginBottom: '0.75em',
-            }}
-          >
-            <h2 id="compose-title" style={{ margin: 0 }}>
-              {prefill.inReplyTo !== undefined ? 'Reply' : 'New message'}
-            </h2>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close compose"
-            >
+      <Dialog
+        open
+        onClose={onClose}
+        title={title}
+        footer={
+          <>
+            <Button variant="secondary" onClick={onClose}>
               Cancel
-            </button>
-          </header>
-          <form onSubmit={onSendClick}>
-            <FieldRow label="From" htmlFor="compose-identity">
-              {identities.length === 0 ? (
-                <output style={{ color: 'var(--text-2)' }}>
-                  {identityList.isLoading
-                    ? 'Loading identities…'
-                    : 'No sending identities configured on the server.'}
-                </output>
-              ) : identities.length === 1 ? (
-                // Single identity — render as static text + a hidden
-                // select so the field row still associates with the
-                // (auto-selected) value.
-                <output style={{ color: 'var(--text-2)' }}>
-                  {formatIdentityLabel(identities[0]!)}
-                </output>
-              ) : (
-                <select
-                  id="compose-identity"
-                  value={selectedIdentityId ?? ''}
-                  onChange={(e) => setSelectedIdentityId(e.target.value)}
-                  style={fieldStyle}
-                  aria-label="Sending identity"
-                >
-                  {identities.map((id) => (
-                    <option key={id.id} value={id.id}>
-                      {formatIdentityLabel(id)}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </FieldRow>
-            <FieldRow label="To" htmlFor="compose-to">
-              <input
-                id="compose-to"
-                type="text"
-                value={toText}
-                onChange={(e) => setToText(e.target.value)}
-                onBlur={triggerDebouncedSave}
-                aria-invalid={parsedTo.errors.length > 0}
-                aria-describedby={
-                  parsedTo.errors.length > 0 ? 'compose-to-errors' : undefined
-                }
-                placeholder="alice@example.net, Bob <bob@example.net>"
-                style={fieldStyle}
-              />
+            </Button>
+            {hasSavedDraft ? (
+              <Button variant="destructive" onClick={onDiscard}>
+                Discard draft
+              </Button>
+            ) : null}
+            <Button
+              variant="primary"
+              type="submit"
+              form={COMPOSE_FORM_ID}
+              disabled={sendDisabled}
+            >
+              {uploadsInFlight > 0 ? 'Uploading…' : 'Send…'}
+            </Button>
+          </>
+        }
+      >
+        <div className={styles['composeBody']}>
+          <form id={COMPOSE_FORM_ID} onSubmit={onSendClick}>
+            <div className={styles['fields']}>
+              <FieldRow label="From" htmlFor="compose-identity">
+                {identities.length === 0 ? (
+                  <output className={styles['fieldOutput']}>
+                    {identityList.isLoading
+                      ? 'Loading identities…'
+                      : 'No sending identities configured on the server.'}
+                  </output>
+                ) : identities.length === 1 ? (
+                  <output className={styles['fieldOutput']}>
+                    {formatIdentityLabel(identities[0]!)}
+                  </output>
+                ) : (
+                  <select
+                    id="compose-identity"
+                    value={selectedIdentityId ?? ''}
+                    onChange={(e) => setSelectedIdentityId(e.target.value)}
+                    className={styles['fieldInput']}
+                    aria-label="Sending identity"
+                  >
+                    {identities.map((id) => (
+                      <option key={id.id} value={id.id}>
+                        {formatIdentityLabel(id)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </FieldRow>
+              <FieldRow label="To" htmlFor="compose-to">
+                <input
+                  id="compose-to"
+                  type="text"
+                  value={toText}
+                  onChange={(e) => setToText(e.target.value)}
+                  onBlur={triggerDebouncedSave}
+                  aria-invalid={parsedTo.errors.length > 0}
+                  aria-describedby={
+                    parsedTo.errors.length > 0 ? 'compose-to-errors' : undefined
+                  }
+                  placeholder="alice@example.net, Bob <bob@example.net>"
+                  className={styles['fieldInput']}
+                />
+              </FieldRow>
               {parsedTo.errors.length > 0 ? (
                 <p
                   id="compose-to-errors"
                   role="alert"
-                  style={errorStyle}
+                  className={styles['fieldError']}
                 >
                   Invalid recipient(s): {parsedTo.errors.join(', ')}
                 </p>
               ) : null}
-            </FieldRow>
-            <FieldRow label="Cc" htmlFor="compose-cc">
-              <input
-                id="compose-cc"
-                type="text"
-                value={ccText}
-                onChange={(e) => setCcText(e.target.value)}
-                onBlur={triggerDebouncedSave}
-                aria-invalid={parsedCc.errors.length > 0}
-                style={fieldStyle}
-              />
+              <FieldRow label="Cc" htmlFor="compose-cc">
+                <input
+                  id="compose-cc"
+                  type="text"
+                  value={ccText}
+                  onChange={(e) => setCcText(e.target.value)}
+                  onBlur={triggerDebouncedSave}
+                  aria-invalid={parsedCc.errors.length > 0}
+                  className={styles['fieldInput']}
+                />
+              </FieldRow>
               {parsedCc.errors.length > 0 ? (
-                <p role="alert" style={errorStyle}>
+                <p role="alert" className={styles['fieldError']}>
                   Invalid recipient(s): {parsedCc.errors.join(', ')}
                 </p>
               ) : null}
-            </FieldRow>
-            <FieldRow label="Bcc" htmlFor="compose-bcc">
-              <input
-                id="compose-bcc"
-                type="text"
-                value={bccText}
-                onChange={(e) => setBccText(e.target.value)}
-                onBlur={triggerDebouncedSave}
-                aria-invalid={parsedBcc.errors.length > 0}
-                style={fieldStyle}
-              />
+              <FieldRow label="Bcc" htmlFor="compose-bcc">
+                <input
+                  id="compose-bcc"
+                  type="text"
+                  value={bccText}
+                  onChange={(e) => setBccText(e.target.value)}
+                  onBlur={triggerDebouncedSave}
+                  aria-invalid={parsedBcc.errors.length > 0}
+                  className={styles['fieldInput']}
+                />
+              </FieldRow>
               {parsedBcc.errors.length > 0 ? (
-                <p role="alert" style={errorStyle}>
+                <p role="alert" className={styles['fieldError']}>
                   Invalid recipient(s): {parsedBcc.errors.join(', ')}
                 </p>
               ) : null}
-            </FieldRow>
-            <FieldRow label="Subject" htmlFor="compose-subject">
-              <input
-                id="compose-subject"
-                type="text"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                onBlur={triggerDebouncedSave}
-                style={fieldStyle}
-              />
-            </FieldRow>
-            <div
-              style={{
-                marginTop: '0.5em',
-              }}
-              onBlur={triggerDebouncedSave}
-            >
+              <FieldRow label="Subject" htmlFor="compose-subject">
+                <input
+                  id="compose-subject"
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  onBlur={triggerDebouncedSave}
+                  className={styles['fieldInput']}
+                />
+              </FieldRow>
+            </div>
+            <div className={styles['bodyWrapper']} onBlur={triggerDebouncedSave}>
               <Composer
                 label="Message body"
                 value={bodyHtml}
@@ -623,42 +603,18 @@ function ComposeModal(props: {
               onRemove={removeAttachment}
             />
             {draftError !== null ? (
-              <p role="alert" style={errorStyle}>
+              <p role="alert" className={styles['errorBanner']}>
                 Draft save failed: {draftError}
               </p>
             ) : null}
             {sendError !== null ? (
-              <p role="alert" style={errorStyle}>
+              <p role="alert" className={styles['errorBanner']}>
                 Send failed: {sendError}
               </p>
             ) : null}
-            <footer
-              style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: '0.5em',
-                marginTop: '0.75em',
-              }}
-            >
-              <button type="button" onClick={onClose}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={
-                  !hasAtLeastOneRecipient ||
-                  hasRecipientErrors ||
-                  sentMailboxId === null ||
-                  selectedIdentity === null ||
-                  uploadsInFlight > 0
-                }
-              >
-                {uploadsInFlight > 0 ? 'Uploading…' : 'Send…'}
-              </button>
-            </footer>
           </form>
         </div>
-      </div>
+      </Dialog>
       {sendPreview !== null ? (
         <SendPreviewModal
           preview={sendPreview}
@@ -679,33 +635,14 @@ function FieldRow(props: {
   readonly children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: 'flex', gap: '0.5em', marginBottom: '0.5em' }}>
-      <label
-        htmlFor={props.htmlFor}
-        style={{ flex: '0 0 4em', paddingTop: '0.4em', fontWeight: 600 }}
-      >
+    <div className={styles['field']}>
+      <label htmlFor={props.htmlFor} className={styles['fieldLabel']}>
         {props.label}
       </label>
-      <div style={{ flex: '1 1 auto' }}>{props.children}</div>
+      {props.children}
     </div>
   );
 }
-
-const fieldStyle = {
-  width: '100%',
-  padding: '0.4em 0.5em',
-  border: '1px solid var(--surface-3)',
-  borderRadius: 4,
-  font: 'inherit',
-  color: 'var(--text-1)',
-  background: 'var(--surface-2)',
-};
-
-const errorStyle = {
-  color: 'var(--destructive)',
-  fontSize: '0.9em',
-  margin: '0.25em 0 0',
-};
 
 function SendPreviewModal(props: {
   readonly preview: MailSendPreview;
@@ -841,25 +778,15 @@ function AttachmentsPanel(props: {
     props;
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
-    <section
-      aria-label="Attachments"
-      style={{
-        marginTop: '0.75em',
-        paddingTop: '0.5em',
-        borderTop: '1px solid var(--surface-3)',
-      }}
-    >
-      <div style={{ display: 'flex', gap: '0.5em', alignItems: 'baseline' }}>
-        <h3
-          style={{
-            margin: 0,
-            fontSize: '0.95em',
-            fontWeight: 600,
-            flex: '0 0 auto',
-          }}
+    <section aria-label="Attachments" className={styles['attachSection']}>
+      <div className={styles['attachHead']}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => inputRef.current?.click()}
         >
-          Attachments ({attachments.length})
-        </h3>
+          Attach
+        </Button>
         <input
           ref={inputRef}
           type="file"
@@ -870,11 +797,15 @@ function AttachmentsPanel(props: {
             // Reset the input so re-picking the same file fires onChange.
             if (inputRef.current !== null) inputRef.current.value = '';
           }}
-          style={{ font: 'inherit' }}
+          className={styles['attachFileInput']}
         />
         {uploadsInFlight > 0 ? (
-          <output style={{ color: 'var(--text-2)', fontSize: '0.9em' }}>
+          <output className={styles['attachSize']}>
             Uploading {uploadsInFlight} file{uploadsInFlight === 1 ? '' : 's'}…
+          </output>
+        ) : attachments.length > 0 ? (
+          <output className={styles['attachSize']}>
+            {attachments.length} attached
           </output>
         ) : null}
         {/* Reserved slot for the image-resize component (Phase 5).
@@ -884,40 +815,28 @@ function AttachmentsPanel(props: {
             (downscale to N px or X% quality) before the upload fires. */}
       </div>
       {error !== null ? (
-        <p role="alert" style={errorStyle}>
+        <p role="alert" className={styles['fieldError']}>
           {error}
         </p>
       ) : null}
       {attachments.length > 0 ? (
-        <ul style={{ listStyle: 'none', padding: 0, margin: '0.5em 0 0' }}>
+        <ul className={styles['attachChips']}>
           {attachments.map((a) => (
-            <li
-              key={a.blobId}
-              style={{
-                display: 'flex',
-                gap: '0.5em',
-                padding: '0.25em 0',
-                borderTop: '1px solid var(--surface-3)',
-                alignItems: 'baseline',
-              }}
-            >
-              <span style={{ flex: '1 1 auto' }}>{a.name}</span>
-              <span style={{ flex: '0 0 auto', color: 'var(--text-2)' }}>{a.type}</span>
-              <span
-                style={{
-                  flex: '0 0 auto',
-                  color: 'var(--text-2)',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
+            <li key={a.blobId} className={styles['attachChip']}>
+              <span className={styles['attachChipName']}>{a.name}</span>
+              <span className={styles['attachChipSize']}>
                 {formatBytes(a.size)}
               </span>
               <button
                 type="button"
                 onClick={() => onRemove(a.blobId)}
                 aria-label={`Remove ${a.name}`}
+                className={styles['attachChipRemove']}
               >
-                Remove
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+                  <line x1="5" y1="5" x2="19" y2="19" />
+                  <line x1="19" y1="5" x2="5" y2="19" />
+                </svg>
               </button>
             </li>
           ))}

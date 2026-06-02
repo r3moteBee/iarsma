@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import type { ReactNode } from 'react';
 import styles from './dialog.module.css';
 
@@ -18,6 +18,10 @@ export function Dialog({
   footer,
 }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // Tie the <dialog> to its visible heading so screen readers announce
+  // the title as the dialog's accessible name (and tests can query
+  // `getByRole('dialog', { name: ... })`).
+  const titleId = useId();
 
   useEffect(() => {
     const el = dialogRef.current;
@@ -33,6 +37,7 @@ export function Dialog({
   return (
     <dialog
       ref={dialogRef}
+      aria-labelledby={titleId}
       className={styles['dialog']}
       onCancel={(e) => {
         e.preventDefault();
@@ -40,7 +45,7 @@ export function Dialog({
       }}
     >
       <div className={styles['header']}>
-        <h2 className={styles['title']}>{title}</h2>
+        <h2 id={titleId} className={styles['title']}>{title}</h2>
         <button
           type="button"
           className={styles['closeButton']}
