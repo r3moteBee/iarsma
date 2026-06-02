@@ -7,6 +7,11 @@ type ButtonProps = {
   readonly children: ReactNode;
   readonly disabled?: boolean;
   readonly type?: 'button' | 'submit';
+  /** Submit-button form association — lets a submit button trigger a
+   *  form that isn't its ancestor (e.g. ComposeView puts the Send
+   *  button in the Dialog footer slot while the form lives in the
+   *  body). */
+  readonly form?: string;
   readonly onClick?: () => void;
   readonly className?: string;
   readonly 'aria-label'?: string;
@@ -18,6 +23,7 @@ export function Button({
   children,
   disabled,
   type = 'button',
+  form,
   onClick,
   className,
   'aria-label': ariaLabel,
@@ -29,6 +35,7 @@ export function Button({
   return (
     <button
       type={type}
+      form={form}
       className={classes}
       disabled={disabled}
       onClick={onClick}

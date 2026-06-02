@@ -447,9 +447,13 @@ describe('ComposeView — send flow', () => {
 describe('ComposeView — dismissal', () => {
   it('Esc closes the compose dialog', async () => {
     renderComposer();
-    fireEvent.keyDown(screen.getByRole('dialog', { name: /new message/i }), {
-      key: 'Escape',
-    });
+    // PR 5.5: the dialog is a native <dialog>. Real browsers fire a
+    // `cancel` event when the user presses Escape; jsdom doesn't
+    // simulate that for synthetic keydown events. Fire the cancel
+    // event directly — same pattern as the Dialog component's own
+    // Esc test (components/__tests__/components.test.tsx).
+    const dialog = screen.getByRole('dialog', { name: /new message/i });
+    fireEvent(dialog, new Event('cancel'));
     await waitFor(() => {
       expect(
         screen.queryByRole('dialog', { name: /new message/i }),
@@ -560,7 +564,7 @@ describe('ComposeView — identity selector', () => {
 });
 
 describe('ComposeView — attachments', () => {
-  it('uploads a picked file and shows it in the list with name + size', async () => {
+  it('uploads a picked file and shows it as a chip with name + size', async () => {
     const { uploads } = renderComposer();
     const input = screen.getByLabelText(/attach files/i) as HTMLInputElement;
     const file = new File(['hello world'], 'note.txt', { type: 'text/plain' });
@@ -571,11 +575,12 @@ describe('ComposeView — attachments', () => {
     expect(uploads).toHaveLength(1);
     expect(uploads[0]?.name).toBe('note.txt');
     expect(screen.getByText('11 B')).toBeInTheDocument();
-    // Attachment count badge in the section heading.
-    expect(screen.getByText('Attachments (1)')).toBeInTheDocument();
+    // PR 5.5: section heading is gone; the count surfaces as "N attached"
+    // next to the Attach button.
+    expect(screen.getByText(/1 attached/i)).toBeInTheDocument();
   });
 
-  it('removes an attachment via the per-row Remove button', async () => {
+  it('removes an attachment via the chip × button', async () => {
     renderComposer();
     const input = screen.getByLabelText(/attach files/i) as HTMLInputElement;
     fireEvent.change(input, {
@@ -588,7 +593,9 @@ describe('ComposeView — attachments', () => {
     await waitFor(() => {
       expect(screen.queryByText('a.txt')).toBeNull();
     });
-    expect(screen.getByText('Attachments (0)')).toBeInTheDocument();
+    // PR 5.5: when there are zero attachments the "N attached" output
+    // is hidden entirely (no chip layout to count).
+    expect(screen.queryByText(/attached/i)).toBeNull();
   });
 
   it('threads attached blobs through to mail.send commit', async () => {

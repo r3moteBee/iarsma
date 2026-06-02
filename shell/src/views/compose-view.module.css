@@ -1,0 +1,179 @@
+/* ──────────────────────────────────────────────────────────────────
+ * ComposeView visuals — PR 5.5 of the UI redesign.
+ *
+ * Lifted from UI-Design/mockups/iarsma-redesign.html §8.3. The outer
+ * dialog chrome (title, close button, backdrop, focus trap) comes from
+ * the shared `Dialog` component (components/dialog.module.css). These
+ * rules style the BODY of the compose dialog: field rows, body editor
+ * wrapper, attachment chips, and error banners.
+ *
+ * Field-row pattern: borderless inputs with a bottom border per row,
+ * label aligned to the left. Reads like a sentence — labels are
+ * captions, not form-chrome.
+ * ────────────────────────────────────────────────────────────────── */
+
+/* The compose body sits inside Dialog's .body (which already has
+ * padding). Override to a tighter top/bottom rhythm so the field
+ * rows look like a single column. */
+.composeBody {
+  padding: 0;
+  margin: calc(-1 * var(--space-lg));
+}
+
+.fields {
+  padding: 0 var(--space-lg);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each <label, content> row. Borderless input with a bottom border. */
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.fieldLabel {
+  width: 56px;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-2);
+  flex: 0 0 auto;
+  padding: 11px 0;
+}
+
+/* The actual <input> / <select> inside a .field row. */
+.fieldInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--text-1);
+  padding: 11px 0;
+  outline: none;
+}
+
+.fieldInput::placeholder {
+  color: var(--text-3);
+}
+
+.fieldInput[aria-invalid='true'] {
+  /* Subtle red underline on invalid recipient parsing. The bottom
+   * border lives on the parent .field; recolor it via the descendant
+   * selector below. */
+}
+
+.field:has(.fieldInput[aria-invalid='true']) {
+  border-bottom-color: var(--destructive);
+}
+
+.fieldOutput {
+  flex: 1;
+  font-size: var(--text-md);
+  color: var(--text-2);
+  padding: 11px 0;
+}
+
+.fieldError {
+  font-size: var(--text-sm);
+  color: var(--destructive);
+  padding: 4px 0 8px 72px;
+  margin: 0;
+}
+
+/* ── Body editor wrapper ─────────────────────────────────────── */
+
+.bodyWrapper {
+  padding: var(--space-md) var(--space-lg);
+  min-height: 180px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ── Attachments: button + chips ─────────────────────────────── */
+
+.attachSection {
+  padding: var(--space-md) var(--space-lg);
+}
+
+.attachHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.attachSize {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  margin-left: auto;
+}
+
+.attachChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  padding-top: var(--space-sm);
+}
+
+.attachChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.attachChipName {
+  font-weight: 600;
+}
+
+.attachChipSize {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.attachChipRemove {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.attachChipRemove:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.attachChipRemove svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Hidden file input (the visible affordance is a styled Button). */
+.attachFileInput {
+  display: none;
+}
+
+/* ── Error banner ─────────────────────────────────────────────── */
+
+.errorBanner {
+  margin: var(--space-md) var(--space-lg) 0;
+  padding: var(--space-sm) var(--space-md);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--destructive);
+  font-size: var(--text-sm);
+}
