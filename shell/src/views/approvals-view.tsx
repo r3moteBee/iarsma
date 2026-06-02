@@ -1,16 +1,20 @@
 /**
  * ApprovalsView — approval queue UI for agent tool-use requests.
  *
- * Single-column list of approval cards with tab filtering (Pending,
- * Approved, Denied, All). Each card displays the agent name, tool name
- * badge, relative timestamp, summary, an expandable JSON preview, and
- * approve/deny action buttons (pending items only).
+ * PR 6: the per-row card lives in the shared `PreviewCard` component
+ * (also used by Compose's send-preview modal). This view is now just
+ * the surrounding chrome — heading, tab filter, list spacing — plus
+ * a tool-specific preview formatter that turns structured previews
+ * (e.g. `files.propose_write`'s unified diff) into a readable body
+ * block. Unknown tools fall back to the raw-JSON disclosure.
  *
- * Purely presentational — side-effect work (approve/deny network calls)
- * is delegated to callback props.
+ * Purely presentational — side-effect work (approve/deny network
+ * calls) is delegated to callback props.
  */
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+import { PreviewCard } from '../components/preview-card.js';
+import styles from './approvals-view.module.css';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -71,56 +75,63 @@ function relativeTime(iso: string): string {
   }
 }
 
-// ── Styles ────────────────────────────────────────────────────────
+// ── Tool-specific preview formatters ──────────────────────────────
 
-const cardStyle: React.CSSProperties = {
-  border: '1px solid var(--surface-3)',
-  borderRadius: 4,
-  padding: '0.75em 1em',
-  marginBottom: '0.5em',
+/**
+ * Turn a structured preview into a readable body block when we know
+ * the tool's shape. Returns null for unknown tools so the caller
+ * falls back to the raw-JSON disclosure.
+ */
+function formatPreviewBody(toolName: string, preview: unknown): ReactNode | null {
+  if (toolName === 'files.propose_write' && isFilesProposeWritePreview(preview)) {
+    const isCreate = preview.diff.isCreate === true;
+    return (
+      <>
+        <p style={{ margin: '0 0 var(--space-sm)' }}>
+          {isCreate ? 'Create ' : 'Edit '}
+          <code style={{ fontFamily: 'ui-monospace, monospace' }}>{preview.path}</code>
+        </p>
+        <pre
+          data-testid="approval-diff"
+          style={{
+            margin: 0,
+            padding: 'var(--space-sm) var(--space-md)',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+            fontSize: '12px',
+            overflow: 'auto',
+            maxHeight: '18em',
+            whiteSpace: 'pre',
+          }}
+        >
+          {preview.diff.unified}
+        </pre>
+      </>
+    );
+  }
+  return null;
+}
+
+type FilesProposeWritePreview = {
+  readonly path: string;
+  readonly diff: {
+    readonly unified: string;
+    readonly baseSha: string;
+    readonly isCreate?: boolean;
+    readonly isBinary?: boolean;
+  };
 };
 
-const badgeStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '0.1em 0.45em',
-  borderRadius: 3,
-  fontSize: '0.85em',
-  background: 'var(--surface-3)',
-  color: 'var(--text-1)',
-  marginLeft: '0.5em',
-};
-
-const countBadgeStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '0 0.45em',
-  borderRadius: '0.75em',
-  fontSize: '0.8em',
-  background: 'var(--surface-3)',
-  color: 'var(--text-1)',
-  marginLeft: '0.35em',
-  fontWeight: 600,
-};
-
-const approveButtonStyle: React.CSSProperties = {
-  padding: '0.25em 0.7em',
-  font: 'inherit',
-  border: '1px solid var(--success)',
-  borderRadius: 4,
-  background: 'color-mix(in srgb, var(--success) 15%, transparent)',
-  color: 'var(--success)',
-  cursor: 'pointer',
-  marginRight: '0.4em',
-};
-
-const denyButtonStyle: React.CSSProperties = {
-  padding: '0.25em 0.7em',
-  font: 'inherit',
-  border: '1px solid var(--destructive)',
-  borderRadius: 4,
-  background: 'color-mix(in srgb, var(--destructive) 15%, transparent)',
-  color: 'var(--destructive)',
-  cursor: 'pointer',
-};
+function isFilesProposeWritePreview(v: unknown): v is FilesProposeWritePreview {
+  if (v === null || typeof v !== 'object') return false;
+  const o = v as { path?: unknown; diff?: unknown };
+  if (typeof o.path !== 'string') return false;
+  if (o.diff === null || typeof o.diff !== 'object') return false;
+  const d = o.diff as { unified?: unknown; baseSha?: unknown };
+  return typeof d.unified === 'string' && typeof d.baseSha === 'string';
+}
 
 // ── Component ─────────────────────────────────────────────────────
 
@@ -142,15 +153,15 @@ export function ApprovalsView({
     pendingCount ?? approvals.filter((a) => a.status === 'pending').length;
 
   return (
-    <section aria-labelledby="approvals-heading" style={{ maxWidth: '56em' }}>
-      <h2 id="approvals-heading">Approvals</h2>
-      {isLoading === true ? <p>Loading approvals...</p> : null}
+    <section aria-labelledby="approvals-heading" className={styles['section']}>
+      <h2 id="approvals-heading" className={styles['heading']}>
+        Approvals
+      </h2>
+      {isLoading === true ? (
+        <p className={styles['loading']}>Loading approvals...</p>
+      ) : null}
 
-      {/* Tab bar */}
-      <nav
-        aria-label="Approval status filter"
-        style={{ display: 'flex', gap: '0.25em', marginBottom: '1em' }}
-      >
+      <nav aria-label="Approval status filter" className={styles['tabs']}>
         <TabButton
           label="Pending"
           count={effectivePendingCount}
@@ -174,15 +185,14 @@ export function ApprovalsView({
         />
       </nav>
 
-      {/* List or empty state */}
       {approvals.length === 0 ? (
-        <p style={{ color: 'var(--text-2)' }}>No approval history yet.</p>
+        <p className={styles['empty']}>No approval history yet.</p>
       ) : filtered.length === 0 ? (
-        <p style={{ color: 'var(--text-2)' }}>
+        <p className={styles['empty']}>
           No pending approvals. Agents that require approval will appear here.
         </p>
       ) : (
-        <div role="list" aria-label="Approval requests">
+        <div role="list" aria-label="Approval requests" className={styles['list']}>
           {filtered.map((approval) => (
             <ApprovalCard
               key={approval.id}
@@ -197,8 +207,6 @@ export function ApprovalsView({
   );
 }
 
-// ── Tab button ────────────────────────────────────────────────────
-
 function TabButton({
   label,
   count,
@@ -210,30 +218,21 @@ function TabButton({
   readonly isActive: boolean;
   readonly onClick: () => void;
 }) {
+  const cls = `${styles['tab']} ${isActive ? styles['tabActive'] : ''}`;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={isActive ? 'page' : undefined}
-      style={{
-        padding: '0.3em 0.8em',
-        font: 'inherit',
-        border: 'none',
-        borderBottom: isActive ? '2px solid currentColor' : '2px solid transparent',
-        background: 'none',
-        cursor: 'pointer',
-        fontWeight: isActive ? 600 : 400,
-      }}
+      className={cls}
     >
       {label}
       {count !== undefined && count > 0 ? (
-        <span style={countBadgeStyle}>{count}</span>
+        <span className={styles['tabCount']}>{count}</span>
       ) : null}
     </button>
   );
 }
-
-// ── Approval card ─────────────────────────────────────────────────
 
 function ApprovalCard({
   approval,
@@ -244,7 +243,6 @@ function ApprovalCard({
   readonly onApprove: (id: string) => Promise<void>;
   readonly onDeny: (id: string) => Promise<void>;
 }) {
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [acting, setActing] = useState(false);
 
   const handleApprove = async () => {
@@ -265,102 +263,31 @@ function ApprovalCard({
     }
   };
 
+  const structuredBody = formatPreviewBody(approval.toolName, approval.preview);
+  const showRawDisclosure = structuredBody === null;
+
   return (
-    <div role="listitem" style={cardStyle}>
-      {/* Header row */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          gap: '0.5em',
-          marginBottom: '0.25em',
+    <div role="listitem" data-testid={`approval-card-${approval.id}`}>
+      <PreviewCard
+        title={approval.summary}
+        actor={{ name: approval.agentName, kind: 'agent' }}
+        badges={[approval.toolName]}
+        meta={relativeTime(approval.requestedAt)}
+        body={structuredBody ?? undefined}
+        rawPreview={showRawDisclosure ? approval.preview : undefined}
+        primary={{
+          label: 'Approve',
+          onClick: () => void handleApprove(),
+          disabled: acting,
         }}
-      >
-        <strong>{approval.agentName}</strong>
-        <span style={badgeStyle}>{approval.toolName}</span>
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: '0.85em',
-            color: 'var(--text-2)',
-          }}
-        >
-          {relativeTime(approval.requestedAt)}
-        </span>
-      </div>
-
-      {/* Summary */}
-      <div style={{ marginBottom: '0.4em', color: 'var(--text-1)' }}>
-        {approval.summary}
-      </div>
-
-      {/* Preview toggle */}
-      <div style={{ marginBottom: '0.4em' }}>
-        <button
-          type="button"
-          onClick={() => setPreviewOpen((v) => !v)}
-          aria-label={previewOpen ? 'Hide preview' : 'Show preview'}
-          style={{
-            font: 'inherit',
-            fontSize: '0.85em',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-2)',
-            padding: 0,
-          }}
-        >
-          {previewOpen ? 'Hide preview' : 'Show preview'}
-        </button>
-        {previewOpen ? (
-          <pre
-            style={{
-              marginTop: '0.4em',
-              padding: '0.5em',
-              background: 'var(--surface-2)',
-              borderRadius: 4,
-              fontSize: '0.85em',
-              overflow: 'auto',
-              maxHeight: '16em',
-              color: 'var(--text-1)',
-            }}
-          >
-            {JSON.stringify(approval.preview, null, 2)}
-          </pre>
-        ) : null}
-      </div>
-
-      {/* Actions (pending only) */}
-      {approval.status === 'pending' ? (
-        <div style={{ display: 'flex', gap: '0.4em' }}>
-          <button
-            type="button"
-            onClick={handleApprove}
-            disabled={acting}
-            style={approveButtonStyle}
-          >
-            Approve
-          </button>
-          <button
-            type="button"
-            onClick={handleDeny}
-            disabled={acting}
-            style={denyButtonStyle}
-          >
-            Deny
-          </button>
-        </div>
-      ) : (
-        <div
-          style={{
-            fontSize: '0.85em',
-            fontWeight: 600,
-            color: approval.status === 'approved' ? 'var(--success)' : 'var(--destructive)',
-          }}
-        >
-          {approval.status === 'approved' ? 'Approved' : 'Denied'}
-        </div>
-      )}
+        secondary={{
+          label: 'Deny',
+          onClick: () => void handleDeny(),
+          disabled: acting,
+          intent: 'destructive',
+        }}
+        status={approval.status}
+      />
     </div>
   );
 }

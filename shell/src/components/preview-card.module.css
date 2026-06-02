@@ -1,0 +1,205 @@
+/* ──────────────────────────────────────────────────────────────────
+ * PreviewCard — the propose/preview/approve/commit surface (§8.6).
+ *
+ * One component, two consumers:
+ *   • Compose's send-preview modal (human flow)
+ *   • Approvals queue entries (agent flow)
+ *
+ * Renders as a self-contained card with three regions:
+ *   header  → who / what is being previewed (actor avatar, badges, time)
+ *   body    → labeled details + free-form slot + optional raw disclosure
+ *   footer  → primary / secondary actions, or a status pill when settled
+ *
+ * The card is theme-aware via tokens; consumers control width by
+ * placing the card inside their own constrained container (Dialog
+ * body for the modal flow; the Approvals list for the inline flow).
+ * ────────────────────────────────────────────────────────────────── */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  background: var(--surface-1);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md) var(--space-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* When PreviewCard is embedded inside a Dialog body the Dialog already
+ * paints its own surface — make the card transparent + drop the border
+ * to avoid double-chrome. */
+.cardInDialog {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+/* ── Header ──────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  flex: 0 0 auto;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.titleWithActor {
+  font-size: var(--text-md);
+}
+
+.actorName {
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.badges {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--accent-subtle);
+  color: var(--accent-active);
+  font-size: var(--text-sm);
+  font-weight: 650;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.meta {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ── Body ────────────────────────────────────────────────────── */
+
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px var(--space-md);
+  margin: 0;
+}
+
+.detailLabel {
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-2);
+  align-self: start;
+  padding-top: 2px;
+}
+
+.detailValue {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bodyBlock {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow: auto;
+  max-height: 18em;
+  color: var(--text-1);
+}
+
+/* ── Raw disclosure (`Show raw`) ─────────────────────────────── */
+
+.rawDisclosure {
+  margin-top: var(--space-xs);
+}
+
+.rawToggle {
+  font: inherit;
+  font-size: var(--text-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rawToggle:hover {
+  color: var(--text-1);
+}
+
+.rawPre {
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 16em;
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.statusPillApproved {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+}
+
+.statusPillDenied {
+  background: color-mix(in srgb, var(--destructive) 15%, transparent);
+  color: var(--destructive);
+  border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+}

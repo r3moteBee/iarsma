@@ -30,6 +30,7 @@ import {
 import { tokensAtom } from '../auth-state.js';
 import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
+import { PreviewCard } from '../components/preview-card.js';
 import { composeStateAtom, type ComposePrefill } from '../compose-state.js';
 import { useMailDraft } from '../generated/capabilities/mail-draft.js';
 import { useIdentityList } from '../generated/capabilities/identity-list.js';
@@ -650,120 +651,64 @@ function SendPreviewModal(props: {
   readonly onConfirm: () => void;
 }) {
   const { preview, onCancel, onConfirm } = props;
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
+  const details: ReadonlyArray<{ label: string; value: React.ReactNode }> = [
+    { label: 'To', value: preview.recipients.to.map((a) => a.email).join(', ') },
+    ...(preview.recipients.cc !== undefined && preview.recipients.cc.length > 0
+      ? [{ label: 'Cc', value: preview.recipients.cc.map((a) => a.email).join(', ') }]
+      : []),
+    ...(preview.recipients.bcc !== undefined && preview.recipients.bcc.length > 0
+      ? [{ label: 'Bcc', value: preview.recipients.bcc.map((a) => a.email).join(', ') }]
+      : []),
+    { label: 'Subject', value: preview.subject },
+    ...(preview.attachmentCount > 0
+      ? [
+          {
+            label: 'Attachments',
+            value: `${preview.attachmentCount} file${preview.attachmentCount === 1 ? '' : 's'}`,
+          },
+        ]
+      : []),
+    { label: 'Send time', value: preview.estimatedSendTime },
+    { label: 'Size', value: `${preview.estimatedSize} B` },
+  ];
   return (
-    <div
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-      }}
+    <Dialog
+      open
+      onClose={onCancel}
+      title="Send this message?"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={onConfirm}>
+            Send
+          </Button>
+        </>
+      }
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="send-preview-title"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onCancel();
-        }}
-        style={{
-          background: 'var(--surface-1)',
-          color: 'var(--text-1)',
-          maxWidth: '36em',
-          width: '100%',
-          padding: '1.25em',
-          borderRadius: 8,
-          boxShadow: 'var(--shadow-md)',
-        }}
-      >
-        <h2 id="send-preview-title" style={{ marginTop: 0 }}>
-          Send this message?
-        </h2>
-        <dl style={{ margin: 0 }}>
-          <dt style={{ fontWeight: 600 }}>To</dt>
-          <dd style={{ margin: '0 0 0.5em' }}>
-            {preview.recipients.to.map((a) => a.email).join(', ')}
-          </dd>
-          {preview.recipients.cc !== undefined &&
-          preview.recipients.cc.length > 0 ? (
-            <>
-              <dt style={{ fontWeight: 600 }}>Cc</dt>
-              <dd style={{ margin: '0 0 0.5em' }}>
-                {preview.recipients.cc.map((a) => a.email).join(', ')}
-              </dd>
-            </>
-          ) : null}
-          {preview.recipients.bcc !== undefined &&
-          preview.recipients.bcc.length > 0 ? (
-            <>
-              <dt style={{ fontWeight: 600 }}>Bcc</dt>
-              <dd style={{ margin: '0 0 0.5em' }}>
-                {preview.recipients.bcc.map((a) => a.email).join(', ')}
-              </dd>
-            </>
-          ) : null}
-          <dt style={{ fontWeight: 600 }}>Subject</dt>
-          <dd style={{ margin: '0 0 0.5em' }}>{preview.subject}</dd>
-          <dt style={{ fontWeight: 600 }}>Body preview</dt>
-          <dd
+      <PreviewCard
+        inDialog
+        details={details}
+        body={
+          <p
+            data-testid="send-preview-body"
             style={{
-              margin: '0 0 0.5em',
-              padding: '0.5em',
+              margin: 0,
+              padding: 'var(--space-sm) var(--space-md)',
               background: 'var(--surface-2)',
-              borderRadius: 4,
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)',
               whiteSpace: 'pre-wrap',
+              fontSize: 'var(--text-sm)',
+              color: 'var(--text-1)',
             }}
           >
-            {preview.bodyPreview === ''
-              ? '(empty body)'
-              : preview.bodyPreview}
-          </dd>
-          {preview.attachmentCount > 0 ? (
-            <>
-              <dt style={{ fontWeight: 600 }}>Attachments</dt>
-              <dd style={{ margin: '0 0 0.5em' }}>
-                {preview.attachmentCount} file
-                {preview.attachmentCount === 1 ? '' : 's'} (
-                {preview.attachmentBlobIds.length} blob refs)
-              </dd>
-            </>
-          ) : null}
-          <dt style={{ fontWeight: 600 }}>Estimated send time</dt>
-          <dd style={{ margin: '0 0 0.5em' }}>{preview.estimatedSendTime}</dd>
-          <dt style={{ fontWeight: 600 }}>Estimated size</dt>
-          <dd style={{ margin: '0 0 0.5em' }}>{preview.estimatedSize} B</dd>
-        </dl>
-        <footer
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: '0.5em',
-            marginTop: '0.75em',
-          }}
-        >
-          <button type="button" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="button" onClick={onConfirm}>
-            Send
-          </button>
-        </footer>
-      </div>
-    </div>
+            {preview.bodyPreview === '' ? '(empty body)' : preview.bodyPreview}
+          </p>
+        }
+      />
+    </Dialog>
   );
 }
 

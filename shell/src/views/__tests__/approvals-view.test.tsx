@@ -90,8 +90,11 @@ describe('ApprovalsView', () => {
         <ApprovalsView approvals={SAMPLE_APPROVALS} onApprove={noop} onDeny={noop} />,
       );
 
+      // PR 6: PreviewCard renders the actor name and the summary in
+      // the same heading ("Agent — summary"). Match the summary as a
+      // substring instead of the full element text.
       expect(
-        screen.getByText('mail.send to alice@example.com — 2 attachments'),
+        screen.getByText(/mail\.send to alice@example\.com — 2 attachments/),
       ).toBeInTheDocument();
     });
 
@@ -259,27 +262,25 @@ describe('ApprovalsView', () => {
   });
 
   describe('preview toggle', () => {
-    it('expands and collapses the preview section', () => {
+    it('expands and collapses the raw-preview section', () => {
       render(
         <ApprovalsView approvals={SAMPLE_APPROVALS} onApprove={noop} onDeny={noop} />,
       );
 
-      // Initially no preview visible
-      expect(screen.queryByText(/"to": "alice@example.com"/)).not.toBeInTheDocument();
+      // PR 6: SAMPLE_APPROVALS use the `mail.send` tool which doesn't
+      // have a structured formatter today — PreviewCard falls back to
+      // the "Show raw preview" disclosure (closed by default).
+      expect(screen.queryByText(/"to": "alice@example\.com"/)).not.toBeInTheDocument();
 
-      // Click "Show preview" for the first card
-      const showButtons = screen.getAllByRole('button', { name: /show preview/i });
+      const showButtons = screen.getAllByRole('button', { name: /show raw preview/i });
       fireEvent.click(showButtons[0]!);
 
-      // Preview is now visible
-      expect(screen.getByText(/"to": "alice@example.com"/)).toBeInTheDocument();
+      expect(screen.getByText(/"to": "alice@example\.com"/)).toBeInTheDocument();
 
-      // Click "Hide preview" to collapse
-      const hideButton = screen.getByRole('button', { name: /hide preview/i });
+      const hideButton = screen.getByRole('button', { name: /hide raw preview/i });
       fireEvent.click(hideButton);
 
-      // Preview is hidden again
-      expect(screen.queryByText(/"to": "alice@example.com"/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/"to": "alice@example\.com"/)).not.toBeInTheDocument();
     });
   });
 

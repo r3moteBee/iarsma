@@ -1,0 +1,84 @@
+/* ──────────────────────────────────────────────────────────────────
+ * ApprovalsView — UI redesign PR 6.
+ *
+ * The cards themselves render via the shared PreviewCard component;
+ * this module is just the surrounding chrome (heading, tab filter,
+ * list spacing, empty states).
+ * ────────────────────────────────────────────────────────────────── */
+
+.section {
+  max-width: 56em;
+  padding: var(--space-md) var(--space-lg);
+}
+
+.heading {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.loading {
+  color: var(--text-2);
+  margin: 0 0 var(--space-sm);
+}
+
+/* ── Tab bar ──────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-2);
+  font-weight: 500;
+  /* The active underline lives on a 2px box-shadow at the bottom edge
+   * so it doesn't push the tab text up/down vs. the inactive state. */
+  box-shadow: inset 0 -2px 0 transparent;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  margin-bottom: -1px;
+}
+
+.tab:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  color: var(--text-1);
+}
+
+.tabActive {
+  color: var(--text-1);
+  font-weight: 650;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tabCount {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--accent-active);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── List ─────────────────────────────────────────────────────── */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.empty {
+  color: var(--text-2);
+  margin: var(--space-md) 0;
+}
