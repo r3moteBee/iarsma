@@ -30,7 +30,9 @@
 /* Variants */
 .primary {
   background-color: var(--accent);
-  color: #fff;
+  /* --accent-on is dark in both light + dark mode now (a11y fix) —
+   * white-on-accent failed WCAG AA at the current accent lightness. */
+  color: var(--accent-on);
 }
 
 .primary:hover:not(:disabled) {

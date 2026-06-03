@@ -34,7 +34,13 @@
   --accent-hover:  hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 8%));
   --accent-active: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) - 14%));
   --accent-subtle: color-mix(in srgb, var(--accent) 13%, transparent);
-  --accent-on: #ffffff;
+  /* Foreground color for text/icons rendered on top of --accent.
+   * The accent is bright (Ember at l:60%); white text clocks in
+   * around 2.8:1 contrast which fails WCAG AA. A dark brown clears
+   * 6:1 easily. PR 6.5 fix — the previous #ffffff was a latent
+   * a11y bug that only surfaced once pa11y saw a large primary
+   * button (the new sign-in CTA in this PR). */
+  --accent-on: #1a1206;
 
   /* Intent colors */
   --destructive: #d64545;
