@@ -56,7 +56,10 @@
 .issuer {
   margin: 0;
   font-size: var(--text-sm);
-  color: var(--text-3);
+  /* --text-3 was too light against --surface-1 to clear WCAG AA
+   * (~3:1 instead of 4.5:1). The body explanation is value-bearing
+   * for the user; bump it to --text-2 for proper contrast. */
+  color: var(--text-2);
   line-height: 1.55;
 }
 
