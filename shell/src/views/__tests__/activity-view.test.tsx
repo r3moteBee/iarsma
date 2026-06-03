@@ -155,17 +155,35 @@ describe('ActivityView', () => {
   });
 
   describe('expandable rows', () => {
-    it('shows params JSON when row is clicked', () => {
+    it('shows structured params when row is clicked', () => {
       render(<ActivityView {...defaultProps()} />);
 
       // Params not visible initially
-      expect(screen.queryByText(/"to": "alice@example.com"/)).not.toBeInTheDocument();
+      expect(screen.queryByText('alice@example.com')).not.toBeInTheDocument();
 
       // Click expand button for first row
       const expandButtons = screen.getAllByRole('button', { name: /expand/i });
       fireEvent.click(expandButtons[0]!);
 
-      // Params now visible as formatted JSON
+      // §8.5: detail panel renders params as labeled rows, not a raw
+      // JSON dump. Key and value should each be present as their own
+      // nodes.
+      expect(screen.getByText('to')).toBeInTheDocument();
+      expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    });
+
+    it('exposes a "view raw JSON" toggle inside the detail panel', () => {
+      render(<ActivityView {...defaultProps()} />);
+
+      const expandButtons = screen.getAllByRole('button', { name: /expand/i });
+      fireEvent.click(expandButtons[0]!);
+
+      // Raw JSON not shown by default — only the structured rows are.
+      expect(screen.queryByText(/"to": "alice@example.com"/)).not.toBeInTheDocument();
+
+      // Reveal raw JSON.
+      const rawToggle = screen.getByRole('button', { name: /view raw json/i });
+      fireEvent.click(rawToggle);
       expect(screen.getByText(/"to": "alice@example.com"/)).toBeInTheDocument();
     });
 
@@ -197,15 +215,15 @@ describe('ActivityView', () => {
       const expandButtons = screen.getAllByRole('button', { name: /expand/i });
       fireEvent.click(expandButtons[0]!);
 
-      // Params visible
-      expect(screen.getByText(/"to": "alice@example.com"/)).toBeInTheDocument();
+      // Detail panel visible (param value renders structured)
+      expect(screen.getByText('alice@example.com')).toBeInTheDocument();
 
       // Click collapse
       const collapseButton = screen.getByRole('button', { name: /collapse/i });
       fireEvent.click(collapseButton);
 
-      // Params hidden
-      expect(screen.queryByText(/"to": "alice@example.com"/)).not.toBeInTheDocument();
+      // Detail panel hidden
+      expect(screen.queryByText('alice@example.com')).not.toBeInTheDocument();
     });
   });
 
@@ -351,7 +369,9 @@ describe('ActivityView', () => {
         />,
       );
 
-      expect(screen.getByText(/verified/i)).toBeInTheDocument();
+      // "Verified" appears both in the visible Badge and the
+      // visually-hidden aria-live region — getAllByText covers both.
+      expect(screen.getAllByText(/verified/i).length).toBeGreaterThan(0);
     });
 
     it('shows red failed status with error', () => {
@@ -364,8 +384,8 @@ describe('ActivityView', () => {
         />,
       );
 
-      expect(screen.getByText(/failed/i)).toBeInTheDocument();
-      expect(screen.getByText(/hash mismatch at seq 5/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/failed/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/hash mismatch at seq 5/i).length).toBeGreaterThan(0);
     });
 
     it('shows spinner when checking', () => {

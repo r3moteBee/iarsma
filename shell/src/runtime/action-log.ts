@@ -150,6 +150,13 @@ export interface ActionLog {
    */
   append(input: AppendInput): Promise<StoredEntry>;
   /**
+   * Read all chain entries in seq order. Surfaces the backing store's
+   * `all()` so the ActivityView (PR 8) doesn't have to plumb the store
+   * past the ActionLog facade. Phase 0 returns the whole chain; Phase
+   * 1's verified-prefix caching will replace this with a paged read.
+   */
+  entries(): Promise<readonly StoredEntry[]>;
+  /**
    * Verify the full chain in storage: link integrity (delegated to the
    * component) plus hash recomputation against the canonical bytes
    * (this side, since SHA-384 lives in the host). Returns null on
@@ -196,6 +203,10 @@ export function createActionLog(opts: ActionLogOptions): ActionLog {
       const entry: StoredEntry = { seq, data, prevHashHex, hashHex };
       await opts.store.append(entry);
       return entry;
+    },
+
+    async entries() {
+      return opts.store.all();
     },
 
     async verify() {
