@@ -1,0 +1,72 @@
+/* ──────────────────────────────────────────────────────────────────
+ * Notice — shared banner-shaped notification (§8.8 of the UI
+ * redesign). Four variants tinted via color-mix on the intent token:
+ *   info     → neutral surface-2
+ *   error    → destructive
+ *   warning  → warning
+ *   success  → success
+ *
+ * Inline-shape: flex row with optional icon, body content, and a
+ * close × on the right when `onDismiss` is provided.
+ * ────────────────────────────────────────────────────────────────── */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dismiss {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.7;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+}
+
+.dismiss:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* ── Variants ─────────────────────────────────────────────────── */
+
+.error {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  border-color: color-mix(in srgb, var(--destructive) 40%, transparent);
+  color: var(--destructive);
+}
+
+.warning {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  color: var(--warning);
+}
+
+.success {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  color: var(--success);
+}
+
+/* `info` keeps the default neutral treatment defined on `.notice`. */

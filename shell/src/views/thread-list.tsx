@@ -40,6 +40,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { EmptyState } from '../components/empty-state.js';
+import { Notice } from '../components/notice.js';
 import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
@@ -437,10 +438,8 @@ function ThreadListBody(props: {
     );
   } else if (error !== undefined) {
     body = (
-      <div className={styles['body']}>
-        <p role="alert" className={styles['error']}>
-          Failed to load threads: {error.message}
-        </p>
+      <div className={styles['body']} style={{ padding: 'var(--space-md)' }}>
+        <Notice variant="error">Failed to load threads: {error.message}</Notice>
       </div>
     );
   } else if (threads.length === 0) {

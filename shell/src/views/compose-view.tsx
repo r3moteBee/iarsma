@@ -30,6 +30,7 @@ import {
 import { tokensAtom } from '../auth-state.js';
 import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
+import { Notice } from '../components/notice.js';
 import { PreviewCard } from '../components/preview-card.js';
 import { composeStateAtom, type ComposePrefill } from '../compose-state.js';
 import { useMailDraft } from '../generated/capabilities/mail-draft.js';
@@ -604,14 +605,14 @@ function ComposeModal(props: {
               onRemove={removeAttachment}
             />
             {draftError !== null ? (
-              <p role="alert" className={styles['errorBanner']}>
-                Draft save failed: {draftError}
-              </p>
+              <div style={{ margin: 'var(--space-md) var(--space-lg) 0' }}>
+                <Notice variant="error">Draft save failed: {draftError}</Notice>
+              </div>
             ) : null}
             {sendError !== null ? (
-              <p role="alert" className={styles['errorBanner']}>
-                Send failed: {sendError}
-              </p>
+              <div style={{ margin: 'var(--space-md) var(--space-lg) 0' }}>
+                <Notice variant="error">Send failed: {sendError}</Notice>
+              </div>
             ) : null}
           </form>
         </div>

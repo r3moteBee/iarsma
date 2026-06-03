@@ -12,7 +12,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Dialog, EmptyState, Skeleton } from '../components/index.js';
+import { Button, Dialog, EmptyState, Notice, Skeleton } from '../components/index.js';
 import styles from './files-view.module.css';
 
 // Lazy import — splits the Monaco editor bundle (~3MB) into a separate chunk.
@@ -306,19 +306,8 @@ function ConnectedFilesView({
             <Skeleton height="1em" />
           </div>
         ) : error !== null && error !== undefined ? (
-          <div
-            role="alert"
-            style={{
-              padding: '0.75em',
-              margin: '0.5em',
-              background: 'color-mix(in srgb, var(--destructive) 10%, transparent)',
-              color: 'var(--destructive)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: 'var(--text-sm)',
-              lineHeight: 1.4,
-            }}
-          >
-            {error}
+          <div style={{ margin: '0.5em' }}>
+            <Notice variant="error">{error}</Notice>
           </div>
         ) : tree.length === 0 ? (
           <div style={{ padding: '0.75em', color: 'var(--text-3)', fontSize: 'var(--text-sm)' }}>
@@ -584,20 +573,7 @@ function CommitDialog({
             resize: 'vertical',
           }}
         />
-        {error !== undefined ? (
-          <div
-            role="alert"
-            style={{
-              padding: '0.5em 0.75em',
-              background: 'color-mix(in srgb, var(--destructive) 10%, transparent)',
-              color: 'var(--destructive)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: '0.875em',
-            }}
-          >
-            {error}
-          </div>
-        ) : null}
+        {error !== undefined ? <Notice variant="error">{error}</Notice> : null}
       </div>
     </Dialog>
   );

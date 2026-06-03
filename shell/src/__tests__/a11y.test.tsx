@@ -76,6 +76,13 @@ describe('a11y — SignedOutView', () => {
 
   it('uses semantic heading + landmark structure', () => {
     const { getByRole } = render(<SignedOutView config={SAMPLE_CONFIG} />);
-    expect(getByRole('heading', { name: 'Sign in', level: 2 })).toBeInTheDocument();
+    // PR 6.5: the signed-out page is its own top-level surface (no
+    // shell h1 above it), so the heading became an h1 — and went
+    // visually-hidden because the wordmark above provides the visual
+    // brand mark. The accessible name now includes the product
+    // ("Sign in to Iarsma") to be unambiguous in screen reader nav.
+    expect(
+      getByRole('heading', { name: 'Sign in to Iarsma', level: 1 }),
+    ).toBeInTheDocument();
   });
 });
