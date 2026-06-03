@@ -34,6 +34,7 @@ import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
+import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
 import { BottomNav } from './components/bottom-nav.js';
 import { Sidebar } from './components/sidebar.js';
 import { TopBar } from './components/top-bar.js';
@@ -189,6 +190,16 @@ function Shell({ config }: { readonly config: ShellConfig }) {
   const isSignedIn = useAtomValue(isSignedInAtom);
   const themePreference = useAtomValue(themePreferenceAtom);
   const resolvedTheme = resolveTheme(themePreference);
+  // Apply accent + density tokens to the document root so every
+  // `var(--accent-h)` / `var(--density)` consumer downstream reflects
+  // the user's choices. Effect dependency is the atom values, so
+  // changing either picker re-runs the CSS-variable assignment.
+  const accent = useAtomValue(accentAtom);
+  const density = useAtomValue(densityAtom);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    applyAppearance(document.documentElement, accent, density);
+  }, [accent, density]);
   useGlobalKeyboardShortcuts();
 
   if (!isSignedIn) {
