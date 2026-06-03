@@ -187,6 +187,7 @@ describe('loggingInvoker — error semantics', () => {
       append: async () => {
         throw new Error('storage gone');
       },
+      entries: async () => [],
       verify: async () => null,
     };
     const wrapped = loggingInvoker({

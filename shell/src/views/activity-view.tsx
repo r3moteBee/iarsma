@@ -1,15 +1,20 @@
 /**
- * ActivityView -- action-log UI for hash-chain integrity verification.
+ * ActivityView — action-log audit trail (§8.5).
  *
  * Paginated, filterable table of action-log entries. Each row is
- * expandable to show full params, provenance, and hash-chain info.
- * Integrity badge shows the hash-chain verification status.
+ * expandable to show structured params, provenance, and hash chain.
+ * Integrity badge announces verify result via aria-live.
  *
- * Purely presentational -- side-effect work (verification, filtering,
- * pagination) is delegated to callback props.
+ * Purely presentational — side-effect work (verification, filtering,
+ * pagination, fetching) is delegated to callback props.
  */
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+
+import { Avatar } from '../components/avatar.js';
+import { Badge } from '../components/badge.js';
+import { Button } from '../components/button.js';
+import styles from './activity-view.module.css';
 
 // -- Types ---------------------------------------------------------------
 
@@ -48,70 +53,6 @@ export type ActivityViewProps = {
   readonly onPageChange: (page: number) => void;
 };
 
-// -- Styles --------------------------------------------------------------
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '0.4em 0.6em',
-  borderBottom: '2px solid var(--surface-3)',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '0.4em 0.6em',
-  borderBottom: '1px solid var(--surface-3)',
-};
-
-const filterBarStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: '1em',
-  alignItems: 'flex-end',
-  flexWrap: 'wrap',
-  marginBottom: '1em',
-};
-
-const filterGroupStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.2em',
-};
-
-const selectStyle: React.CSSProperties = {
-  padding: '0.3em 0.5em',
-  font: 'inherit',
-  border: '1px solid var(--surface-3)',
-  borderRadius: 4,
-  color: 'var(--text-1)',
-  background: 'var(--surface-2)',
-};
-
-const badgeBaseStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '0.3em',
-  padding: '0.2em 0.6em',
-  borderRadius: 4,
-  fontSize: '0.85em',
-  fontWeight: 600,
-};
-
-const modeBadgeStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '0.1em 0.4em',
-  borderRadius: 3,
-  fontSize: '0.85em',
-  background: 'var(--surface-3)',
-  color: 'var(--text-1)',
-};
-
-const paginationStyle: React.CSSProperties = {
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-  gap: '1em',
-  marginTop: '1em',
-  padding: '0.5em 0',
-};
-
 // -- Helpers -------------------------------------------------------------
 
 function formatTimestamp(iso: string): string {
@@ -124,18 +65,36 @@ function formatTimestamp(iso: string): string {
 
 function uniqueActors(entries: readonly ActivityEntry[]): string[] {
   const seen = new Set<string>();
-  for (const e of entries) {
-    seen.add(e.actor);
-  }
+  for (const e of entries) seen.add(e.actor);
   return [...seen].sort();
 }
 
 function uniqueActions(entries: readonly ActivityEntry[]): string[] {
   const seen = new Set<string>();
-  for (const e of entries) {
-    seen.add(e.action);
-  }
+  for (const e of entries) seen.add(e.action);
   return [...seen].sort();
+}
+
+function actorKindLabel(c: ActivityEntry['callerClass']): string {
+  switch (c) {
+    case 'ui':
+      return 'human';
+    case 'agent':
+    case 'mcp':
+      return 'agent';
+    case 'library':
+      return 'system';
+  }
+}
+
+function actorKindColor(c: ActivityEntry['callerClass']): 'accent' | 'neutral' | 'warning' {
+  if (c === 'ui') return 'accent';
+  if (c === 'library') return 'neutral';
+  return 'warning';
+}
+
+function modeColor(mode: 'preview' | 'commit'): 'accent' | 'neutral' {
+  return mode === 'commit' ? 'accent' : 'neutral';
 }
 
 // -- Component -----------------------------------------------------------
@@ -154,34 +113,44 @@ export function ActivityView({
   onPageChange,
 }: ActivityViewProps) {
   const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
-
   const actors = uniqueActors(entries);
   const actions = uniqueActions(entries);
 
   return (
-    <section aria-labelledby="activity-heading" style={{ maxWidth: '72em' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5em' }}>
-        <h2 id="activity-heading" style={{ margin: 0 }}>Activity</h2>
+    <section
+      aria-labelledby="activity-heading"
+      className={styles['container']}
+    >
+      <div className={styles['header']}>
+        <h2 id="activity-heading" className={styles['heading']}>Activity</h2>
         <IntegrityBadge
-          status={integrityStatus}
-          error={integrityError}
-          onVerify={onVerify}
+          {...(integrityStatus !== undefined ? { status: integrityStatus } : {})}
+          {...(integrityError !== undefined ? { error: integrityError } : {})}
+          {...(onVerify !== undefined ? { onVerify } : {})}
         />
       </div>
 
-      {isLoading === true ? <p>Loading activity...</p> : null}
+      {/* aria-live region for verify announcement (status pill is visual). */}
+      <div className={styles['statusRegion']} aria-live="polite" role="status">
+        {integrityStatus === 'verified' ? 'Chain verified.' : ''}
+        {integrityStatus === 'failed'
+          ? `Verification failed${integrityError !== undefined ? `: ${integrityError}` : ''}.`
+          : ''}
+      </div>
+
+      {isLoading === true ? <p className={styles['muted']}>Loading activity…</p> : null}
 
       {/* Filter bar */}
-      <div style={filterBarStyle}>
-        <div style={filterGroupStyle}>
-          <label htmlFor="activity-filter-actor" style={{ fontSize: '0.85em', fontWeight: 600 }}>
+      <div className={styles['filterBar']}>
+        <div className={styles['filterField']}>
+          <label htmlFor="activity-filter-actor" className={styles['filterLabel']}>
             Actor
           </label>
           <select
             id="activity-filter-actor"
             value={filters.actor}
             onChange={(e) => onFilterChange('actor', e.target.value)}
-            style={selectStyle}
+            className={styles['filterSelect']}
           >
             <option value="all">All</option>
             {actors.map((a) => (
@@ -190,15 +159,15 @@ export function ActivityView({
           </select>
         </div>
 
-        <div style={filterGroupStyle}>
-          <label htmlFor="activity-filter-action" style={{ fontSize: '0.85em', fontWeight: 600 }}>
+        <div className={styles['filterField']}>
+          <label htmlFor="activity-filter-action" className={styles['filterLabel']}>
             Action
           </label>
           <select
             id="activity-filter-action"
             value={filters.action}
             onChange={(e) => onFilterChange('action', e.target.value)}
-            style={selectStyle}
+            className={styles['filterSelect']}
           >
             <option value="all">All</option>
             {actions.map((a) => (
@@ -207,15 +176,15 @@ export function ActivityView({
           </select>
         </div>
 
-        <div style={filterGroupStyle}>
-          <label htmlFor="activity-filter-mode" style={{ fontSize: '0.85em', fontWeight: 600 }}>
+        <div className={styles['filterField']}>
+          <label htmlFor="activity-filter-mode" className={styles['filterLabel']}>
             Mode
           </label>
           <select
             id="activity-filter-mode"
             value={filters.mode}
             onChange={(e) => onFilterChange('mode', e.target.value)}
-            style={selectStyle}
+            className={styles['filterSelect']}
           >
             <option value="all">All</option>
             <option value="preview">Preview</option>
@@ -223,15 +192,15 @@ export function ActivityView({
           </select>
         </div>
 
-        <div style={filterGroupStyle}>
-          <label htmlFor="activity-filter-timerange" style={{ fontSize: '0.85em', fontWeight: 600 }}>
+        <div className={styles['filterField']}>
+          <label htmlFor="activity-filter-timerange" className={styles['filterLabel']}>
             Time range
           </label>
           <select
             id="activity-filter-timerange"
             value={filters.timeRange}
             onChange={(e) => onFilterChange('timeRange', e.target.value)}
-            style={selectStyle}
+            className={styles['filterSelect']}
           >
             <option value="all">All</option>
             <option value="hour">Last hour</option>
@@ -243,21 +212,21 @@ export function ActivityView({
 
       {/* Table or empty state */}
       {entries.length === 0 ? (
-        <p style={{ color: 'var(--text-2)' }}>No activity recorded yet.</p>
+        <p className={styles['empty']}>No activity recorded yet.</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table className={styles['table']}>
           <thead>
             <tr>
-              <th scope="col" style={thStyle}>Timestamp</th>
-              <th scope="col" style={thStyle}>Actor</th>
-              <th scope="col" style={thStyle}>Action</th>
-              <th scope="col" style={thStyle}>Mode</th>
-              <th scope="col" style={thStyle}>Details</th>
+              <th scope="col">Timestamp</th>
+              <th scope="col">Actor</th>
+              <th scope="col">Action</th>
+              <th scope="col">Mode</th>
+              <th scope="col">Details</th>
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry, idx) => (
-              <ActivityRow key={entry.seq} entry={entry} index={idx} />
+            {entries.map((entry) => (
+              <ActivityRow key={entry.seq} entry={entry} />
             ))}
           </tbody>
         </table>
@@ -265,24 +234,26 @@ export function ActivityView({
 
       {/* Pagination */}
       {totalEntries > 0 ? (
-        <nav aria-label="Activity pagination" style={paginationStyle}>
-          <button
-            type="button"
+        <nav aria-label="Activity pagination" className={styles['pagination']}>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onPageChange(page - 1)}
             disabled={page <= 1}
             aria-label="Previous page"
           >
             Previous
-          </button>
-          <span>Page {page} of {totalPages}</span>
-          <button
-            type="button"
+          </Button>
+          <span className={styles['pageInfo']}>Page {page} of {totalPages}</span>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => onPageChange(page + 1)}
             disabled={page >= totalPages}
             aria-label="Next page"
           >
             Next
-          </button>
+          </Button>
         </nav>
       ) : null}
     </section>
@@ -296,183 +267,216 @@ function IntegrityBadge({
   error,
   onVerify,
 }: {
-  readonly status?: 'verified' | 'failed' | 'checking' | 'unchecked' | undefined;
-  readonly error?: string | undefined;
-  readonly onVerify?: (() => void) | undefined;
+  readonly status?: 'verified' | 'failed' | 'checking' | 'unchecked';
+  readonly error?: string;
+  readonly onVerify?: () => void;
 }) {
   if (status === 'verified') {
     return (
-      <span
-        style={{
-          ...badgeBaseStyle,
-          background: 'color-mix(in srgb, var(--success) 15%, transparent)',
-          color: 'var(--success)',
-          border: '1px solid var(--success)',
-        }}
-        role="status"
-      >
-        &#10003; Verified
+      <span className={styles['integrity']}>
+        <Badge variant="status" color="success">Verified</Badge>
       </span>
     );
   }
 
   if (status === 'failed') {
     return (
-      <span
-        style={{
-          ...badgeBaseStyle,
-          background: 'color-mix(in srgb, var(--destructive) 15%, transparent)',
-          color: 'var(--destructive)',
-          border: '1px solid var(--destructive)',
-        }}
-        role="alert"
-      >
-        &#10007; Failed{error !== undefined ? `: ${error}` : ''}
+      <span className={styles['integrity']} role="alert">
+        <Badge variant="status" color="destructive">
+          Failed{error !== undefined ? `: ${error}` : ''}
+        </Badge>
       </span>
     );
   }
 
   if (status === 'checking') {
     return (
-      <span
-        style={{
-          ...badgeBaseStyle,
-          background: 'color-mix(in srgb, var(--warning) 15%, transparent)',
-          color: 'var(--warning)',
-          border: '1px solid var(--warning)',
-        }}
-        role="status"
-      >
-        Checking...
+      <span className={styles['integrity']}>
+        <Badge variant="status" color="warning">Checking…</Badge>
       </span>
     );
   }
 
-  // unchecked or undefined
   return (
-    <button
-      type="button"
-      onClick={onVerify}
+    <Button
+      variant="secondary"
+      size="sm"
+      {...(onVerify !== undefined ? { onClick: onVerify } : {})}
       aria-label="Verify chain"
-      style={{
-        padding: '0.3em 0.8em',
-        font: 'inherit',
-        fontSize: '0.85em',
-        border: '1px solid var(--surface-3)',
-        borderRadius: 4,
-        background: 'none',
-        color: 'var(--text-1)',
-        cursor: 'pointer',
-      }}
     >
       Verify chain
-    </button>
+    </Button>
   );
 }
 
 // -- Activity row --------------------------------------------------------
 
-function ActivityRow({
-  entry,
-  index,
-}: {
-  readonly entry: ActivityEntry;
-  readonly index: number;
-}) {
+function ActivityRow({ entry }: { readonly entry: ActivityEntry }) {
   const [expanded, setExpanded] = useState(false);
-  const bgColor = index % 2 === 0 ? 'transparent' : 'var(--surface-2)';
 
   return (
     <>
-      <tr style={{ background: bgColor }}>
-        <td style={tdStyle}>{formatTimestamp(entry.timestamp)}</td>
-        <td style={tdStyle}>{entry.actor}</td>
-        <td style={tdStyle}>{entry.action}</td>
-        <td style={tdStyle}>
+      <tr className={styles['row']}>
+        <td>
+          <span className={styles['timestamp']}>{formatTimestamp(entry.timestamp)}</span>
+        </td>
+        <td>
+          <div className={styles['actorCell']}>
+            <Avatar name={entry.actor} size="sm" />
+            <div>
+              <div className={styles['actorName']}>{entry.actor}</div>
+              <div className={styles['actorKind']}>
+                <Badge variant="scope" color={actorKindColor(entry.callerClass)}>
+                  {actorKindLabel(entry.callerClass)}
+                </Badge>
+              </div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <code className={styles['actionCode']}>{entry.action}</code>
+        </td>
+        <td>
           {entry.mode !== undefined ? (
-            <span style={modeBadgeStyle}>{entry.mode}</span>
+            <Badge variant="scope" color={modeColor(entry.mode)}>
+              {entry.mode}
+            </Badge>
           ) : (
-            <span style={{ color: 'var(--text-3)' }}>--</span>
+            <span className={styles['muted']}>—</span>
           )}
         </td>
-        <td style={tdStyle}>
+        <td>
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
             aria-label={expanded ? 'Collapse details' : 'Expand details'}
-            style={{
-              font: 'inherit',
-              fontSize: '0.85em',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--text-2)',
-              padding: 0,
-            }}
+            aria-expanded={expanded}
+            className={styles['expandButton']}
           >
+            <span
+              className={`${styles['chevron']} ${expanded ? styles['chevronOpen'] : ''}`}
+              aria-hidden="true"
+            >
+              ›
+            </span>
             {expanded ? 'Collapse' : 'Expand'}
           </button>
         </td>
       </tr>
       {expanded ? (
-        <tr style={{ background: bgColor }}>
-          <td colSpan={5} style={{ padding: '0.5em 1em 1em 1em' }}>
-            {/* Params */}
-            <div style={{ marginBottom: '0.5em' }}>
-              <strong style={{ fontSize: '0.85em' }}>Params:</strong>
-              <pre
-                style={{
-                  marginTop: '0.3em',
-                  padding: '0.5em',
-                  background: 'var(--surface-2)',
-                  borderRadius: 4,
-                  fontSize: '0.85em',
-                  overflow: 'auto',
-                  maxHeight: '16em',
-                  color: 'var(--text-1)',
-                }}
-              >
-                {JSON.stringify(entry.params, null, 2)}
-              </pre>
-            </div>
-
-            {/* Provenance */}
-            {entry.provenance !== undefined ? (
-              <div style={{ marginBottom: '0.5em' }}>
-                <strong style={{ fontSize: '0.85em' }}>Provenance:</strong>
-                <div style={{ fontSize: '0.85em', marginTop: '0.2em' }}>
-                  <div>
-                    <span style={{ color: 'var(--text-2)' }}>affectedJson:</span>{' '}
-                    <code>{entry.provenance.affectedJson}</code>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-2)' }}>previewHashHex:</span>{' '}
-                    <code>{entry.provenance.previewHashHex}</code>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {/* Hash chain */}
-            <div>
-              <strong style={{ fontSize: '0.85em' }}>Hash chain:</strong>
-              <div style={{ fontSize: '0.85em', marginTop: '0.2em' }}>
-                <div>
-                  <span style={{ color: 'var(--text-2)' }}>seq:</span> {entry.seq}
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-2)' }}>hashHex:</span>{' '}
-                  <code>{entry.hashHex}</code>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-2)' }}>prevHashHex:</span>{' '}
-                  <code>{entry.prevHashHex}</code>
-                </div>
-              </div>
-            </div>
+        <tr className={styles['detailRow']}>
+          <td colSpan={5} className={styles['detailCell']}>
+            <DetailPanel entry={entry} />
           </td>
         </tr>
       ) : null}
     </>
   );
+}
+
+// -- Detail panel --------------------------------------------------------
+
+function DetailPanel({ entry }: { readonly entry: ActivityEntry }) {
+  const [showRaw, setShowRaw] = useState(false);
+
+  const paramEntries = isPlainObject(entry.params)
+    ? Object.entries(entry.params)
+    : null;
+
+  return (
+    <div className={styles['detail']}>
+      {/* Params */}
+      <div className={styles['detailSection']}>
+        <h3 className={styles['detailHeading']}>Params</h3>
+        {paramEntries !== null && paramEntries.length > 0 ? (
+          <dl className={styles['paramsList']}>
+            {paramEntries.map(([k, v]) => (
+              <div key={k} style={{ display: 'contents' }}>
+                <dt>{k}</dt>
+                <dd>{formatParamValue(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : paramEntries !== null && paramEntries.length === 0 ? (
+          <p className={styles['muted']}>(no params)</p>
+        ) : (
+          <pre className={styles['rawJson']}>{JSON.stringify(entry.params, null, 2)}</pre>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowRaw((v) => !v)}
+          aria-expanded={showRaw}
+        >
+          {showRaw ? 'Hide raw JSON' : 'View raw JSON'}
+        </Button>
+        {showRaw ? (
+          <pre className={styles['rawJson']}>{JSON.stringify(entry.params, null, 2)}</pre>
+        ) : null}
+      </div>
+
+      {/* Provenance */}
+      {entry.provenance !== undefined ? (
+        <div className={styles['detailSection']}>
+          <h3 className={styles['detailHeading']}>Provenance</h3>
+          <HashRow label="affectedJson" value={entry.provenance.affectedJson} />
+          <HashRow label="previewHashHex" value={entry.provenance.previewHashHex} />
+        </div>
+      ) : null}
+
+      {/* Hash chain */}
+      <div className={styles['detailSection']}>
+        <h3 className={styles['detailHeading']}>Hash chain</h3>
+        <HashRow label="seq" value={String(entry.seq)} copyable={false} />
+        <HashRow label="hashHex" value={entry.hashHex} />
+        <HashRow label="prevHashHex" value={entry.prevHashHex} />
+      </div>
+    </div>
+  );
+}
+
+function HashRow({
+  label,
+  value,
+  copyable = true,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly copyable?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = (): void => {
+    if (typeof navigator === 'undefined' || navigator.clipboard === undefined) return;
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className={styles['hashRow']}>
+      <span className={styles['hashLabel']}>{label}</span>
+      <code className={styles['hashValue']}>{value === '' ? '(empty)' : value}</code>
+      {copyable ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onCopy}
+          aria-label={`Copy ${label}`}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function formatParamValue(v: unknown): ReactNode {
+  if (v === null) return 'null';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  return JSON.stringify(v);
 }

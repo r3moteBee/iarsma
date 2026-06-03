@@ -45,6 +45,7 @@ import { FilesView, type FileTreeNode, type FileContent as FilesViewContent, typ
 import { githubClient, type GitHubConfig } from './runtime/github-client.js';
 import { indexedDbGitHubConfigStore, inMemoryGitHubConfigStore, type GitHubStoredConfig } from './runtime/github-config-store.js';
 import { ActivityView } from './views/activity-view.js';
+import { useActivityLog } from './runtime/use-activity-log.js';
 import { ApprovalsView } from './views/approvals-view.js';
 import {
   jmapApprovalStore,
@@ -741,6 +742,17 @@ function SignedInShell({
     setAgentTokens(refreshed);
   };
 
+  // Activity view — wires the action log to a paginated, filterable
+  // table. Phase 0 reads the whole chain into memory and slices in JS;
+  // Phase 1's verified-prefix caching will move pagination server-side.
+  const activity = useActivityLog({
+    actorTokenName: useCallback(
+      (tokenId: string) =>
+        agentTokens.find((t) => t.tokenId === tokenId)?.name ?? tokenId,
+      [agentTokens],
+    ),
+  });
+
   // View title for mobile top bar
   const VIEW_TITLES: Record<ActiveView, string> = {
     mail: 'Mail',
@@ -978,14 +990,19 @@ function SignedInShell({
           />
         ) : activeView === 'activity' ? (
           <ActivityView
-            entries={[]}
-            integrityStatus="unchecked"
-            filters={{ actor: 'all', action: 'all', mode: 'all', timeRange: 'all' }}
-            onFilterChange={() => {}}
-            page={1}
-            pageSize={25}
-            totalEntries={0}
-            onPageChange={() => {}}
+            entries={activity.entries}
+            isLoading={activity.isLoading}
+            integrityStatus={activity.integrityStatus}
+            {...(activity.integrityError !== undefined
+              ? { integrityError: activity.integrityError }
+              : {})}
+            onVerify={activity.onVerify}
+            filters={activity.filters}
+            onFilterChange={activity.onFilterChange}
+            page={activity.page}
+            pageSize={activity.pageSize}
+            totalEntries={activity.totalEntries}
+            onPageChange={activity.onPageChange}
           />
         ) : activeView === 'files' ? (
           <FilesView
