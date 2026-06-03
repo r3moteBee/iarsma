@@ -1,0 +1,269 @@
+/* ──────────────────────────────────────────────────────────────────
+ * Settings layout — sub-nav + content panel (§8.11).
+ *
+ * Replaces the previous flat-scroll layout. Sections sit behind a
+ * left rail; the active section's panel renders on the right.
+ * Mobile (≤640px): the rail collapses to a horizontal scrollable
+ * row of pills above the content.
+ * ────────────────────────────────────────────────────────────────── */
+
+.layout {
+  display: flex;
+  gap: var(--space-lg);
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-md) var(--space-lg);
+  max-width: 64em;
+}
+
+.subnav {
+  flex: 0 0 auto;
+  width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: flex-start;
+  position: sticky;
+  top: var(--space-md);
+}
+
+.tab {
+  display: block;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  width: 100%;
+}
+
+.tab:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.tabActive {
+  background: var(--accent-subtle);
+  color: var(--text-1);
+  font-weight: 650;
+  /* Accent rail — matches the sidebar's active-nav rule (§6.3). */
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+}
+
+.sectionHeading {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-xl);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.sectionDescription {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-md);
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+/* ── Appearance section ──────────────────────────────────────── */
+
+.appearanceRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-md);
+}
+
+.appearanceLabel {
+  width: 88px;
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-2);
+}
+
+/* ── Tokens section ──────────────────────────────────────────── */
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space-md);
+}
+
+.formField label {
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-2);
+}
+
+.scopeFieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 var(--space-md);
+  padding: 0;
+  border: none;
+}
+
+.scopeFieldset legend {
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--text-2);
+  margin-bottom: 4px;
+  padding: 0;
+}
+
+.scopeChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scopeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.scopeChip:hover {
+  background: var(--surface-3);
+}
+
+.scopeChipChecked {
+  background: var(--accent-subtle);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent-active);
+  font-weight: 650;
+}
+
+.scopeChip input[type='checkbox'] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.lifetimeSelect {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+/* ── Token table ─────────────────────────────────────────────── */
+
+.tokenTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.tokenTable th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 2px solid var(--border);
+  color: var(--text-2);
+  font-weight: 650;
+}
+
+.tokenTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scopeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin: 1px 3px 1px 0;
+  background: var(--accent-subtle);
+  color: var(--accent-active);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.statusActive {
+  display: inline-flex;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.statusRevoked {
+  display: inline-flex;
+  padding: 2px 8px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* ── Account section ─────────────────────────────────────────── */
+
+.accountRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-md) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.accountLabel {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-weight: 650;
+}
+
+.accountValue {
+  font-size: var(--text-md);
+  color: var(--text-1);
+}
+
+/* ── Mobile ──────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .layout {
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+  .subnav {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    position: static;
+    padding-bottom: var(--space-xs);
+  }
+  .tab {
+    flex: 0 0 auto;
+    width: auto;
+  }
+}

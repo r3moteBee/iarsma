@@ -1013,6 +1013,8 @@ function SignedInShell({
               onConnect: handleFilesConnect,
               onDisconnect: handleFilesDisconnect,
             }}
+            {...(userName !== undefined ? { userName } : {})}
+            onSignOut={onSignOut}
           />
         ) : null /* activeView is a closed union — every case is handled above */}
       </div>
