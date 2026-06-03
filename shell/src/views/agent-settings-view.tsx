@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react';
+import { Notice } from '../components/index.js';
 import type { AgentTokenInfo, IssuedToken } from '../runtime/agent-token-issuer.js';
 import { FilesSettingsPanel } from './files-settings-panel.js';
 import type { FilesSettingsPanelProps } from './files-settings-panel.js';
@@ -126,33 +127,19 @@ function IssueTokenForm({
       <h3 id="issue-token-heading">Issue New Token</h3>
 
       {issuedSecret !== null ? (
-        <div
-          role="alert"
-          style={{
-            padding: '1em',
-            border: '2px solid var(--warning)',
-            borderRadius: 4,
-            background: 'color-mix(in srgb, var(--warning) 15%, transparent)',
-            marginBottom: '1em',
-          }}
-        >
-          <p>
-            <strong>Client Secret:</strong>{' '}
-            <code style={{ wordBreak: 'break-all' }}>{issuedSecret.clientSecret}</code>
-          </p>
-          <button type="button" onClick={handleCopy} aria-label="Copy secret">
-            {copyFeedback ? 'Copied!' : 'Copy'}
-          </button>
-          <p style={{ color: 'var(--warning)', marginTop: '0.5em', fontSize: '0.9em' }}>
-            This secret won't be shown again. Store it securely now.
-          </p>
-          <button
-            type="button"
-            onClick={() => setIssuedSecret(null)}
-            style={{ marginTop: '0.5em' }}
-          >
-            Dismiss
-          </button>
+        <div style={{ marginBottom: '1em' }}>
+          <Notice variant="warning" onDismiss={() => setIssuedSecret(null)}>
+            <p style={{ margin: '0 0 0.5em' }}>
+              <strong>Client Secret:</strong>{' '}
+              <code style={{ wordBreak: 'break-all' }}>{issuedSecret.clientSecret}</code>
+            </p>
+            <button type="button" onClick={handleCopy} aria-label="Copy secret">
+              {copyFeedback ? 'Copied!' : 'Copy'}
+            </button>
+            <p style={{ margin: '0.5em 0 0', fontSize: '0.9em' }}>
+              This secret won't be shown again. Store it securely now.
+            </p>
+          </Notice>
         </div>
       ) : null}
 

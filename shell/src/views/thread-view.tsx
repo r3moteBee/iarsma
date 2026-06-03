@@ -46,6 +46,7 @@ import {
 import { tokensAtom } from '../auth-state.js';
 import { Button } from '../components/button.js';
 import { EmptyState } from '../components/empty-state.js';
+import { Notice } from '../components/notice.js';
 import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
 import { selectedThreadIdAtom } from '../mail-state.js';
@@ -90,9 +91,9 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
   if (error !== undefined) {
     return (
       <section aria-label="Thread" className={styles['pane']}>
-        <p role="alert" className={styles['error']}>
-          Failed to load thread: {error.message}
-        </p>
+        <div style={{ padding: 'var(--space-md)' }}>
+          <Notice variant="error">Failed to load thread: {error.message}</Notice>
+        </div>
       </section>
     );
   }

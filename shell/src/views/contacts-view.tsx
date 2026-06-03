@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Avatar, Button, Dialog, Input } from '../components/index.js';
+import { Avatar, Button, Dialog, Input, Notice } from '../components/index.js';
 import styles from './contacts-view.module.css';
 
 // -- Types ---------------------------------------------------------------
@@ -353,9 +353,7 @@ function ContactFormDialog({ open, contact, onSave, onCancel }: ContactFormDialo
     >
       <div className={styles['contactForm']}>
         {submitError !== null && (
-          <div role="alert" style={{ padding: '0.5em 0.75em', background: 'color-mix(in srgb, var(--destructive) 10%, transparent)', color: 'var(--destructive)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)' }}>
-            {submitError}
-          </div>
+          <Notice variant="error">{submitError}</Notice>
         )}
         <Input
           label="Given name"

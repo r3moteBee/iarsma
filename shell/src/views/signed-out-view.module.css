@@ -1,0 +1,88 @@
+/* ──────────────────────────────────────────────────────────────────
+ * Signed-out (sign-in) screen — UI redesign PR 6.5 (§8.9).
+ *
+ * Centered card on a soft surface background. The first impression
+ * for any unauthenticated visitor — should read like a product, not
+ * a debug screen.
+ * ────────────────────────────────────────────────────────────────── */
+
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-lg);
+  background: var(--surface-2);
+}
+
+.card {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-xl);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-1);
+}
+
+.wordmarkDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.valueProp {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.issuer {
+  margin: 0;
+  font-size: var(--text-sm);
+  /* --text-3 was too light against --surface-1 to clear WCAG AA
+   * (~3:1 instead of 4.5:1). The body explanation is value-bearing
+   * for the user; bump it to --text-2 for proper contrast. */
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.issuer code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  padding: 1px 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* Full-width override for the sign-in CTA. Passed to <Button
+ * className={styles.cta}/> — the Button's own class chain composes
+ * with this width rule. */
+.cta {
+  width: 100%;
+}

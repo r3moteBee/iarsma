@@ -13,7 +13,7 @@
  */
 
 import { useState } from 'react';
-import { Button, Input } from '../components/index.js';
+import { Button, Input, Notice } from '../components/index.js';
 
 // ── Props ────────────────────────────────────────────────────────
 
@@ -115,20 +115,7 @@ function ConnectForm({
         <Input label="Owner" value={owner} onChange={setOwner} placeholder="octocat" />
         <Input label="Repo" value={repo} onChange={setRepo} placeholder="my-repo" />
         <Input label="Branch" value={branch} onChange={setBranch} placeholder="main" />
-        {error !== null ? (
-          <div
-            role="alert"
-            style={{
-              padding: '0.5em 0.75em',
-              background: 'color-mix(in srgb, var(--destructive) 10%, transparent)',
-              color: 'var(--destructive)',
-              borderRadius: 'var(--radius-sm, 4px)',
-              fontSize: '0.875em',
-            }}
-          >
-            {error}
-          </div>
-        ) : null}
+        {error !== null ? <Notice variant="error">{error}</Notice> : null}
         <div>
           <Button type="submit" variant="primary" disabled={!canSubmit}>
             {isSubmitting ? 'Connecting...' : 'Connect'}
