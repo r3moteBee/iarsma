@@ -13,6 +13,8 @@
 import React, { useEffect, useState } from 'react';
 import type { ActiveView } from '../nav-state.js';
 import type { ThemePreference } from '../runtime/theme.js';
+import { AccentPicker } from './accent-picker.js';
+import { DensitySelector } from './density-selector.js';
 import { MailboxTreeView } from './mailbox-tree-view.js';
 import styles from './sidebar.module.css';
 
@@ -320,37 +322,41 @@ export function Sidebar({
               Sign out
             </button>
           </div>
-          <div className={styles.themeRow} role="radiogroup" aria-label="Theme preference">
-            <button
-              type="button"
-              className={`${styles.themeButton} ${theme === 'light' ? styles.themeButtonActive : ''}`}
-              onClick={() => cycleTheme('light')}
-              aria-label="Light theme"
-              aria-checked={theme === 'light'}
-              role="radio"
-            >
-              <SunIcon />
-            </button>
-            <button
-              type="button"
-              className={`${styles.themeButton} ${theme === 'dark' ? styles.themeButtonActive : ''}`}
-              onClick={() => cycleTheme('dark')}
-              aria-label="Dark theme"
-              aria-checked={theme === 'dark'}
-              role="radio"
-            >
-              <MoonIcon />
-            </button>
-            <button
-              type="button"
-              className={`${styles.themeButton} ${theme === 'system' ? styles.themeButtonActive : ''}`}
-              onClick={() => cycleTheme('system')}
-              aria-label="System theme"
-              aria-checked={theme === 'system'}
-              role="radio"
-            >
-              <MonitorIcon />
-            </button>
+          <div className={styles.appearance} role="group" aria-label="Appearance">
+            <div className={styles.themeRow} role="radiogroup" aria-label="Theme preference">
+              <button
+                type="button"
+                className={`${styles.themeButton} ${theme === 'light' ? styles.themeButtonActive : ''}`}
+                onClick={() => cycleTheme('light')}
+                aria-label="Light theme"
+                aria-checked={theme === 'light'}
+                role="radio"
+              >
+                <SunIcon />
+              </button>
+              <button
+                type="button"
+                className={`${styles.themeButton} ${theme === 'dark' ? styles.themeButtonActive : ''}`}
+                onClick={() => cycleTheme('dark')}
+                aria-label="Dark theme"
+                aria-checked={theme === 'dark'}
+                role="radio"
+              >
+                <MoonIcon />
+              </button>
+              <button
+                type="button"
+                className={`${styles.themeButton} ${theme === 'system' ? styles.themeButtonActive : ''}`}
+                onClick={() => cycleTheme('system')}
+                aria-label="System theme"
+                aria-checked={theme === 'system'}
+                role="radio"
+              >
+                <MonitorIcon />
+              </button>
+              <AccentPicker />
+            </div>
+            <DensitySelector />
           </div>
         </div>
       </aside>

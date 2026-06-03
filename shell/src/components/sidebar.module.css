@@ -302,10 +302,17 @@
   color: var(--danger);
 }
 
+.appearance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
 .themeRow {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .themeButton {

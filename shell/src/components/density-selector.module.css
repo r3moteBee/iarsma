@@ -1,0 +1,43 @@
+/* ──────────────────────────────────────────────────────────────────
+ * DensitySelector — 3-way segmented control (§5.3).
+ *
+ * Dense / Normal / Spacious — maps to --density 0.85 / 1 / 1.25.
+ * Same form factor as the mockup demo bar's density toggle.
+ * ────────────────────────────────────────────────────────────────── */
+
+.group {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+
+.option {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: calc(var(--radius-md) - 3px);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.option:hover {
+  color: var(--text-1);
+}
+
+.option[aria-pressed='true'] {
+  background: var(--surface-1);
+  color: var(--text-1);
+  box-shadow: var(--shadow-sm);
+}
+
+.option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
