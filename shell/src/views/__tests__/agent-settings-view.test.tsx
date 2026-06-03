@@ -53,12 +53,24 @@ function noopIssue(): Promise<IssuedToken> {
   });
 }
 
+/**
+ * PR 9: Settings has a sub-nav (Appearance / Agent tokens / Files /
+ * Account). Default tab is Appearance. Tests that exercise the Issue
+ * form + Token table need to navigate into the Agent tokens tab
+ * first. Reused everywhere instead of duplicating the click.
+ */
+function openTokensTab(): void {
+  const tab = screen.getByTestId('settings-tab-tokens');
+  fireEvent.click(tab);
+}
+
 describe('AgentSettingsView', () => {
   describe('Issue form', () => {
     it('renders all form fields', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       expect(screen.getByLabelText(/agent name/i)).toBeInTheDocument();
       expect(screen.getByRole('group', { name: /scopes/i })).toBeInTheDocument();
@@ -70,6 +82,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const scopes = ['mail:read', 'mail:draft', 'mail:send', 'mail:modify', 'mail:delete'];
       for (const scope of scopes) {
@@ -81,6 +94,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const select = screen.getByLabelText(/lifetime/i);
       const options = within(select).getAllByRole('option');
@@ -97,6 +111,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       // Check a scope so only name is missing
       fireEvent.click(screen.getByLabelText('mail:read'));
@@ -107,6 +122,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       // Fill in name but no scopes
       fireEvent.change(screen.getByLabelText(/agent name/i), {
@@ -119,6 +135,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       fireEvent.change(screen.getByLabelText(/agent name/i), {
         target: { value: 'My Agent' },
@@ -132,6 +149,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={onIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       fireEvent.change(screen.getByLabelText(/agent name/i), {
         target: { value: 'CI Bot' },
@@ -152,6 +170,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       fireEvent.change(screen.getByLabelText(/agent name/i), {
         target: { value: 'CI Bot' },
@@ -172,6 +191,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const table = screen.getByRole('table');
       expect(table).toBeInTheDocument();
@@ -197,6 +217,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const rows = screen.getAllByRole('row');
       // First data row (index 1) is the non-revoked token
@@ -207,6 +228,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const rows = screen.getAllByRole('row');
       // Second data row (index 2) is the revoked token
@@ -217,6 +239,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const revokeButtons = screen.getAllByRole('button', { name: /revoke/i });
       // Only one active token, so only one revoke button
@@ -228,6 +251,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={onRevoke} />,
       );
+      openTokensTab();
 
       const revokeButton = screen.getByRole('button', { name: /revoke/i });
       fireEvent.click(revokeButton);
@@ -241,6 +265,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const rows = screen.getAllByRole('row');
       // First data row has scopes 'mail:read', 'mail:draft'
@@ -252,6 +277,7 @@ describe('AgentSettingsView', () => {
       render(
         <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />,
       );
+      openTokensTab();
 
       const table = screen.getByRole('table');
       const rows = within(table).getAllByRole('row');
@@ -270,6 +296,7 @@ describe('AgentSettingsView', () => {
           isLoading={true}
         />,
       );
+      openTokensTab();
 
       expect(screen.getByText(/loading/i)).toBeInTheDocument();
     });

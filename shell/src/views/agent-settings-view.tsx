@@ -1,19 +1,28 @@
 /**
- * AgentSettingsView — token management UI for agent credentials.
+ * AgentSettingsView — settings surface with a left sub-nav + content panel
+ * (§8.11). Sections:
+ *   • Appearance  — theme + accent + density (mirrors sidebar footer)
+ *   • Agent tokens — issue + table of active tokens
+ *   • Files       — GitHub connection (FilesSettingsPanel)
+ *   • Account     — signed-in email + sign out
  *
- * Two sections:
- *   1. Issue New Token form (name, scopes, lifetime, submit).
- *   2. Active Tokens table (name, scopes, issued, expires, status, action).
- *
- * The view is purely presentational — all side-effect work (network calls
- * to issue / revoke tokens) is delegated to callback props.
+ * Previously a flat scroll containing all three; the sub-nav gives
+ * each surface a discoverable home and matches the navigation
+ * affordance density of the rest of the shell.
  */
 
+import { useAtom } from 'jotai';
 import { useState } from 'react';
-import { Notice } from '../components/index.js';
+import { AccentPicker } from '../components/accent-picker.js';
+import { Button } from '../components/button.js';
+import { DensitySelector } from '../components/density-selector.js';
+import { Input } from '../components/input.js';
+import { Notice } from '../components/notice.js';
+import { themePreferenceAtom, type ThemePreference } from '../runtime/theme.js';
 import type { AgentTokenInfo, IssuedToken } from '../runtime/agent-token-issuer.js';
 import { FilesSettingsPanel } from './files-settings-panel.js';
 import type { FilesSettingsPanelProps } from './files-settings-panel.js';
+import styles from './agent-settings-view.module.css';
 
 // ── Scope definitions ──────────────────────────────────────────────
 
@@ -42,9 +51,26 @@ type AgentSettingsViewProps = {
   readonly onIssue: (name: string, scopes: string[], lifetimeSec: number) => Promise<IssuedToken>;
   readonly onRevoke: (tokenId: string) => Promise<void>;
   readonly isLoading?: boolean;
-  /** Optional GitHub Files integration settings. When omitted, the section is hidden. */
+  /** Optional GitHub Files integration settings. */
   readonly files?: FilesSettingsPanelProps;
+  /** Account info — signed-in email + sign-out handler. */
+  readonly userName?: string;
+  readonly onSignOut?: () => void;
 };
+
+type SectionId = 'appearance' | 'tokens' | 'files' | 'account';
+
+type SectionDef = {
+  readonly id: SectionId;
+  readonly label: string;
+};
+
+const SECTIONS: readonly SectionDef[] = [
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'tokens', label: 'Agent tokens' },
+  { id: 'files', label: 'Files' },
+  { id: 'account', label: 'Account' },
+];
 
 // ── Component ──────────────────────────────────────────────────────
 
@@ -54,20 +80,139 @@ export function AgentSettingsView({
   onRevoke,
   isLoading,
   files,
+  userName,
+  onSignOut,
 }: AgentSettingsViewProps) {
+  const [section, setSection] = useState<SectionId>('appearance');
+
   return (
-    <section aria-labelledby="agent-settings-heading" style={{ maxWidth: '56em' }}>
-      <h2 id="agent-settings-heading">Settings</h2>
-      {files !== undefined ? <FilesSettingsPanel {...files} /> : null}
-      <h2 style={{ marginTop: '1.5em' }}>Agent Tokens</h2>
-      {isLoading === true ? <p>Loading tokens...</p> : null}
+    <section aria-labelledby="agent-settings-heading" className={styles['layout']}>
+      <h2 id="agent-settings-heading" style={visuallyHidden}>
+        Settings
+      </h2>
+      <nav className={styles['subnav']} aria-label="Settings sections">
+        {SECTIONS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`${styles['tab']} ${section === s.id ? styles['tabActive'] : ''}`}
+            onClick={() => setSection(s.id)}
+            aria-current={section === s.id ? 'page' : undefined}
+            data-testid={`settings-tab-${s.id}`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </nav>
+      <div className={styles['content']}>
+        {section === 'appearance' ? <AppearanceSection /> : null}
+        {section === 'tokens' ? (
+          <TokensSection
+            tokens={tokens}
+            onIssue={onIssue}
+            onRevoke={onRevoke}
+            {...(isLoading !== undefined ? { isLoading } : {})}
+          />
+        ) : null}
+        {section === 'files' ? (
+          files !== undefined ? (
+            <FilesSection {...files} />
+          ) : (
+            <p className={styles['sectionDescription']}>
+              Files integration is not configured for this deployment.
+            </p>
+          )
+        ) : null}
+        {section === 'account' ? (
+          <AccountSection
+            {...(userName !== undefined ? { userName } : {})}
+            {...(onSignOut !== undefined ? { onSignOut } : {})}
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+// ── Appearance section ─────────────────────────────────────────────
+
+function AppearanceSection() {
+  const [theme, setTheme] = useAtom(themePreferenceAtom);
+  return (
+    <section aria-labelledby="appearance-heading">
+      <h3 id="appearance-heading" className={styles['sectionHeading']}>
+        Appearance
+      </h3>
+      <p className={styles['sectionDescription']}>
+        Theme, accent, and density. The same controls live in the sidebar footer; changing them here updates everywhere immediately.
+      </p>
+      <div className={styles['appearanceRow']}>
+        <span className={styles['appearanceLabel']}>Theme</span>
+        <ThemeToggleInline theme={theme} onChange={setTheme} />
+      </div>
+      <div className={styles['appearanceRow']}>
+        <span className={styles['appearanceLabel']}>Accent</span>
+        <AccentPicker />
+      </div>
+      <div className={styles['appearanceRow']}>
+        <span className={styles['appearanceLabel']}>Density</span>
+        <DensitySelector />
+      </div>
+    </section>
+  );
+}
+
+function ThemeToggleInline({
+  theme,
+  onChange,
+}: {
+  readonly theme: ThemePreference;
+  readonly onChange: (next: ThemePreference) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Theme preference" style={{ display: 'inline-flex', gap: 4 }}>
+      {(['light', 'dark', 'system'] as const).map((opt) => (
+        <Button
+          key={opt}
+          variant={theme === opt ? 'primary' : 'secondary'}
+          size="sm"
+          onClick={() => onChange(opt)}
+          aria-label={`${opt} theme`}
+        >
+          {opt.charAt(0).toUpperCase() + opt.slice(1)}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+// ── Tokens section ─────────────────────────────────────────────────
+
+function TokensSection({
+  tokens,
+  onIssue,
+  onRevoke,
+  isLoading,
+}: {
+  readonly tokens: readonly AgentTokenInfo[];
+  readonly onIssue: AgentSettingsViewProps['onIssue'];
+  readonly onRevoke: AgentSettingsViewProps['onRevoke'];
+  readonly isLoading?: boolean;
+}) {
+  return (
+    <section aria-labelledby="tokens-heading">
+      <h3 id="tokens-heading" className={styles['sectionHeading']}>
+        Agent tokens
+      </h3>
+      <p className={styles['sectionDescription']}>
+        Issue capability-scoped tokens for agents to access this account. Each token can be revoked at any time.
+      </p>
+      {isLoading === true ? <p>Loading tokens…</p> : null}
       <IssueTokenForm onIssue={onIssue} />
       <TokenTable tokens={tokens} onRevoke={onRevoke} />
     </section>
   );
 }
-
-// ── Issue Token Form ───────────────────────────────────────────────
 
 function IssueTokenForm({
   onIssue,
@@ -86,11 +231,8 @@ function IssueTokenForm({
   const toggleScope = (scope: string) => {
     setSelectedScopes((prev) => {
       const next = new Set(prev);
-      if (next.has(scope)) {
-        next.delete(scope);
-      } else {
-        next.add(scope);
-      }
+      if (next.has(scope)) next.delete(scope);
+      else next.add(scope);
       return next;
     });
   };
@@ -102,7 +244,6 @@ function IssueTokenForm({
     try {
       const result = await onIssue(name.trim(), [...selectedScopes], lifetimeSec);
       setIssuedSecret(result);
-      // Reset form
       setName('');
       setSelectedScopes(new Set());
       setLifetimeSec(LIFETIME_OPTIONS[0]!.seconds);
@@ -118,24 +259,26 @@ function IssueTokenForm({
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 2000);
     } catch {
-      // Fallback: select the text for manual copy
+      /* fallback: select text */
     }
   };
 
   return (
-    <section aria-labelledby="issue-token-heading" style={{ marginBottom: '2em' }}>
-      <h3 id="issue-token-heading">Issue New Token</h3>
+    <section aria-labelledby="issue-token-heading" style={{ marginBottom: 'var(--space-xl)' }}>
+      <h4 id="issue-token-heading" style={{ margin: '0 0 var(--space-md)' }}>
+        Issue New Token
+      </h4>
 
       {issuedSecret !== null ? (
-        <div style={{ marginBottom: '1em' }}>
+        <div style={{ marginBottom: 'var(--space-md)' }}>
           <Notice variant="warning" onDismiss={() => setIssuedSecret(null)}>
             <p style={{ margin: '0 0 0.5em' }}>
               <strong>Client Secret:</strong>{' '}
               <code style={{ wordBreak: 'break-all' }}>{issuedSecret.clientSecret}</code>
             </p>
-            <button type="button" onClick={handleCopy} aria-label="Copy secret">
+            <Button size="sm" variant="secondary" onClick={handleCopy} aria-label="Copy secret">
               {copyFeedback ? 'Copied!' : 'Copy'}
-            </button>
+            </Button>
             <p style={{ margin: '0.5em 0 0', fontSize: '0.9em' }}>
               This secret won't be shown again. Store it securely now.
             </p>
@@ -144,67 +287,45 @@ function IssueTokenForm({
       ) : null}
 
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '0.75em' }}>
-          <label htmlFor="agent-name-input">Agent name</label>
-          <br />
-          <input
-            id="agent-name-input"
-            type="text"
+        <div className={styles['formField']}>
+          <Input
+            label="Agent Name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            style={{
-              padding: '0.3em 0.5em',
-              font: 'inherit',
-              border: '1px solid var(--surface-3)',
-              borderRadius: 4,
-              width: '20em',
-              color: 'var(--text-1)',
-              background: 'var(--surface-2)',
-            }}
+            onChange={setName}
+            id="token-name"
+            placeholder="e.g. triage-bot"
           />
         </div>
 
-        <fieldset
-          style={{
-            border: '1px solid var(--surface-3)',
-            borderRadius: 4,
-            padding: '0.5em 0.75em',
-            marginBottom: '0.75em',
-          }}
-        >
+        <fieldset className={styles['scopeFieldset']}>
           <legend>Scopes</legend>
-          {ALL_SCOPES.map((scope) => (
-            <label
-              key={scope}
-              style={{ display: 'inline-block', marginRight: '1em', cursor: 'pointer' }}
-            >
-              <input
-                type="checkbox"
-                checked={selectedScopes.has(scope)}
-                onChange={() => toggleScope(scope)}
-                style={{ marginRight: '0.3em' }}
-              />
-              {scope}
-            </label>
-          ))}
+          <div className={styles['scopeChips']}>
+            {ALL_SCOPES.map((scope) => {
+              const checked = selectedScopes.has(scope);
+              return (
+                <label
+                  key={scope}
+                  className={`${styles['scopeChip']} ${checked ? styles['scopeChipChecked'] : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleScope(scope)}
+                  />
+                  {scope}
+                </label>
+              );
+            })}
+          </div>
         </fieldset>
 
-        <div style={{ marginBottom: '0.75em' }}>
+        <div className={styles['formField']}>
           <label htmlFor="lifetime-select">Lifetime</label>
-          <br />
           <select
             id="lifetime-select"
             value={lifetimeSec}
             onChange={(e) => setLifetimeSec(Number(e.target.value))}
-            style={{
-              padding: '0.3em 0.5em',
-              font: 'inherit',
-              border: '1px solid var(--surface-3)',
-              borderRadius: 4,
-              color: 'var(--text-1)',
-              background: 'var(--surface-2)',
-            }}
+            className={styles['lifetimeSelect']}
           >
             {LIFETIME_OPTIONS.map((opt) => (
               <option key={opt.seconds} value={opt.seconds}>
@@ -214,15 +335,13 @@ function IssueTokenForm({
           </select>
         </div>
 
-        <button type="submit" disabled={!canSubmit}>
-          {isSubmitting ? 'Issuing...' : 'Issue Token'}
-        </button>
+        <Button type="submit" variant="primary" disabled={!canSubmit}>
+          {isSubmitting ? 'Issuing…' : 'Issue Token'}
+        </Button>
       </form>
     </section>
   );
 }
-
-// ── Token Table ────────────────────────────────────────────────────
 
 function TokenTable({
   tokens,
@@ -233,16 +352,18 @@ function TokenTable({
 }) {
   return (
     <section aria-labelledby="active-tokens-heading">
-      <h3 id="active-tokens-heading">Active Tokens</h3>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <h4 id="active-tokens-heading" style={{ margin: '0 0 var(--space-md)' }}>
+        Active Tokens
+      </h4>
+      <table className={styles['tokenTable']}>
         <thead>
           <tr>
-            <th scope="col" style={thStyle}>Name</th>
-            <th scope="col" style={thStyle}>Scopes</th>
-            <th scope="col" style={thStyle}>Issued</th>
-            <th scope="col" style={thStyle}>Expires</th>
-            <th scope="col" style={thStyle}>Status</th>
-            <th scope="col" style={thStyle}>Action</th>
+            <th scope="col">Name</th>
+            <th scope="col">Scopes</th>
+            <th scope="col">Issued</th>
+            <th scope="col">Expires</th>
+            <th scope="col">Status</th>
+            <th scope="col">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -255,27 +376,6 @@ function TokenTable({
   );
 }
 
-const thStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '0.4em 0.6em',
-  borderBottom: '2px solid var(--surface-3)',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '0.4em 0.6em',
-  borderBottom: '1px solid var(--surface-3)',
-};
-
-const badgeStyle: React.CSSProperties = {
-  display: 'inline-block',
-  padding: '0.1em 0.4em',
-  margin: '0.1em 0.2em',
-  borderRadius: 3,
-  fontSize: '0.85em',
-  background: 'var(--surface-3)',
-  color: 'var(--text-1)',
-};
-
 function TokenRow({
   token,
   onRevoke,
@@ -284,7 +384,6 @@ function TokenRow({
   readonly onRevoke: (tokenId: string) => Promise<void>;
 }) {
   const [revoking, setRevoking] = useState(false);
-
   const handleRevoke = async () => {
     setRevoking(true);
     try {
@@ -296,33 +395,85 @@ function TokenRow({
 
   return (
     <tr>
-      <td style={tdStyle}>{token.name}</td>
-      <td style={tdStyle}>
+      <td>{token.name}</td>
+      <td>
         {token.scopes.map((s) => (
-          <span key={s} style={badgeStyle}>
+          <span key={s} className={styles['scopeBadge']}>
             {s}
           </span>
         ))}
       </td>
-      <td style={tdStyle}>{formatDate(token.issuedAt)}</td>
-      <td style={tdStyle}>{formatDate(token.expiresAt)}</td>
-      <td style={tdStyle}>
-        {token.revoked ? (
-          <span style={{ color: 'var(--destructive)', fontWeight: 600 }}>Revoked</span>
-        ) : (
-          <span style={{ color: 'var(--success)', fontWeight: 600 }}>Active</span>
-        )}
+      <td>{formatDate(token.issuedAt)}</td>
+      <td>{formatDate(token.expiresAt)}</td>
+      <td>
+        <span
+          className={token.revoked ? styles['statusRevoked'] : styles['statusActive']}
+        >
+          {token.revoked ? 'Revoked' : 'Active'}
+        </span>
       </td>
-      <td style={tdStyle}>
+      <td>
         {!token.revoked ? (
-          <button type="button" onClick={handleRevoke} disabled={revoking}>
-            {revoking ? 'Revoking...' : 'Revoke'}
-          </button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={handleRevoke}
+            disabled={revoking}
+          >
+            {revoking ? 'Revoking…' : 'Revoke'}
+          </Button>
         ) : null}
       </td>
     </tr>
   );
 }
+
+// ── Files section ──────────────────────────────────────────────────
+
+function FilesSection(props: FilesSettingsPanelProps) {
+  return (
+    <section aria-labelledby="files-heading">
+      <h3 id="files-heading" className={styles['sectionHeading']}>
+        Files
+      </h3>
+      <p className={styles['sectionDescription']}>
+        Connect a GitHub repository so agents and the Files view can read and propose changes against it.
+      </p>
+      <FilesSettingsPanel {...props} />
+    </section>
+  );
+}
+
+// ── Account section ────────────────────────────────────────────────
+
+function AccountSection({
+  userName,
+  onSignOut,
+}: {
+  readonly userName?: string;
+  readonly onSignOut?: () => void;
+}) {
+  return (
+    <section aria-labelledby="account-heading">
+      <h3 id="account-heading" className={styles['sectionHeading']}>
+        Account
+      </h3>
+      <div className={styles['accountRow']}>
+        <span className={styles['accountLabel']}>Signed in as</span>
+        <span className={styles['accountValue']}>{userName ?? '—'}</span>
+      </div>
+      {onSignOut !== undefined ? (
+        <div style={{ marginTop: 'var(--space-lg)' }}>
+          <Button variant="destructive" onClick={onSignOut}>
+            Sign out
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
   try {
@@ -335,3 +486,16 @@ function formatDate(iso: string): string {
     return iso;
   }
 }
+
+const visuallyHidden = {
+  position: 'absolute' as const,
+  width: '1px',
+  height: '1px',
+  padding: 0,
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0,0,0,0)',
+  whiteSpace: 'nowrap' as const,
+  border: 0,
+};
+
