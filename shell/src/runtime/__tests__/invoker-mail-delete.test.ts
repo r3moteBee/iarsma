@@ -157,7 +157,11 @@ describe('mail.delete (two-stage soft delete, PR 19)', () => {
     });
 
     const result = await inv.invoke('mail.delete', { emailIds: ['em-1'] });
-    expect(result).toEqual({ modifiedCount: 1 });
+    expect(result).toEqual({
+      modifiedCount: 1,
+      previousMailboxesByEmail: { 'em-1': ['Mb-inbox'] },
+      trashMailboxId: 'Mb-trash',
+    });
 
     // Three API calls: Mailbox/get (trash lookup) + Email/get
     // (memberships) + Email/set (the update).

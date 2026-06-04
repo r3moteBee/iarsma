@@ -129,6 +129,63 @@ describe('loggingInvoker × UndoRegistry (PR 21)', () => {
     ).resolves.toEqual({ modifiedCount: 1 });
   });
 
+  it('registers an inverse for mail.delete using previousMailboxesByEmail', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const inv = loggingInvoker({
+      inner: fakeInner({
+        modifiedCount: 2,
+        previousMailboxesByEmail: {
+          'em-1': ['Mb-inbox'],
+          'em-2': ['Mb-inbox'],
+        },
+        trashMailboxId: 'Mb-trash',
+      }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+    });
+
+    await inv.invoke('mail.delete', { emailIds: ['em-1', 'em-2'] });
+
+    const u = await undoRegistry.forEntry(0);
+    expect(u).not.toBeNull();
+    expect(u?.inverseAction).toBe('mail.modify');
+    expect(u?.inverseParams).toEqual({
+      emailIds: ['em-1', 'em-2'],
+      patch: {
+        mailboxIds: {
+          // Restore Inbox on; Trash off.
+          'Mb-inbox': true,
+          'Mb-trash': false,
+        },
+      },
+    });
+  });
+
+  it('skips mail.delete registration when previousMailboxesByEmail is absent', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const inv = loggingInvoker({
+      // The shell's mail.delete now returns the previousMailboxesByEmail
+      // field, but the MCP server's mail.delete handler (separate code
+      // path) may not. In that case, no undo — better than registering
+      // a wrong inverse.
+      inner: fakeInner({ modifiedCount: 1 }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+    });
+    await inv.invoke('mail.delete', { emailIds: ['em-1'] });
+    expect(await undoRegistry.forEntry(0)).toBeNull();
+  });
+
   it('omitting undoRegistry skips all registration logic (back-compat)', async () => {
     const log = createActionLog({
       store: inMemoryActionLogStore(),
