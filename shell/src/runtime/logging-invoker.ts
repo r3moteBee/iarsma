@@ -35,6 +35,7 @@ import type { InvocationOptions, Invoker } from './invoker.js';
 import { isLoggable } from './loggable-tools.js';
 import { affectedJsonFor, isDestructive } from './provenance-policy.js';
 import type { DryRunPreview } from './types.js';
+import { buildInverse, type UndoRegistry } from './undo-registry.js';
 
 export type LoggingInvokerOptions = {
   readonly inner: Invoker;
@@ -52,6 +53,10 @@ export type LoggingInvokerOptions = {
   /** Surfaces append failures (tests + diagnostics). Default warns to
    *  console; pass `() => {}` to silence. */
   readonly onAppendError?: (toolName: string, error: unknown) => void;
+  /** Optional registry that receives an inverse-action descriptor for
+   *  each reversible commit (PR 21+). Failures here are best-effort
+   *  — the user-facing call still succeeds. */
+  readonly undoRegistry?: UndoRegistry;
 };
 
 const defaultOnAppendError = (toolName: string, error: unknown): void => {
@@ -116,7 +121,35 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
           ...(provenance !== undefined ? { provenance } : {}),
           ...(opts.agentTokenId !== undefined ? { agentTokenId: opts.agentTokenId } : {}),
         };
-        await opts.log.append(append);
+        const entry = await opts.log.append(append);
+
+        // PR 21 — undo registration. Only commits get registered (a
+        // preview has nothing to undo). buildInverse returns null for
+        // tools that aren't reversible-from-params alone (notably
+        // mail.delete, which PR 22 will handle via provenance).
+        if (
+          opts.undoRegistry !== undefined &&
+          mode === 'commit'
+        ) {
+          const inv = buildInverse(name, input);
+          if (inv !== null) {
+            try {
+              await opts.undoRegistry.register({
+                forEntrySeq: entry.seq,
+                inverseAction: inv.inverseAction,
+                inverseParams: inv.inverseParams,
+              });
+            } catch (e) {
+              // Best-effort — the modify succeeded; the user just
+              // won't see an Undo button for it.
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[iarsma] undo-registry register failed for ${name}:`,
+                e,
+              );
+            }
+          }
+        }
       } catch (e) {
         onAppendError(name, e);
       }

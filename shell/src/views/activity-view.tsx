@@ -51,6 +51,12 @@ export type ActivityViewProps = {
   readonly pageSize: number;
   readonly totalEntries: number;
   readonly onPageChange: (page: number) => void;
+  /** Seqs of entries that have an active (unconsumed, unexpired) undo
+   *  registered. Rows whose seq is in this set get an Undo button.
+   *  PR 21 — opt-in via prop so legacy/test renders that don't supply
+   *  it keep the prior surface. */
+  readonly undoableSeqs?: ReadonlySet<number>;
+  readonly onUndo?: (seq: number) => void;
 };
 
 // -- Helpers -------------------------------------------------------------
@@ -111,6 +117,8 @@ export function ActivityView({
   pageSize,
   totalEntries,
   onPageChange,
+  undoableSeqs,
+  onUndo,
 }: ActivityViewProps) {
   const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
   const actors = uniqueActors(entries);
@@ -226,7 +234,12 @@ export function ActivityView({
           </thead>
           <tbody>
             {entries.map((entry) => (
-              <ActivityRow key={entry.seq} entry={entry} />
+              <ActivityRow
+                key={entry.seq}
+                entry={entry}
+                canUndo={undoableSeqs?.has(entry.seq) === true}
+                {...(onUndo !== undefined ? { onUndo } : {})}
+              />
             ))}
           </tbody>
         </table>
@@ -311,7 +324,15 @@ function IntegrityBadge({
 
 // -- Activity row --------------------------------------------------------
 
-function ActivityRow({ entry }: { readonly entry: ActivityEntry }) {
+function ActivityRow({
+  entry,
+  canUndo,
+  onUndo,
+}: {
+  readonly entry: ActivityEntry;
+  readonly canUndo: boolean;
+  readonly onUndo?: (seq: number) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -361,6 +382,16 @@ function ActivityRow({ entry }: { readonly entry: ActivityEntry }) {
             </span>
             {expanded ? 'Collapse' : 'Expand'}
           </button>
+          {canUndo && onUndo !== undefined ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onUndo(entry.seq)}
+              aria-label={`Undo ${entry.action}`}
+            >
+              Undo
+            </Button>
+          ) : null}
         </td>
       </tr>
       {expanded ? (

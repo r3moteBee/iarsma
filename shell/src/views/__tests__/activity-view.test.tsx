@@ -423,6 +423,40 @@ describe('ActivityView', () => {
     });
   });
 
+  describe('undo button (PR 21, §8.5)', () => {
+    it('omits the Undo button when undoableSeqs is undefined', () => {
+      render(<ActivityView {...defaultProps()} />);
+      expect(screen.queryByRole('button', { name: /undo/i })).not.toBeInTheDocument();
+    });
+
+    it('shows Undo only on rows whose seq is in undoableSeqs', () => {
+      render(
+        <ActivityView
+          {...defaultProps({
+            undoableSeqs: new Set([1]),
+            onUndo: vi.fn(),
+          })}
+        />,
+      );
+      // SAMPLE_ENTRIES has seqs 1, 2, 3. Only seq 1 should get an
+      // Undo button.
+      const buttons = screen.getAllByRole('button', { name: /undo/i });
+      expect(buttons).toHaveLength(1);
+    });
+
+    it('clicking Undo calls onUndo with the entry seq', () => {
+      const onUndo = vi.fn();
+      render(
+        <ActivityView
+          {...defaultProps({ undoableSeqs: new Set([2]), onUndo })}
+        />,
+      );
+      const btn = screen.getByRole('button', { name: /undo/i });
+      fireEvent.click(btn);
+      expect(onUndo).toHaveBeenCalledWith(2);
+    });
+  });
+
   describe('accessibility', () => {
     it('has no axe violations', async () => {
       const { container } = render(
