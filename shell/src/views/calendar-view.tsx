@@ -132,6 +132,28 @@ function getWeekDays(date: Date): Date[] {
   return days;
 }
 
+/** Max event chips rendered inside a month cell before falling back to
+ *  a "+N more" row. Three keeps a 5-week month grid scannable; users
+ *  who want every event click into day view. */
+const MONTH_CHIP_LIMIT = 3;
+
+/** Hour the week/day view auto-scrolls to on open. 8am is the
+ *  conventional start-of-workday anchor that gets the user near "now"
+ *  without forcing the viewport into late-evening dead space. */
+const SCROLL_ANCHOR_HOUR = 8;
+
+/** Re-render every minute so the now-indicator slides without a refresh.
+ *  Returns the current Date. Cheap; we only re-render the week/day
+ *  views (the indicator + its position are the only dependents). */
+function useNowTick(): Date {
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const handle = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(handle);
+  }, []);
+  return now;
+}
+
 function getEventsForDay(events: readonly CalendarViewEvent[], day: Date): CalendarViewEvent[] {
   return events.filter((evt) => {
     const evtDate = new Date(evt.start);
@@ -525,7 +547,7 @@ function MonthView({
               {day.getDate()}
             </span>
 
-            {/* Event dots */}
+            {/* Event dots — mobile fallback (CSS hides above 640px). */}
             {dayEvents.length > 0 ? (
               <div className={styles.eventDots}>
                 {dayEvents.slice(0, 3).map((evt) => (
@@ -542,6 +564,52 @@ function MonthView({
                 ))}
                 {dayEvents.length > 3 ? (
                   <span className={styles.eventDotMore}>+{dayEvents.length - 3}</span>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Event chips — primary surface ≥640px (§8.4). */}
+            {dayEvents.length > 0 ? (
+              <div className={styles.eventChips}>
+                {dayEvents.slice(0, MONTH_CHIP_LIMIT).map((evt) => {
+                  const allDay = evt.duration === 'P1D';
+                  const chipColor = evt.calendarColor;
+                  // Chips render as <span> (matching the dot variant) so
+                  // they aren't a nested interactive inside the day
+                  // cell's role="button". Roving keyboard focus across
+                  // chips + cells is the P2 a11y follow-up.
+                  return (
+                    <span
+                      key={evt.id}
+                      className={styles.eventChip}
+                      data-testid="event-chip"
+                      style={
+                        chipColor !== undefined
+                          ? {
+                              borderLeftColor: chipColor,
+                              background: `color-mix(in srgb, ${chipColor} 12%, transparent)`,
+                            }
+                          : undefined
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEventClick?.(evt.id);
+                      }}
+                      aria-label={`${evt.title}, ${formatEventTime(evt.start, evt.duration)}`}
+                    >
+                      <span
+                        className={`${styles.eventChipTime} ${allDay ? styles.eventChipAllDay : ''}`}
+                      >
+                        {formatEventTime(evt.start, evt.duration)}
+                      </span>
+                      <span className={styles.eventChipTitle}>{evt.title}</span>
+                    </span>
+                  );
+                })}
+                {dayEvents.length > MONTH_CHIP_LIMIT ? (
+                  <span className={styles.eventMore}>
+                    +{dayEvents.length - MONTH_CHIP_LIMIT} more
+                  </span>
                 ) : null}
               </div>
             ) : null}
@@ -567,6 +635,8 @@ function WeekView({
 }) {
   const weekDays = getWeekDays(currentDate);
   const hours = Array.from({ length: 24 }, (_, i) => i);
+  const now = useNowTick();
+  const todayIndex = weekDays.findIndex((d) => isSameDay(d, now));
 
   return (
     <div className={styles.weekGrid} role="region" aria-label="Week calendar grid">
@@ -587,6 +657,8 @@ function WeekView({
           events={events}
           onEventClick={onEventClick}
           onCreateEvent={onCreateEvent}
+          now={now}
+          todayIndex={todayIndex}
         />
       ))}
     </div>
@@ -599,19 +671,41 @@ function WeekRow({
   events,
   onEventClick,
   onCreateEvent,
+  now,
+  todayIndex,
 }: {
   readonly hour: number;
   readonly weekDays: Date[];
   readonly events: readonly CalendarViewEvent[];
   readonly onEventClick?: ((eventId: string) => void) | undefined;
   readonly onCreateEvent?: ((date: Date) => void) | undefined;
+  readonly now: Date;
+  readonly todayIndex: number;
 }) {
+  const labelRef = useRef<HTMLDivElement | null>(null);
+  // Anchor the 8am scroll-into-view on the time-label cell of the
+  // 8am row — first DOM node in that row's tab order.
+  useEffect(() => {
+    if (hour !== SCROLL_ANCHOR_HOUR) return;
+    // Feature-detect: jsdom (test env) doesn't implement scrollIntoView.
+    const el = labelRef.current;
+    if (el !== null && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'start' });
+    }
+  }, [hour]);
+
   return (
     <>
-      <div className={styles.weekTimeLabel}>{formatHour(hour)}</div>
-      {weekDays.map((day) => {
+      <div
+        className={styles.weekTimeLabel}
+        ref={hour === SCROLL_ANCHOR_HOUR ? labelRef : undefined}
+      >
+        {formatHour(hour)}
+      </div>
+      {weekDays.map((day, idx) => {
         const dateId = formatDateId(day);
         const slotEvents = getEventsForHourSlot(events, day, hour);
+        const isNowSlot = idx === todayIndex && now.getHours() === hour;
 
         return (
           <div
@@ -630,6 +724,14 @@ function WeekRow({
                 onClick={onEventClick}
               />
             ))}
+            {isNowSlot ? (
+              <div
+                className={styles.nowIndicator}
+                data-testid="now-indicator"
+                aria-hidden="true"
+                style={{ top: `${(now.getMinutes() / 60) * 100}%` }}
+              />
+            ) : null}
           </div>
         );
       })}
@@ -653,6 +755,8 @@ function DayView({
   const dayEvents = getEventsForDay(events, currentDate);
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const shortLabel = `${DAY_NAMES[currentDate.getDay()]}, ${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getDate()}`;
+  const now = useNowTick();
+  const isToday = isSameDay(now, currentDate);
 
   return (
     <div className={styles.dayGrid} role="region" aria-label="Day calendar grid">
@@ -671,6 +775,8 @@ function DayView({
             slotEvents={slotEvents}
             onEventClick={onEventClick}
             onCreateEvent={onCreateEvent}
+            now={now}
+            isToday={isToday}
           />
         );
       })}
@@ -684,16 +790,35 @@ function DayRow({
   slotEvents,
   onEventClick,
   onCreateEvent,
+  now,
+  isToday,
 }: {
   readonly hour: number;
   readonly currentDate: Date;
   readonly slotEvents: CalendarViewEvent[];
   readonly onEventClick?: ((eventId: string) => void) | undefined;
   readonly onCreateEvent?: ((date: Date) => void) | undefined;
+  readonly now: Date;
+  readonly isToday: boolean;
 }) {
+  const labelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (hour !== SCROLL_ANCHOR_HOUR) return;
+    // Feature-detect: jsdom (test env) doesn't implement scrollIntoView.
+    const el = labelRef.current;
+    if (el !== null && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'start' });
+    }
+  }, [hour]);
+  const isNowSlot = isToday && now.getHours() === hour;
   return (
     <>
-      <div className={styles.dayTimeLabel}>{formatHour(hour)}</div>
+      <div
+        className={styles.dayTimeLabel}
+        ref={hour === SCROLL_ANCHOR_HOUR ? labelRef : undefined}
+      >
+        {formatHour(hour)}
+      </div>
       <div
         className={styles.daySlot}
         onDoubleClick={() => {
@@ -709,6 +834,14 @@ function DayRow({
             onClick={onEventClick}
           />
         ))}
+        {isNowSlot ? (
+          <div
+            className={styles.nowIndicator}
+            data-testid="now-indicator"
+            aria-hidden="true"
+            style={{ top: `${(now.getMinutes() / 60) * 100}%` }}
+          />
+        ) : null}
       </div>
     </>
   );
