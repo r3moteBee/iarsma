@@ -35,6 +35,7 @@ import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
 import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
+import { hiddenCalendarIdsAtom, toggleCalendarId } from './runtime/calendar-visibility.js';
 import { BottomNav } from './components/bottom-nav.js';
 import { SegmentedControl, type SegmentedOption } from './components/segmented-control.js';
 import { Sidebar } from './components/sidebar.js';
@@ -441,6 +442,7 @@ function SignedInShell({
     start: string;
     duration?: string;
     calendarColor?: string;
+    calendarId?: string;
   }>>([]);
 
   useEffect(() => {
@@ -458,13 +460,42 @@ function SignedInShell({
           title: string;
           start: string;
           duration?: string;
+          calendarIds?: Readonly<Record<string, boolean>>;
         }> }>('event.list', {
           after: monthStart.toISOString(),
           before: monthEnd.toISOString(),
         });
         if (!cancelled) {
-          const e = events as { events: ReadonlyArray<{ id: string; title: string; start: string; duration?: string }> };
-          setCalendarEvents(e.events ?? []);
+          const e = events as { events: ReadonlyArray<{
+            id: string;
+            title: string;
+            start: string;
+            duration?: string;
+            calendarIds?: Readonly<Record<string, boolean>>;
+          }> };
+          // Map JMAP's calendarIds:{cal-1:true} → flat calendarId for the
+          // view. Pick the first true entry; multi-calendar membership is
+          // a rare case we can revisit when it matters.
+          const calList = list as ReadonlyArray<{ id: string; name: string; color?: string }>;
+          const colorByCalId = new Map<string, string | undefined>(
+            calList.map((c) => [c.id, c.color]),
+          );
+          const mapped = (e.events ?? []).map((evt) => {
+            const ids = evt.calendarIds;
+            const calId = ids !== undefined
+              ? Object.keys(ids).find((k) => ids[k] === true)
+              : undefined;
+            const color = calId !== undefined ? colorByCalId.get(calId) : undefined;
+            return {
+              id: evt.id,
+              title: evt.title,
+              start: evt.start,
+              ...(evt.duration !== undefined ? { duration: evt.duration } : {}),
+              ...(calId !== undefined ? { calendarId: calId } : {}),
+              ...(color !== undefined ? { calendarColor: color } : {}),
+            };
+          });
+          setCalendarEvents(mapped);
         }
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -473,6 +504,17 @@ function SignedInShell({
     })();
     return () => { cancelled = true; };
   }, [activeView, calendarDate, invoker, crudRefresh]);
+
+  // Calendar visibility — hidden-set atom is persisted; events whose
+  // calendarId is in the set are filtered out before reaching the view.
+  const [hiddenCalendarIds, setHiddenCalendarIds] = useAtom(hiddenCalendarIdsAtom);
+  const visibleCalendarEvents = useMemo(() => {
+    if (hiddenCalendarIds.length === 0) return calendarEvents;
+    const hidden = new Set(hiddenCalendarIds);
+    return calendarEvents.filter(
+      (e) => e.calendarId === undefined || !hidden.has(e.calendarId),
+    );
+  }, [calendarEvents, hiddenCalendarIds]);
 
   // Contacts data fetching
   const [contacts, setContacts] = useState<ReadonlyArray<{
@@ -888,7 +930,12 @@ function SignedInShell({
           <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} />
         ) : activeView === 'calendar' ? (
           <CalendarView
-            events={calendarEvents}
+            events={visibleCalendarEvents}
+            calendars={calendars}
+            hiddenCalendarIds={hiddenCalendarIds}
+            onToggleCalendar={(id) =>
+              setHiddenCalendarIds(toggleCalendarId(hiddenCalendarIds, id))
+            }
             view={calendarView}
             onViewChange={setCalendarView}
             currentDate={calendarDate}

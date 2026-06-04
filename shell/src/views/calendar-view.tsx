@@ -26,9 +26,16 @@ export type CalendarViewEvent = {
   readonly start: string; // ISO local datetime
   readonly duration?: string; // ISO duration "PT1H"
   readonly calendarColor?: string;
+  readonly calendarId?: string;
   readonly status?: 'confirmed' | 'tentative' | 'cancelled';
   readonly description?: string;
   readonly location?: string;
+};
+
+export type CalendarInfo = {
+  readonly id: string;
+  readonly name: string;
+  readonly color?: string;
 };
 
 export type EventFormData = {
@@ -49,6 +56,14 @@ export type CalendarViewProps = {
   readonly onEventClick?: (eventId: string) => void;
   readonly onCreateEvent?: (date: Date) => void;
   readonly isLoading?: boolean;
+  /** Calendars to list in the visibility rail (§8.4). Omit to hide
+   *  the rail entirely (legacy / test usage). */
+  readonly calendars?: readonly CalendarInfo[];
+  /** IDs of calendars the user has hidden. The host filters events
+   *  before they reach us — the rail uses this only to render the
+   *  checkbox state. */
+  readonly hiddenCalendarIds?: readonly string[];
+  readonly onToggleCalendar?: (calendarId: string) => void;
   // CRUD callbacks
   readonly onSaveEvent?: (input: EventFormData) => Promise<void>;
   readonly onUpdateEvent?: (id: string, input: EventFormData) => Promise<void>;
@@ -214,6 +229,9 @@ export function CalendarView({
   onEventClick,
   onCreateEvent,
   isLoading,
+  calendars,
+  hiddenCalendarIds,
+  onToggleCalendar,
   onSaveEvent,
   onUpdateEvent,
   onDeleteEvent,
@@ -389,30 +407,41 @@ export function CalendarView({
 
       {isLoading === true ? <p>Loading calendar...</p> : null}
 
-      {/* View body */}
-      {view === 'month' ? (
-        <MonthView
-          currentDate={currentDate}
-          events={events}
-          onDateChange={onDateChange}
-          onEventClick={handleEventClick}
-          onCreateEvent={handleDayCellCreate}
-        />
-      ) : view === 'week' ? (
-        <WeekView
-          currentDate={currentDate}
-          events={events}
-          onEventClick={handleEventClick}
-          onCreateEvent={onCreateEvent}
-        />
-      ) : (
-        <DayView
-          currentDate={currentDate}
-          events={events}
-          onEventClick={handleEventClick}
-          onCreateEvent={onCreateEvent}
-        />
-      )}
+      {/* Body: optional visibility rail (§8.4) + view */}
+      <div className={styles.body}>
+        {calendars !== undefined && calendars.length > 0 && onToggleCalendar !== undefined ? (
+          <CalendarRail
+            calendars={calendars}
+            hiddenIds={hiddenCalendarIds ?? []}
+            onToggle={onToggleCalendar}
+          />
+        ) : null}
+        <div className={styles.viewArea}>
+          {view === 'month' ? (
+            <MonthView
+              currentDate={currentDate}
+              events={events}
+              onDateChange={onDateChange}
+              onEventClick={handleEventClick}
+              onCreateEvent={handleDayCellCreate}
+            />
+          ) : view === 'week' ? (
+            <WeekView
+              currentDate={currentDate}
+              events={events}
+              onEventClick={handleEventClick}
+              {...(onCreateEvent !== undefined ? { onCreateEvent } : {})}
+            />
+          ) : (
+            <DayView
+              currentDate={currentDate}
+              events={events}
+              onEventClick={handleEventClick}
+              {...(onCreateEvent !== undefined ? { onCreateEvent } : {})}
+            />
+          )}
+        </div>
+      </div>
 
       {/* Event form dialog (create/edit) */}
       {dialogMode.kind === 'form' ? (
@@ -913,6 +942,52 @@ function EventBlock({
     >
       {event.title}
     </div>
+  );
+}
+
+// ── Calendar visibility rail (§8.4) ──────────────────────────────
+
+function CalendarRail({
+  calendars,
+  hiddenIds,
+  onToggle,
+}: {
+  readonly calendars: readonly CalendarInfo[];
+  readonly hiddenIds: readonly string[];
+  readonly onToggle: (id: string) => void;
+}) {
+  const hidden = new Set(hiddenIds);
+  return (
+    <aside
+      className={styles.rail}
+      aria-label="Calendars"
+    >
+      <h3 className={styles.railHeading}>Calendars</h3>
+      <ul className={styles.railList}>
+        {calendars.map((c) => {
+          const isHidden = hidden.has(c.id);
+          return (
+            <li key={c.id} className={styles.railItem}>
+              <label className={styles.railLabel}>
+                <input
+                  type="checkbox"
+                  className={styles.railCheckbox}
+                  checked={!isHidden}
+                  onChange={() => onToggle(c.id)}
+                  aria-label={`${isHidden ? 'Show' : 'Hide'} ${c.name}`}
+                />
+                <span
+                  className={styles.railSwatch}
+                  style={c.color !== undefined ? { background: c.color } : undefined}
+                  aria-hidden="true"
+                />
+                <span className={styles.railName}>{c.name}</span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </aside>
   );
 }
 

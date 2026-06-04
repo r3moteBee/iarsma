@@ -477,6 +477,78 @@ describe('CalendarView', () => {
     });
   });
 
+  describe('visibility rail (PR 14, §8.4)', () => {
+    const SAMPLE_CALENDARS = [
+      { id: 'cal-1', name: 'Personal', color: '#3b82f6' },
+      { id: 'cal-2', name: 'Work', color: '#10b981' },
+    ];
+
+    it('renders one row per calendar with color swatch and checkbox', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          calendars={SAMPLE_CALENDARS}
+          hiddenCalendarIds={[]}
+          onToggleCalendar={noop}
+        />,
+      );
+      expect(screen.getByRole('checkbox', { name: /hide personal/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /hide work/i })).toBeChecked();
+    });
+
+    it('renders hidden calendars with unchecked boxes', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          calendars={SAMPLE_CALENDARS}
+          hiddenCalendarIds={['cal-2']}
+          onToggleCalendar={noop}
+        />,
+      );
+      expect(screen.getByRole('checkbox', { name: /hide personal/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: /show work/i })).not.toBeChecked();
+    });
+
+    it('calls onToggleCalendar with the calendar id when clicked', () => {
+      const onToggleCalendar = vi.fn();
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          calendars={SAMPLE_CALENDARS}
+          hiddenCalendarIds={[]}
+          onToggleCalendar={onToggleCalendar}
+        />,
+      );
+      fireEvent.click(screen.getByRole('checkbox', { name: /hide work/i }));
+      expect(onToggleCalendar).toHaveBeenCalledWith('cal-2');
+    });
+
+    it('omits the rail when no calendars prop is passed', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      expect(screen.queryByRole('region', { name: /calendars/i })).not.toBeInTheDocument();
+    });
+  });
+
   describe('CRUD: create/edit/delete', () => {
     it('renders "+ New Event" button when onSaveEvent is provided', () => {
       render(
