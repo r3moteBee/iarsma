@@ -246,19 +246,42 @@ describe('AgentSettingsView', () => {
       expect(revokeButtons).toHaveLength(1);
     });
 
-    it('calls onRevoke with the tokenId when clicking revoke', async () => {
+    it('opens a confirm dialog before calling onRevoke (PR 12, §8.11)', async () => {
       const onRevoke = vi.fn(noop);
       render(
         <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={onRevoke} />,
       );
       openTokensTab();
 
-      const revokeButton = screen.getByRole('button', { name: /revoke/i });
-      fireEvent.click(revokeButton);
+      // Row button: opens the dialog, does NOT immediately revoke.
+      const rowRevoke = screen.getByRole('button', { name: /revoke ci bot/i });
+      fireEvent.click(rowRevoke);
+      expect(onRevoke).not.toHaveBeenCalled();
+
+      // Confirm dialog visible with destructive copy.
+      const dialog = screen.getByRole('dialog', { name: /revoke token\?/i });
+      expect(dialog).toBeInTheDocument();
+
+      // Confirm.
+      const confirm = within(dialog).getByRole('button', { name: /revoke token/i });
+      fireEvent.click(confirm);
 
       await waitFor(() => {
         expect(onRevoke).toHaveBeenCalledWith('tok-1');
       });
+    });
+
+    it('cancel button closes the confirm dialog without revoking', () => {
+      const onRevoke = vi.fn(noop);
+      render(
+        <AgentSettingsView tokens={SAMPLE_TOKENS} onIssue={noopIssue} onRevoke={onRevoke} />,
+      );
+      openTokensTab();
+
+      fireEvent.click(screen.getByRole('button', { name: /revoke ci bot/i }));
+      const dialog = screen.getByRole('dialog', { name: /revoke token\?/i });
+      fireEvent.click(within(dialog).getByRole('button', { name: /cancel/i }));
+      expect(onRevoke).not.toHaveBeenCalled();
     });
 
     it('shows scopes as comma-separated badges', () => {

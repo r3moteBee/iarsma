@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { AccentPicker } from '../components/accent-picker.js';
 import { Button } from '../components/button.js';
 import { DensitySelector } from '../components/density-selector.js';
+import { Dialog } from '../components/dialog.js';
 import { Input } from '../components/input.js';
 import { Notice } from '../components/notice.js';
 import { themePreferenceAtom, type ThemePreference } from '../runtime/theme.js';
@@ -383,11 +384,18 @@ function TokenRow({
   readonly token: AgentTokenInfo;
   readonly onRevoke: (tokenId: string) => Promise<void>;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [revoking, setRevoking] = useState(false);
-  const handleRevoke = async () => {
+  const openConfirm = (): void => setConfirmOpen(true);
+  const closeConfirm = (): void => {
+    if (revoking) return;
+    setConfirmOpen(false);
+  };
+  const handleRevoke = async (): Promise<void> => {
     setRevoking(true);
     try {
       await onRevoke(token.tokenId);
+      setConfirmOpen(false);
     } finally {
       setRevoking(false);
     }
@@ -414,14 +422,47 @@ function TokenRow({
       </td>
       <td>
         {!token.revoked ? (
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={handleRevoke}
-            disabled={revoking}
-          >
-            {revoking ? 'Revoking…' : 'Revoke'}
-          </Button>
+          <>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={openConfirm}
+              aria-label={`Revoke ${token.name}`}
+            >
+              Revoke
+            </Button>
+            <Dialog
+              open={confirmOpen}
+              onClose={closeConfirm}
+              title="Revoke token?"
+              footer={
+                <>
+                  <Button variant="secondary" onClick={closeConfirm} disabled={revoking}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      void handleRevoke();
+                    }}
+                    disabled={revoking}
+                  >
+                    {revoking ? 'Revoking…' : 'Revoke token'}
+                  </Button>
+                </>
+              }
+            >
+              <p>
+                <strong>{token.name}</strong> will lose access immediately.
+                Any agent using this token will start receiving 401s on the
+                next call.
+              </p>
+              <p>
+                This is permanent — issued tokens can't be un-revoked.
+                Issue a new token if the agent should regain access.
+              </p>
+            </Dialog>
+          </>
         ) : null}
       </td>
     </tr>
