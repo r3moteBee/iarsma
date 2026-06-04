@@ -19,6 +19,11 @@ import { DensitySelector } from '../components/density-selector.js';
 import { Dialog } from '../components/dialog.js';
 import { Input } from '../components/input.js';
 import { Notice } from '../components/notice.js';
+import {
+  DEFAULT_SEND_DELAY_MS,
+  MAX_SEND_DELAY_MS,
+  sendDelayMsAtom,
+} from '../runtime/send-delay-state.js';
 import { themePreferenceAtom, type ThemePreference } from '../runtime/theme.js';
 import type { AgentTokenInfo, IssuedToken } from '../runtime/agent-token-issuer.js';
 import { FilesSettingsPanel } from './files-settings-panel.js';
@@ -66,7 +71,7 @@ type AgentSettingsViewProps = {
   readonly onSignOut?: () => void;
 };
 
-type SectionId = 'appearance' | 'tokens' | 'files' | 'account';
+type SectionId = 'appearance' | 'sending' | 'tokens' | 'files' | 'account';
 
 type SectionDef = {
   readonly id: SectionId;
@@ -75,6 +80,7 @@ type SectionDef = {
 
 const SECTIONS: readonly SectionDef[] = [
   { id: 'appearance', label: 'Appearance' },
+  { id: 'sending', label: 'Sending' },
   { id: 'tokens', label: 'Agent tokens' },
   { id: 'files', label: 'Files' },
   { id: 'account', label: 'Account' },
@@ -116,6 +122,7 @@ export function AgentSettingsView({
       </nav>
       <div className={styles['content']}>
         {section === 'appearance' ? <AppearanceSection /> : null}
+        {section === 'sending' ? <SendingSection /> : null}
         {section === 'tokens' ? (
           <TokensSection
             tokens={tokens}
@@ -195,6 +202,49 @@ function ThemeToggleInline({
         </Button>
       ))}
     </div>
+  );
+}
+
+// ── Sending section ────────────────────────────────────────────────
+
+function SendingSection() {
+  const [delayMs, setDelayMs] = useAtom(sendDelayMsAtom);
+  const seconds = Math.round(delayMs / 1000);
+  return (
+    <section aria-labelledby="sending-heading">
+      <h3 id="sending-heading" className={styles['sectionHeading']}>
+        Sending
+      </h3>
+      <p className={styles['sectionDescription']}>
+        Buffers outgoing mail locally for a short window so you can undo
+        a send before it actually leaves. Setting this to 0 sends
+        immediately — no undo. Max {MAX_SEND_DELAY_MS / 1000}s.
+      </p>
+      <div className={styles['appearanceRow']}>
+        <label
+          className={styles['appearanceLabel']}
+          htmlFor="send-delay-input"
+        >
+          Delay
+        </label>
+        <Input
+          id="send-delay-input"
+          type="text"
+          value={String(seconds)}
+          onChange={(v) => {
+            const n = Number.parseInt(v, 10);
+            if (Number.isNaN(n)) {
+              setDelayMs(DEFAULT_SEND_DELAY_MS);
+              return;
+            }
+            setDelayMs(n * 1000);
+          }}
+        />
+        <span className={styles['sectionDescription']} style={{ margin: 0 }}>
+          seconds
+        </span>
+      </div>
+    </section>
   );
 }
 
