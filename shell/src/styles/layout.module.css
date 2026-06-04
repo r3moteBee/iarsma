@@ -36,42 +36,12 @@
 
 /* Mail layout variants moved to styles/mail-layout.module.css (PR 3). */
 
-/* ── Layout toggle buttons ───────────────────────────────── */
-
-.layoutToggle {
+/* Mail layout toggle is now the shared SegmentedControl (§12).
+ * The wrapper class below hides it on mobile (the bottom nav
+ * subsumes layout choice on phones).
+ */
+.mailLayoutToggle {
   display: inline-flex;
-  gap: 2px;
-  border: 1px solid var(--surface-3);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.layoutToggleBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: var(--surface-1);
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.layoutToggleBtn:hover {
-  background: var(--surface-2);
-}
-
-.layoutToggleBtnActive {
-  background: var(--accent);
-  color: #fff;
-}
-
-.layoutToggleBtnActive:hover {
-  background: var(--accent);
-  color: #fff;
 }
 
 /* Mobile: stack vertically, leave room for bottom nav */
@@ -86,7 +56,7 @@
     padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   }
 
-  .layoutToggle {
+  .mailLayoutToggle {
     display: none;
   }
 }

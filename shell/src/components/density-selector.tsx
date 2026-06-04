@@ -2,22 +2,18 @@
  * DensitySelector — 3-way segmented control (§5.3).
  *
  * Dense / Normal / Spacious. Writes the chosen value to densityAtom;
- * the runtime layer (`runtime/appearance.ts`) applies the
- * corresponding `--density` multiplier to document.documentElement.
+ * the runtime layer (`runtime/appearance.ts`) applies the corresponding
+ * `--density` multiplier to document.documentElement.
  *
- * Uses `aria-pressed` (toolbar-button pattern) rather than
- * `role="radio"` because the three options act like a toolbar of
- * pressable buttons — exactly one is active at a time, but each is
- * also independently focusable via Tab. Either pattern is acceptable
- * per WAI-ARIA APG; aria-pressed reads more cleanly with screen
- * readers that don't synthesize roving tabindex.
+ * Visuals + a11y are owned by the shared SegmentedControl (§12); this
+ * component is now just a thin atom-binding wrapper.
  */
 
 import { useAtom } from 'jotai';
 import { densityAtom, type Density } from '../runtime/appearance.js';
-import styles from './density-selector.module.css';
+import { SegmentedControl, type SegmentedOption } from './segmented-control.js';
 
-const OPTIONS: ReadonlyArray<{ readonly value: Density; readonly label: string }> = [
+const OPTIONS: ReadonlyArray<SegmentedOption<Density>> = [
   { value: 'dense', label: 'Dense' },
   { value: 'normal', label: 'Normal' },
   { value: 'spacious', label: 'Spacious' },
@@ -26,21 +22,12 @@ const OPTIONS: ReadonlyArray<{ readonly value: Density; readonly label: string }
 export function DensitySelector() {
   const [current, setCurrent] = useAtom(densityAtom);
   return (
-    <div role="group" aria-label="Density" className={styles['group']}>
-      {OPTIONS.map((opt) => {
-        const isCurrent = opt.value === current;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            aria-pressed={isCurrent}
-            onClick={() => setCurrent(opt.value)}
-            className={styles['option']}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
+    <SegmentedControl
+      label="Density"
+      options={OPTIONS}
+      value={current}
+      onChange={setCurrent}
+      size="sm"
+    />
   );
 }

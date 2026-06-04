@@ -36,6 +36,7 @@ import { handleCallback, signOut } from './runtime/oauth.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
 import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
 import { BottomNav } from './components/bottom-nav.js';
+import { SegmentedControl, type SegmentedOption } from './components/segmented-control.js';
 import { Sidebar } from './components/sidebar.js';
 import { TopBar } from './components/top-bar.js';
 import { ComposeView } from './views/compose-view.js';
@@ -319,6 +320,32 @@ async function executeApprovedAction(
       );
   }
 }
+
+/** SegmentedControl options for the mail layout toggle. Icon glyphs
+ *  match the §12 mockup: two vertical bars = side-by-side, two
+ *  horizontal bars = stacked. */
+const MAIL_LAYOUT_OPTIONS: ReadonlyArray<SegmentedOption<MailLayoutType>> = [
+  {
+    value: 'side',
+    label: 'Side-by-side',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <rect x="0.5" y="0.5" width="6" height="13" rx="1" stroke="currentColor" />
+        <rect x="7.5" y="0.5" width="6" height="13" rx="1" stroke="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    value: 'stacked',
+    label: 'Stacked',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <rect x="0.5" y="0.5" width="13" height="6" rx="1" stroke="currentColor" />
+        <rect x="0.5" y="7.5" width="13" height="6" rx="1" stroke="currentColor" />
+      </svg>
+    ),
+  },
+];
 
 /**
  * The signed-in shell with responsive sidebar/top-bar/bottom-nav layout.
@@ -844,34 +871,16 @@ function SignedInShell({
                 Clear
               </button>
             ) : null}
-            <div className={layoutStyles.layoutToggle} role="group" aria-label="Mail layout">
-              <button
-                type="button"
-                className={`${layoutStyles.layoutToggleBtn}${mailLayout === 'side' ? ` ${layoutStyles.layoutToggleBtnActive}` : ''}`}
-                onClick={() => handleLayoutChange('side')}
-                aria-pressed={mailLayout === 'side'}
-                aria-label="Side-by-side layout"
-                title="Side-by-side"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                  <rect x="0.5" y="0.5" width="6" height="13" rx="1" stroke="currentColor" />
-                  <rect x="7.5" y="0.5" width="6" height="13" rx="1" stroke="currentColor" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={`${layoutStyles.layoutToggleBtn}${mailLayout === 'stacked' ? ` ${layoutStyles.layoutToggleBtnActive}` : ''}`}
-                onClick={() => handleLayoutChange('stacked')}
-                aria-pressed={mailLayout === 'stacked'}
-                aria-label="Stacked layout"
-                title="Stacked"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                  <rect x="0.5" y="0.5" width="13" height="6" rx="1" stroke="currentColor" />
-                  <rect x="0.5" y="7.5" width="13" height="6" rx="1" stroke="currentColor" />
-                </svg>
-              </button>
-            </div>
+            <SegmentedControl
+              label="Mail layout"
+              size="sm"
+              options={MAIL_LAYOUT_OPTIONS}
+              value={mailLayout}
+              onChange={handleLayoutChange}
+              {...(layoutStyles.mailLayoutToggle !== undefined
+                ? { className: layoutStyles.mailLayoutToggle }
+                : {})}
+            />
           </div>
         )}
 

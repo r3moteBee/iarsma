@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Dialog } from '../components/index.js';
+import { SegmentedControl, type SegmentedOption } from '../components/segmented-control.js';
 import styles from './calendar-view.module.css';
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -141,6 +142,14 @@ const MONTH_CHIP_LIMIT = 3;
  *  conventional start-of-workday anchor that gets the user near "now"
  *  without forcing the viewport into late-evening dead space. */
 const SCROLL_ANCHOR_HOUR = 8;
+
+type CalendarViewMode = 'month' | 'week' | 'day';
+
+const CALENDAR_VIEW_OPTIONS: ReadonlyArray<SegmentedOption<CalendarViewMode>> = [
+  { value: 'month', label: 'Month' },
+  { value: 'week', label: 'Week' },
+  { value: 'day', label: 'Day' },
+];
 
 /** Re-render every minute so the now-indicator slides without a refresh.
  *  Returns the current Date. Cheap; we only re-render the week/day
@@ -321,36 +330,14 @@ export function CalendarView({
       <div className={styles.header}>
         <h2 id="calendar-heading" className="sr-only">Calendar</h2>
 
-        {/* View toggle */}
-        <div className={styles.viewToggle} role="group" aria-label="Calendar view">
-          <button
-            type="button"
-            className={`${styles.viewToggleBtn} ${view === 'month' ? styles.viewToggleBtnActive : ''}`}
-            onClick={() => onViewChange('month')}
-            aria-pressed={view === 'month'}
-            aria-label="Month"
-          >
-            Month
-          </button>
-          <button
-            type="button"
-            className={`${styles.viewToggleBtn} ${view === 'week' ? styles.viewToggleBtnActive : ''}`}
-            onClick={() => onViewChange('week')}
-            aria-pressed={view === 'week'}
-            aria-label="Week"
-          >
-            Week
-          </button>
-          <button
-            type="button"
-            className={`${styles.viewToggleBtn} ${view === 'day' ? styles.viewToggleBtnActive : ''}`}
-            onClick={() => onViewChange('day')}
-            aria-pressed={view === 'day'}
-            aria-label="Day"
-          >
-            Day
-          </button>
-        </div>
+        {/* View toggle — shared SegmentedControl (§12). */}
+        <SegmentedControl
+          label="Calendar view"
+          options={CALENDAR_VIEW_OPTIONS}
+          value={view}
+          onChange={onViewChange}
+          size="sm"
+        />
 
         {/* New Event button */}
         {(onSaveEvent !== undefined || onUpdateEvent !== undefined) ? (
