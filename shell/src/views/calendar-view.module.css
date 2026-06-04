@@ -20,34 +20,9 @@
   flex-wrap: wrap;
 }
 
-.viewToggle {
-  display: flex;
-  gap: 0;
-  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
-  border-radius: var(--radius-sm, 4px);
-  overflow: hidden;
-}
-
-.viewToggleBtn {
-  padding: 0.3em 0.7em;
-  font: inherit;
-  font-size: 0.85em;
-  border: none;
-  background: var(--surface-1, #fff);
-  color: var(--text-1, #000);
-  cursor: pointer;
-  border-right: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
-}
-
-.viewToggleBtn:last-child {
-  border-right: none;
-}
-
-.viewToggleBtnActive {
-  background: var(--accent);
-  color: var(--surface-1);
-  font-weight: 600;
-}
+/* View toggle is now the shared SegmentedControl (§12); the
+ * .viewToggle/.viewToggleBtn/.viewToggleBtnActive classes were
+ * removed when calendar-view.tsx migrated. */
 
 .nav {
   display: flex;

@@ -1,8 +1,9 @@
 /* ──────────────────────────────────────────────────────────────────
- * DensitySelector — 3-way segmented control (§5.3).
+ * SegmentedControl — shared pill bar (§12).
  *
- * Dense / Normal / Spacious — maps to --density 0.85 / 1 / 1.25.
- * Same form factor as the mockup demo bar's density toggle.
+ * Same form factor as the design-mockup density toggle, lifted out of
+ * density-selector.module.css so density, mail layout, calendar view,
+ * and approval tabs share one source of truth.
  * ────────────────────────────────────────────────────────────────── */
 
 .group {
@@ -19,15 +20,13 @@
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: var(--text-sm);
   font-weight: 600;
-  padding: 4px 10px;
-  border-radius: calc(var(--radius-md) - 3px);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
+  border-radius: calc(var(--radius-md) - 3px);
 }
 
-.option:hover {
+.option:hover:not(:disabled) {
   color: var(--text-1);
 }
 
@@ -37,7 +36,24 @@
   box-shadow: var(--shadow-sm);
 }
 
+.option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .option:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Size variants. */
+
+.sm .option {
+  font-size: var(--text-sm);
+  padding: 4px 10px;
+}
+
+.md .option {
+  font-size: var(--text-md);
+  padding: 6px 14px;
 }
