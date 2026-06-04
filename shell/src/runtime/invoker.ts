@@ -32,6 +32,7 @@ import {
   fetchContactUpdateCommit,
   fetchEventCreateCommit,
   fetchEventDeleteCommit,
+  fetchEmailMailboxMemberships,
   fetchEventGet,
   fetchEventList,
   fetchEventUpdateCommit,
@@ -45,6 +46,7 @@ import {
   fetchThreadGet,
   fetchThreadList,
   fetchThreadSearch,
+  resolveTrashMailboxId,
   type AttachmentUpload,
   type Calendar,
   type CalendarEvent,
@@ -327,9 +329,45 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           return result as unknown as O;
         }
         case 'mail.delete': {
-          // Task 4. Destructive contract — dry-run returns the affected
-          // count (minimal preview; the MCP handler enriches this later
-          // with Email/get metadata). Commit issues Email/set destroy.
+          // PR 19 — soft delete. mail.delete no longer issues Email/set
+          // destroy. It resolves the Trash mailbox, reads each email's
+          // current memberships, then issues Email/set update that adds
+          // Trash and removes the union of source mailboxes. The
+          // inverse — what the UndoRegistry (PR 21+) will record — is
+          // exactly the reverse patch.
+          //
+          // Destructive contract preserved: dry-run still returns
+          // `{affectedCount, emails: []}` so existing dry-run gates
+          // through the MCP / preview surface don't change shape.
+          const params = _input as unknown as { emailIds: string[] };
+          if (_options.dryRun === true) {
+            return {
+              affectedCount: params.emailIds.length,
+              emails: [],
+            } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const trashId = await resolveTrashMailboxId({ ...opts, session });
+          const memberships = await fetchEmailMailboxMemberships({
+            ...opts,
+            session,
+            emailIds: params.emailIds,
+          });
+          const result: MailModifyResult = await fetchMailModifyCommit({
+            ...opts,
+            session,
+            params: {
+              emailIds: params.emailIds,
+              patch: { mailboxIds: buildSoftDeletePatch(trashId, memberships) },
+            },
+          });
+          return result as unknown as O;
+        }
+        case 'mail.purge': {
+          // PR 19 — the hard JMAP Email/set destroy. UI-only; the MCP
+          // server doesn't expose mail.purge, and the agent-token scope
+          // vocabulary doesn't grant it. Agents calling mail.delete get
+          // the safer soft-delete path above.
           const params = _input as unknown as { emailIds: string[] };
           if (_options.dryRun === true) {
             return {
@@ -714,6 +752,31 @@ function makeMailModifyPreview(params: MailModifyInput): {
       patchApplied: params.patch,
     })),
   };
+}
+
+/**
+ * PR 19 — soft delete patch. Combines per-email memberships into a
+ * single `mailboxIds` patch that moves every selected email into
+ * Trash and out of the union of source mailboxes.
+ *
+ * Limitation: when callers delete a heterogeneous batch (e.g., one
+ * email from Inbox and another from Archive), the combined patch
+ * removes the email from *both* mailboxes — the Archive email
+ * effectively loses its Archive membership too. The common case
+ * (delete N from one mailbox) is unaffected. Heterogeneous batches
+ * are a v2 refinement.
+ */
+function buildSoftDeletePatch(
+  trashId: string,
+  memberships: ReadonlyMap<string, readonly string[]>,
+): Record<string, boolean> {
+  const patch: Record<string, boolean> = { [trashId]: true };
+  for (const ids of memberships.values()) {
+    for (const id of ids) {
+      if (id !== trashId) patch[id] = false;
+    }
+  }
+  return patch;
 }
 
 function previewSnippet(text: string | undefined, html: string | undefined): string {
