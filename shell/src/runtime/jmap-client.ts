@@ -200,6 +200,132 @@ export function parseMailboxes(body: string): Mailbox[] {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Two-stage delete helpers (PR 19) — Trash lookup + memberships read
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the id of the mailbox with role: 'trash' for the signed-in
+ * account. Throws when no Trash mailbox exists — soft delete requires
+ * a destination, so the caller (mail.delete) can't proceed without it.
+ *
+ * Stalwart provisions a Trash on every account; this should only
+ * trip for accounts on servers that don't.
+ */
+export async function resolveTrashMailboxId(
+  opts: FetchMailboxListOptions,
+): Promise<string> {
+  const list = await fetchMailboxList(opts);
+  const trash = list.find((m) => m.role === 'trash');
+  if (trash === undefined) {
+    throw makeError(
+      'no_trash_mailbox',
+      'mail.delete (soft delete) requires a mailbox with role: trash; ' +
+        'the account has none.',
+    );
+  }
+  return trash.id;
+}
+
+/**
+ * Fetch only the `mailboxIds` field for each given email. Returns
+ * a Map<emailId, mailboxIds[]> with each email's current membership
+ * list — what mail.delete needs to build the inverse patch (and what
+ * PR 22 stashes in the action-log provenance for undo).
+ *
+ * Cheap: a single Email/get with `properties: ['mailboxIds']`.
+ */
+export async function fetchEmailMailboxMemberships(
+  opts: JmapClientOptions & {
+    readonly session: Session;
+    readonly emailIds: readonly string[];
+  },
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Email/get',
+        {
+          accountId: opts.session.primaryAccountIdMail,
+          ids: opts.emailIds,
+          properties: ['mailboxIds'],
+        },
+        '0',
+      ],
+    ],
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Email/get (memberships) returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/get memberships response: ${describe(e)}`,
+      e,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Email/get memberships: not an object.');
+  }
+  const responses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(responses) || responses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/get memberships: no methodResponses array.',
+    );
+  }
+  const first = responses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/get memberships: malformed methodResponse entry.',
+    );
+  }
+  const result = first[1] as { list?: unknown };
+  const items = Array.isArray(result.list) ? result.list : [];
+  const out = new Map<string, readonly string[]>();
+  for (const row of items) {
+    if (row === null || typeof row !== 'object') continue;
+    const r = row as { id?: unknown; mailboxIds?: unknown };
+    if (typeof r.id !== 'string') continue;
+    const ids: string[] = [];
+    if (r.mailboxIds !== null && typeof r.mailboxIds === 'object') {
+      for (const [k, v] of Object.entries(r.mailboxIds as Record<string, unknown>)) {
+        if (v === true) ids.push(k);
+      }
+    }
+    out.set(r.id, ids);
+  }
+  return out;
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Email/query + Email/get (chained — thread.list)
 // ──────────────────────────────────────────────────────────────────────
 
