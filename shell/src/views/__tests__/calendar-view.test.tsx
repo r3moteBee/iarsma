@@ -477,6 +477,105 @@ describe('CalendarView', () => {
     });
   });
 
+  describe('tentative / agent treatment (PR 15, §8.4)', () => {
+    it('marks tentative status in the aria-label', () => {
+      const tentative: CalendarViewEvent = {
+        id: 'evt-t',
+        title: 'Maybe Lunch',
+        start: '2026-05-15T12:00',
+        duration: 'PT1H',
+        status: 'tentative',
+      };
+      render(
+        <CalendarView
+          events={[tentative]}
+          view="week"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      const block = screen.getByRole('button', { name: /maybe lunch \(tentative\)/i });
+      expect(block).toBeInTheDocument();
+    });
+
+    it('renders the agent dot + accent treatment for createdBy=agent', () => {
+      const agentEvent: CalendarViewEvent = {
+        id: 'evt-a',
+        title: 'Scheduling hold',
+        start: '2026-05-15T14:00',
+        duration: 'PT1H',
+        createdBy: 'agent',
+      };
+      render(
+        <CalendarView
+          events={[agentEvent]}
+          view="week"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      // aria-label folds in the "booked by agent" tag so screen-reader
+      // users get the same signal sighted users get from the dot.
+      expect(
+        screen.getByRole('button', { name: /scheduling hold \(booked by agent\)/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('slot + affordance (PR 15, §8.4)', () => {
+    it('renders + buttons in week slots when onCreateEvent is provided', () => {
+      const onCreateEvent = vi.fn();
+      render(
+        <CalendarView
+          events={[]}
+          view="week"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onCreateEvent={onCreateEvent}
+        />,
+      );
+      const buttons = screen.getAllByTestId('slot-add');
+      // 24 hours × 7 days = 168 slots.
+      expect(buttons.length).toBe(24 * 7);
+    });
+
+    it('omits + buttons when onCreateEvent is not provided', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="week"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      expect(screen.queryAllByTestId('slot-add')).toHaveLength(0);
+    });
+
+    it('clicking + calls onCreateEvent with the slot date/time', () => {
+      const onCreateEvent = vi.fn();
+      render(
+        <CalendarView
+          events={[]}
+          view="day"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onCreateEvent={onCreateEvent}
+        />,
+      );
+      const buttons = screen.getAllByTestId('slot-add');
+      // Day view: 24 hour slots; click the first one (00:00).
+      fireEvent.click(buttons[0]!);
+      expect(onCreateEvent).toHaveBeenCalled();
+      const calledWith = onCreateEvent.mock.calls[0]![0] as Date;
+      expect(calledWith.getHours()).toBe(0);
+    });
+  });
+
   describe('visibility rail (PR 14, §8.4)', () => {
     const SAMPLE_CALENDARS = [
       { id: 'cal-1', name: 'Personal', color: '#3b82f6' },

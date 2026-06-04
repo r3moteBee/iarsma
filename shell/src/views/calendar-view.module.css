@@ -500,6 +500,86 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
+/* Tentative — diagonal-stripe fill so the "this isn't fully committed
+ * yet" signal is visible even when the user can't see the desaturation
+ * (color-blind safety) and reads more like a deliberate hold than
+ * "the row's faded". */
+.eventBlockTentative {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--surface-1) 0 6px,
+      color-mix(in srgb, var(--accent) 12%, var(--surface-1)) 6px 12px
+    );
+  border-left-style: dashed;
+}
+
+/* Cancelled — keep the desaturate but add a strikethrough so it
+ * reads as "this is gone" even on dark backgrounds where opacity
+ * alone is unreliable. */
+.eventBlockCancelled {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+/* Agent treatment (§7.3.1) — small ✦ in the top-left corner +
+ * subtle accent-tinted background so the row visually pops. */
+.eventBlockAgent {
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+  padding-left: 1.2em;
+}
+
+.eventBlockAgentDot {
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  font-size: 0.7em;
+  color: var(--accent);
+  pointer-events: none;
+  font-weight: 700;
+}
+
+/* Slot + affordance — appears on hover (or focus) of the slot.
+ * Keyboard users get to it via Tab, mouse users discover it on
+ * pointer enter; double-click on the slot still works as before. */
+.slotAddBtn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  border: 1px dashed var(--accent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-1));
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.weekSlot:hover .slotAddBtn,
+.daySlot:hover .slotAddBtn,
+.slotAddBtn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.slotAddBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.slotAddBtn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-1));
+}
+
 /* ── Event form ────────────────────────────────────────────── */
 
 .eventForm {
