@@ -76,6 +76,88 @@
   letter-spacing: -0.01em;
 }
 
+/* Body wraps the rail + view area so the rail can sit beside the
+ * grid. Collapses to a vertical stack on mobile so the rail moves
+ * above the grid (or you'd lose ~70% of the calendar). */
+.body {
+  display: flex;
+  gap: var(--space-md);
+  align-items: flex-start;
+}
+
+.viewArea {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Visibility rail (§8.4) ─────────────────────────────────── */
+
+.rail {
+  flex: 0 0 auto;
+  width: 180px;
+  padding: var(--space-sm) 0;
+}
+
+.railHeading {
+  margin: 0 0 var(--space-xs);
+  padding: 0 var(--space-xs);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+
+.railList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.railItem {
+  margin: 0;
+}
+
+.railLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.railLabel:hover {
+  background: var(--surface-2);
+}
+
+.railCheckbox {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.railSwatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.railName {
+  font-size: var(--text-md);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Month view ─────────────────────────────────────────────── */
 
 .monthGrid {
@@ -544,6 +626,22 @@
    * we already had; the chips collapse out of the layout. */
   .eventChips {
     display: none;
+  }
+
+  /* Rail moves above the grid on mobile so it doesn't eat the
+   * already-cramped 7-column row. */
+  .body {
+    flex-direction: column;
+  }
+
+  .rail {
+    width: 100%;
+  }
+
+  .railList {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
   }
 
   .weekGrid {
