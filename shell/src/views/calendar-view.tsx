@@ -30,6 +30,10 @@ export type CalendarViewEvent = {
   readonly status?: 'confirmed' | 'tentative' | 'cancelled';
   readonly description?: string;
   readonly location?: string;
+  /** §7.3.1 — who put this event on the calendar. Defaults to 'human'
+   *  when absent; 'agent' triggers the agent-treatment row dot so
+   *  "your scheduling agent booked this" is legible at a glance. */
+  readonly createdBy?: 'human' | 'agent';
 };
 
 export type CalendarInfo = {
@@ -761,6 +765,21 @@ function WeekRow({
                 onClick={onEventClick}
               />
             ))}
+            {onCreateEvent !== undefined ? (
+              <button
+                type="button"
+                className={styles.slotAddBtn}
+                aria-label={`New event at ${formatHour(hour)} on ${DAY_NAMES_FULL[day.getDay()]} ${day.getDate()}`}
+                data-testid="slot-add"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const eventDate = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour);
+                  onCreateEvent(eventDate);
+                }}
+              >
+                +
+              </button>
+            ) : null}
             {isNowSlot ? (
               <div
                 className={styles.nowIndicator}
@@ -884,6 +903,21 @@ function DayRow({
             onClick={onEventClick}
           />
         ))}
+        {onCreateEvent !== undefined ? (
+          <button
+            type="button"
+            className={styles.slotAddBtn}
+            aria-label={`New event at ${formatHour(hour)}`}
+            data-testid="slot-add"
+            onClick={(e) => {
+              e.stopPropagation();
+              const eventDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate(), hour);
+              onCreateEvent(eventDate);
+            }}
+          >
+            +
+          </button>
+        ) : null}
         {isNowSlot ? (
           <div
             className={styles.nowIndicator}
@@ -921,16 +955,36 @@ function EventBlock({
   const heightPercent = (durationMinutes / 60) * 100;
 
   const borderColor = event.calendarColor ?? 'var(--accent)';
+  const isAgent = event.createdBy === 'agent';
+
+  const classes = [
+    styles.eventBlock,
+    event.status === 'tentative' ? styles.eventBlockTentative : '',
+    event.status === 'cancelled' ? styles.eventBlockCancelled : '',
+    isAgent ? styles.eventBlockAgent : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  // aria-label folds in the status + provenance so screen-reader
+  // users get the same "this is tentative / your agent booked it"
+  // signal sighted users get from the hatched fill + agent dot.
+  const tagBits: string[] = [];
+  if (event.status === 'tentative') tagBits.push('tentative');
+  if (event.status === 'cancelled') tagBits.push('cancelled');
+  if (isAgent) tagBits.push('booked by agent');
+  const ariaLabel = tagBits.length > 0
+    ? `${event.title} (${tagBits.join(', ')})`
+    : event.title;
 
   return (
     <div
-      className={styles.eventBlock}
+      className={classes}
       style={{
         top: `${topOffset}%`,
         height: `${heightPercent}%`,
         minHeight: '1.2em',
         borderLeftColor: borderColor,
-        opacity: event.status === 'cancelled' ? 0.5 : event.status === 'tentative' ? 0.75 : 1,
       }}
       onClick={(e) => {
         e.stopPropagation();
@@ -938,8 +992,17 @@ function EventBlock({
       }}
       title={event.title}
       role="button"
-      aria-label={event.title}
+      aria-label={ariaLabel}
     >
+      {isAgent ? (
+        <span
+          className={styles.eventBlockAgentDot}
+          aria-hidden="true"
+          title="Booked by agent"
+        >
+          ✦
+        </span>
+      ) : null}
       {event.title}
     </div>
   );
