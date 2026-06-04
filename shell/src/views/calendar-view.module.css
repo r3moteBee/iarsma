@@ -13,44 +13,67 @@
 
 /* ── Header ─────────────────────────────────────────────────── */
 
+/* Header — §8.4 left/right split. Left cluster: label + ‹ Today ›
+ * nav. Right cluster: view toggle + primary New Event button. The
+ * spacer is the natural justify-content distance between them. */
 .header {
   display: flex;
   align-items: center;
-  gap: var(--space-sm, 0.5rem);
+  justify-content: space-between;
+  gap: var(--space-md, 1rem);
   flex-wrap: wrap;
 }
 
-/* View toggle is now the shared SegmentedControl (§12); the
- * .viewToggle/.viewToggleBtn/.viewToggleBtnActive classes were
- * removed when calendar-view.tsx migrated. */
+.headerLeft,
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 0.5rem);
+}
 
 .nav {
   display: flex;
   align-items: center;
-  gap: var(--space-xs, 0.25rem);
-  margin-left: auto;
+  gap: 0;
 }
 
 .navBtn {
   padding: 0.3em 0.6em;
   font: inherit;
-  font-size: 0.85em;
-  border: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
-  border-radius: var(--radius-sm, 4px);
-  background: var(--surface-1, #fff);
-  color: var(--text-1, #000);
+  font-size: 0.9em;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-1);
   cursor: pointer;
 }
 
+.navBtn:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.navBtn:not(:first-child) {
+  border-left: none;
+}
+
+.navBtn:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
 .navBtn:hover {
-  background: var(--surface-2, #f5f5f5);
+  background: var(--surface-2);
+}
+
+.navBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
 }
 
 .monthLabel {
-  font-size: 1.1em;
-  font-weight: 600;
-  margin: 0 var(--space-sm, 0.5rem);
+  font-size: 1.15em;
+  font-weight: 700;
   white-space: nowrap;
+  letter-spacing: -0.01em;
 }
 
 /* ── Month view ─────────────────────────────────────────────── */
@@ -282,6 +305,67 @@
   font-weight: 600;
   background: var(--surface-2, #f5f5f5);
   border-bottom: 1px solid var(--surface-3, rgba(0, 0, 0, 0.15));
+}
+
+/* ── All-day strip (week + day views, §8.4) ─────────────────── */
+
+.allDayLabel {
+  padding: 4px 6px;
+  font-size: 0.7em;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+}
+
+.allDayCell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  min-height: 1.8em;
+}
+
+.allDayCell:last-child {
+  border-right: none;
+}
+
+/* Day view's all-day cell spans the single content column. */
+.dayGrid > .allDayCell {
+  grid-column: 2 / 3;
+}
+
+.allDayChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: 2px;
+  font-size: 0.78em;
+  font-weight: 500;
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.allDayChip:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.allDayChip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ── Now indicator (week + day views, §8.4) ─────────────────── */
