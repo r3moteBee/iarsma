@@ -11,6 +11,7 @@ import {
   cacheStorage,
   isSignedInAtom,
   tokensAtom,
+  undoRegistry,
 } from './auth-state.js';
 import { composeStateAtom } from './compose-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
@@ -168,6 +169,7 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
           store: cacheStorage,
         }),
         log: actionLog,
+        undoRegistry,
         getIdentity: () => {
           const t = authStorage.loadTokens();
           if (t === null) return null;
@@ -823,6 +825,28 @@ function SignedInShell({
   });
   const setActivityFilters = useSetAtom(activityFiltersAtom);
 
+  // PR 21 — Activity row's Undo button. Looks up the inverse, runs
+  // it through the same invoker (so it's logged + cached + visible
+  // in the chain as a normal action), then marks the original undo
+  // entry consumed.
+  const handleUndo = useCallback(
+    (seq: number) => {
+      void (async () => {
+        const u = await undoRegistry.forEntry(seq);
+        if (u === null || u.consumed) return;
+        try {
+          await invoker.invoke(u.inverseAction, u.inverseParams);
+          await undoRegistry.consume(seq);
+          setCrudRefresh((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[iarsma] undo failed:', e);
+        }
+      })();
+    },
+    [invoker],
+  );
+
   // View title for mobile top bar
   const VIEW_TITLES: Record<ActiveView, string> = {
     mail: 'Mail',
@@ -1060,6 +1084,8 @@ function SignedInShell({
             pageSize={activity.pageSize}
             totalEntries={activity.totalEntries}
             onPageChange={activity.onPageChange}
+            undoableSeqs={new Set(activity.undoBySeq.keys())}
+            onUndo={handleUndo}
           />
         ) : activeView === 'files' ? (
           <FilesView

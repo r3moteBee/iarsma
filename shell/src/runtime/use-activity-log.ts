@@ -21,8 +21,9 @@
 import { atom, useAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { actionLog } from '../auth-state.js';
+import { actionLog, undoRegistry } from '../auth-state.js';
 import type { StoredEntry } from './action-log.js';
+import type { UndoEntry } from './undo-registry.js';
 import type { ActivityEntry } from '../views/activity-view.js';
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -78,6 +79,9 @@ export type UseActivityLogResult = {
   readonly totalEntries: number;
   readonly onPageChange: (page: number) => void;
   readonly lastUsedByToken: LastUsedByToken;
+  /** Per-seq lookup of active undo entries (consumed/expired excluded).
+   *  Activity view uses this to decide which rows show an Undo button. */
+  readonly undoBySeq: ReadonlyMap<number, UndoEntry>;
 };
 
 export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResult {
@@ -91,6 +95,9 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
 
   const [filters, setFilters] = useAtom(activityFiltersAtom);
   const [page, setPage] = useState(1);
+  const [undoBySeq, setUndoBySeq] = useState<ReadonlyMap<number, UndoEntry>>(
+    () => new Map(),
+  );
 
   // Initial load + periodic refresh. Cheap enough on Phase-0 chain
   // sizes; Phase 1 swaps this for a count-watch and verified-prefix
@@ -100,8 +107,10 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
     const load = async (): Promise<void> => {
       try {
         const rows = await actionLog.entries();
+        const undos = await undoRegistry.list({ activeOnly: true });
         if (!cancelled) {
           setAllEntries(rows);
+          setUndoBySeq(new Map(undos.map((u) => [u.forEntrySeq, u])));
           setIsLoading(false);
         }
       } catch {
@@ -193,6 +202,7 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
     pageSize: DEFAULT_PAGE_SIZE,
     totalEntries,
     lastUsedByToken,
+    undoBySeq,
     onPageChange,
   };
 }
