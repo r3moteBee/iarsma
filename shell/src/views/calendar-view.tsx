@@ -13,7 +13,7 @@
  *   - d: switch to day view
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dialog } from '../components/index.js';
 import { SegmentedControl, type SegmentedOption } from '../components/segmented-control.js';
 import styles from './calendar-view.module.css';
@@ -530,6 +530,92 @@ function MonthView({
   const days = getMonthDays(year, month);
   const today = new Date();
 
+  // Roving focus state (§8.4): exactly one cell is in the tab order at
+  // a time; arrow keys move focus cell-to-cell. Default to today when
+  // it falls inside the visible grid, else fall back to currentDate.
+  const initialFocus = useMemo(() => {
+    const todayId = formatDateId(today);
+    const inGrid = days.some((d) => formatDateId(d) === todayId);
+    return inGrid ? todayId : formatDateId(currentDate);
+    // Recompute on month change only; today.toISOString() shouldn't
+    // tick mid-render — see Date.now() ban in skill docs, this is
+    // unobserved-since-mount and acceptable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, month]);
+  const [focusedDateId, setFocusedDateId] = useState<string>(initialFocus);
+  // When the month changes (Today nav, ‹ ›), pull the roving cursor
+  // back to today / first of month so it doesn't stay on an old cell.
+  useEffect(() => {
+    setFocusedDateId(initialFocus);
+  }, [initialFocus]);
+
+  const cellRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // After state updates the focused id, actually move the DOM focus.
+  // useEffect runs after the new tabIndex props are applied so the
+  // target cell is focusable.
+  const shouldRestoreFocusRef = useRef(false);
+  useEffect(() => {
+    if (!shouldRestoreFocusRef.current) return;
+    shouldRestoreFocusRef.current = false;
+    const el = cellRefs.current.get(focusedDateId);
+    if (el !== null && el !== undefined && typeof el.focus === 'function') {
+      el.focus();
+    }
+  }, [focusedDateId]);
+
+  const moveFocus = (delta: number): void => {
+    const idx = days.findIndex((d) => formatDateId(d) === focusedDateId);
+    if (idx === -1) return;
+    const nextIdx = idx + delta;
+    const next = days[nextIdx];
+    if (next === undefined) {
+      // Out of grid — page to prev/next month, the host's onDateChange
+      // will rebuild the grid and the initial-focus effect will land
+      // the cursor on the right cell. Day overshooting past Sat moves
+      // to next month's first row; underflow to prev month's last row.
+      const stepDate = new Date(
+        days[idx]!.getFullYear(),
+        days[idx]!.getMonth(),
+        days[idx]!.getDate() + delta,
+      );
+      onDateChange(stepDate);
+      shouldRestoreFocusRef.current = true;
+      setFocusedDateId(formatDateId(stepDate));
+      return;
+    }
+    shouldRestoreFocusRef.current = true;
+    setFocusedDateId(formatDateId(next));
+  };
+
+  const handleKey = (e: React.KeyboardEvent<HTMLDivElement>, day: Date): void => {
+    switch (e.key) {
+      case 'ArrowLeft':
+        e.preventDefault();
+        moveFocus(-1);
+        return;
+      case 'ArrowRight':
+        e.preventDefault();
+        moveFocus(1);
+        return;
+      case 'ArrowUp':
+        e.preventDefault();
+        moveFocus(-7);
+        return;
+      case 'ArrowDown':
+        e.preventDefault();
+        moveFocus(7);
+        return;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        onDateChange(day);
+        return;
+      default:
+        return;
+    }
+  };
+
   return (
     <div className={styles.monthGrid} role="region" aria-label="Month calendar grid">
       {/* Day-of-week headers */}
@@ -545,6 +631,7 @@ function MonthView({
         const isToday = isSameDay(day, today);
         const dateId = formatDateId(day);
         const dayEvents = getEventsForDay(events, day);
+        const isFocusable = dateId === focusedDateId;
 
         const cellClasses = [
           styles.dayCell,
@@ -557,11 +644,20 @@ function MonthView({
         return (
           <div
             key={dateId}
+            ref={(el) => {
+              if (el === null) cellRefs.current.delete(dateId);
+              else cellRefs.current.set(dateId, el);
+            }}
             className={cellClasses}
             data-testid={isToday ? 'calendar-day-today' : `calendar-day-${dateId}`}
             data-date={dateId}
-            onClick={() => onDateChange(day)}
+            tabIndex={isFocusable ? 0 : -1}
+            onClick={() => {
+              setFocusedDateId(dateId);
+              onDateChange(day);
+            }}
             onDoubleClick={() => onCreateEvent?.(day)}
+            onKeyDown={(e) => handleKey(e, day)}
             role="button"
             aria-label={`${DAY_NAMES_FULL[day.getDay()]}, ${MONTH_NAMES[day.getMonth()]} ${day.getDate()}`}
           >
