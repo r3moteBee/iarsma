@@ -203,6 +203,7 @@ describe('AgentSettingsView', () => {
         'Scopes',
         'Issued',
         'Expires',
+        'Last used',
         'Status',
         'Action',
       ]);
@@ -322,6 +323,57 @@ describe('AgentSettingsView', () => {
       openTokensTab();
 
       expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('last used + jump-to-Activity (PR 16, §8.11)', () => {
+    it('shows "Never" when a token has no last-used entry', () => {
+      render(
+        <AgentSettingsView
+          tokens={SAMPLE_TOKENS}
+          onIssue={noopIssue}
+          onRevoke={noop}
+          lastUsedByToken={new Map()}
+        />,
+      );
+      openTokensTab();
+      expect(screen.getAllByText(/never/i).length).toBeGreaterThan(0);
+    });
+
+    it('shows a relative time for tokens with a last-used entry', () => {
+      // Use a fixed reference: 5 minutes ago.
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      render(
+        <AgentSettingsView
+          tokens={SAMPLE_TOKENS}
+          onIssue={noopIssue}
+          onRevoke={noop}
+          lastUsedByToken={new Map([['tok-1', fiveMinAgo]])}
+        />,
+      );
+      openTokensTab();
+      // 5m ago should match the active row.
+      expect(screen.getByText(/5m ago/i)).toBeInTheDocument();
+    });
+
+    it('renders an "Activity" button per token that calls onViewActivity with the token name', () => {
+      const onViewActivity = vi.fn();
+      render(
+        <AgentSettingsView
+          tokens={SAMPLE_TOKENS}
+          onIssue={noopIssue}
+          onRevoke={noop}
+          onViewActivity={onViewActivity}
+        />,
+      );
+      openTokensTab();
+      const buttons = screen.getAllByRole('button', { name: /view activity for/i });
+      // SAMPLE_TOKENS has 2 entries (one revoked, one active) — both
+      // get the Activity link because filtering history is useful
+      // even for revoked tokens.
+      expect(buttons.length).toBe(SAMPLE_TOKENS.length);
+      fireEvent.click(buttons[0]!);
+      expect(onViewActivity).toHaveBeenCalledWith('CI Bot');
     });
   });
 
