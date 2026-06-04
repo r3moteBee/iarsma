@@ -18,6 +18,7 @@
  * coupling.
  */
 
+import { atom, useAtom } from 'jotai';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { actionLog } from '../auth-state.js';
@@ -40,6 +41,21 @@ const DEFAULT_FILTERS: ActivityFilters = {
   timeRange: 'all',
 };
 
+/**
+ * Cross-view atom holding the Activity view's active filters. Lifted
+ * out of the hook so other surfaces (Settings → Agent tokens) can
+ * pre-set a filter (e.g. actor=<tokenName>) before navigating in.
+ */
+export const activityFiltersAtom = atom<ActivityFilters>(DEFAULT_FILTERS);
+
+/**
+ * Per-token last-used map: tokenId → ISO timestamp of the most
+ * recent action-log entry for that token. Empty when the token has
+ * never been used. Lifts the derivation out of any one view so the
+ * Settings token table and the Activity view can both consume it.
+ */
+export type LastUsedByToken = ReadonlyMap<string, string>;
+
 export type UseActivityLogOptions = {
   /** Resolve a tokenId to a display name (e.g., "CI Bot"). Falls back
    *  to the tokenId when the token is unknown — covers revoked tokens
@@ -61,6 +77,7 @@ export type UseActivityLogResult = {
   readonly pageSize: number;
   readonly totalEntries: number;
   readonly onPageChange: (page: number) => void;
+  readonly lastUsedByToken: LastUsedByToken;
 };
 
 export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResult {
@@ -72,7 +89,7 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
   >('unchecked');
   const [integrityError, setIntegrityError] = useState<string | undefined>(undefined);
 
-  const [filters, setFilters] = useState<ActivityFilters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useAtom(activityFiltersAtom);
   const [page, setPage] = useState(1);
 
   // Initial load + periodic refresh. Cheap enough on Phase-0 chain
@@ -124,7 +141,22 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
   const onFilterChange = useCallback((key: string, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(1);
-  }, []);
+  }, [setFilters]);
+
+  // Per-token last-used map derived from the raw chain (not the
+  // filtered view, so the Settings table sees the truth regardless
+  // of what the Activity view is currently scoped to).
+  const lastUsedByToken = useMemo<LastUsedByToken>(() => {
+    const map = new Map<string, string>();
+    for (const e of allEntries) {
+      const tokenId = e.data.agentTokenId;
+      if (tokenId === undefined) continue;
+      const ts = new Date(e.data.timestampMs).toISOString();
+      const prev = map.get(tokenId);
+      if (prev === undefined || prev < ts) map.set(tokenId, ts);
+    }
+    return map;
+  }, [allEntries]);
 
   const onPageChange = useCallback((next: number) => {
     setPage(Math.max(1, next));
@@ -160,6 +192,7 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
     page,
     pageSize: DEFAULT_PAGE_SIZE,
     totalEntries,
+    lastUsedByToken,
     onPageChange,
   };
 }

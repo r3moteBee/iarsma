@@ -47,7 +47,7 @@ import { FilesView, type FileTreeNode, type FileContent as FilesViewContent, typ
 import { githubClient, type GitHubConfig } from './runtime/github-client.js';
 import { indexedDbGitHubConfigStore, inMemoryGitHubConfigStore, type GitHubStoredConfig } from './runtime/github-config-store.js';
 import { ActivityView } from './views/activity-view.js';
-import { useActivityLog } from './runtime/use-activity-log.js';
+import { activityFiltersAtom, useActivityLog } from './runtime/use-activity-log.js';
 import { ApprovalsView } from './views/approvals-view.js';
 import {
   jmapApprovalStore,
@@ -821,6 +821,7 @@ function SignedInShell({
       [agentTokens],
     ),
   });
+  const setActivityFilters = useSetAtom(activityFiltersAtom);
 
   // View title for mobile top bar
   const VIEW_TITLES: Record<ActiveView, string> = {
@@ -1081,6 +1082,15 @@ function SignedInShell({
             onIssue={handleIssue}
             onRevoke={handleRevoke}
             isLoading={agentTokensLoading}
+            lastUsedByToken={activity.lastUsedByToken}
+            onViewActivity={(tokenName) => {
+              // Pre-set the actor filter via the shared atom, then
+              // navigate. The Activity view's hook reads the same
+              // atom on next render so the filter is already applied
+              // when the view mounts.
+              setActivityFilters((prev) => ({ ...prev, actor: tokenName }));
+              setActiveView('activity');
+            }}
             files={{
               currentConfig: githubConfig !== null ? { owner: githubConfig.owner, repo: githubConfig.repo, branch: githubConfig.branch } : null,
               onConnect: handleFilesConnect,

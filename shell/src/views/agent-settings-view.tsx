@@ -52,6 +52,13 @@ type AgentSettingsViewProps = {
   readonly onIssue: (name: string, scopes: string[], lifetimeSec: number) => Promise<IssuedToken>;
   readonly onRevoke: (tokenId: string) => Promise<void>;
   readonly isLoading?: boolean;
+  /** Per-token "last used" map (§8.11). Keyed by tokenId; values are
+   *  ISO timestamps. Tokens that have never been used are absent. */
+  readonly lastUsedByToken?: ReadonlyMap<string, string>;
+  /** Navigate to Activity view with an actor filter pre-scoped to
+   *  the given tokenName. App.tsx wires both the navigation and the
+   *  cross-view filter atom. */
+  readonly onViewActivity?: (tokenName: string) => void;
   /** Optional GitHub Files integration settings. */
   readonly files?: FilesSettingsPanelProps;
   /** Account info — signed-in email + sign-out handler. */
@@ -80,6 +87,8 @@ export function AgentSettingsView({
   onIssue,
   onRevoke,
   isLoading,
+  lastUsedByToken,
+  onViewActivity,
   files,
   userName,
   onSignOut,
@@ -113,6 +122,8 @@ export function AgentSettingsView({
             onIssue={onIssue}
             onRevoke={onRevoke}
             {...(isLoading !== undefined ? { isLoading } : {})}
+            {...(lastUsedByToken !== undefined ? { lastUsedByToken } : {})}
+            {...(onViewActivity !== undefined ? { onViewActivity } : {})}
           />
         ) : null}
         {section === 'files' ? (
@@ -194,11 +205,15 @@ function TokensSection({
   onIssue,
   onRevoke,
   isLoading,
+  lastUsedByToken,
+  onViewActivity,
 }: {
   readonly tokens: readonly AgentTokenInfo[];
   readonly onIssue: AgentSettingsViewProps['onIssue'];
   readonly onRevoke: AgentSettingsViewProps['onRevoke'];
   readonly isLoading?: boolean;
+  readonly lastUsedByToken?: ReadonlyMap<string, string>;
+  readonly onViewActivity?: (tokenName: string) => void;
 }) {
   return (
     <section aria-labelledby="tokens-heading">
@@ -210,7 +225,12 @@ function TokensSection({
       </p>
       {isLoading === true ? <p>Loading tokens…</p> : null}
       <IssueTokenForm onIssue={onIssue} />
-      <TokenTable tokens={tokens} onRevoke={onRevoke} />
+      <TokenTable
+        tokens={tokens}
+        onRevoke={onRevoke}
+        {...(lastUsedByToken !== undefined ? { lastUsedByToken } : {})}
+        {...(onViewActivity !== undefined ? { onViewActivity } : {})}
+      />
     </section>
   );
 }
@@ -347,9 +367,13 @@ function IssueTokenForm({
 function TokenTable({
   tokens,
   onRevoke,
+  lastUsedByToken,
+  onViewActivity,
 }: {
   readonly tokens: readonly AgentTokenInfo[];
   readonly onRevoke: (tokenId: string) => Promise<void>;
+  readonly lastUsedByToken?: ReadonlyMap<string, string>;
+  readonly onViewActivity?: (tokenName: string) => void;
 }) {
   return (
     <section aria-labelledby="active-tokens-heading">
@@ -363,14 +387,24 @@ function TokenTable({
             <th scope="col">Scopes</th>
             <th scope="col">Issued</th>
             <th scope="col">Expires</th>
+            <th scope="col">Last used</th>
             <th scope="col">Status</th>
             <th scope="col">Action</th>
           </tr>
         </thead>
         <tbody>
-          {tokens.map((token) => (
-            <TokenRow key={token.tokenId} token={token} onRevoke={onRevoke} />
-          ))}
+          {tokens.map((token) => {
+            const lu = lastUsedByToken?.get(token.tokenId);
+            return (
+              <TokenRow
+                key={token.tokenId}
+                token={token}
+                onRevoke={onRevoke}
+                {...(lu !== undefined ? { lastUsed: lu } : {})}
+                {...(onViewActivity !== undefined ? { onViewActivity } : {})}
+              />
+            );
+          })}
         </tbody>
       </table>
     </section>
@@ -380,9 +414,13 @@ function TokenTable({
 function TokenRow({
   token,
   onRevoke,
+  lastUsed,
+  onViewActivity,
 }: {
   readonly token: AgentTokenInfo;
   readonly onRevoke: (tokenId: string) => Promise<void>;
+  readonly lastUsed?: string;
+  readonly onViewActivity?: (tokenName: string) => void;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [revoking, setRevoking] = useState(false);
@@ -414,6 +452,17 @@ function TokenRow({
       <td>{formatDate(token.issuedAt)}</td>
       <td>{formatDate(token.expiresAt)}</td>
       <td>
+        {lastUsed !== undefined ? (
+          <span title={new Date(lastUsed).toLocaleString()}>
+            {formatRelativeTime(lastUsed)}
+          </span>
+        ) : (
+          <span className={styles['muted'] ?? ''} style={{ color: 'var(--text-3)' }}>
+            Never
+          </span>
+        )}
+      </td>
+      <td>
         <span
           className={token.revoked ? styles['statusRevoked'] : styles['statusActive']}
         >
@@ -421,6 +470,16 @@ function TokenRow({
         </span>
       </td>
       <td>
+        {onViewActivity !== undefined ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onViewActivity(token.name)}
+            aria-label={`View activity for ${token.name}`}
+          >
+            Activity
+          </Button>
+        ) : null}
         {!token.revoked ? (
           <>
             <Button
@@ -523,6 +582,29 @@ function formatDate(iso: string): string {
       month: 'short',
       day: 'numeric',
     });
+  } catch {
+    return iso;
+  }
+}
+
+/** Compact relative time for the token table's "Last used" column.
+ *  Scales: <1m → "just now", <1h → "Xm ago", <24h → "Xh ago",
+ *  <7d → "Xd ago", otherwise an absolute date. The absolute
+ *  timestamp lives on the cell's title attribute for the precise
+ *  read. */
+function formatRelativeTime(iso: string): string {
+  try {
+    const then = new Date(iso).getTime();
+    const now = Date.now();
+    const diff = Math.max(0, now - then);
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diff < minute) return 'just now';
+    if (diff < hour) return `${Math.floor(diff / minute)}m ago`;
+    if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+    return formatDate(iso);
   } catch {
     return iso;
   }
