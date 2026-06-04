@@ -477,6 +477,88 @@ describe('CalendarView', () => {
     });
   });
 
+  describe('roving keyboard focus (PR 17, §8.4)', () => {
+    it('moves focus cell-to-cell with arrow keys', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      // Initial focus defaults to today when today falls in the
+      // visible grid, otherwise the currentDate — either way, click
+      // the test target to put the cursor where we expect it.
+      const start = screen.getByTestId('calendar-day-2026-05-15');
+      fireEvent.click(start);
+      expect(start).toHaveAttribute('tabindex', '0');
+
+      // ArrowRight → 16 May becomes focusable.
+      fireEvent.keyDown(start, { key: 'ArrowRight' });
+      const next = screen.getByTestId('calendar-day-2026-05-16');
+      expect(next).toHaveAttribute('tabindex', '0');
+      expect(start).toHaveAttribute('tabindex', '-1');
+    });
+
+    it('ArrowDown moves a week ahead', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      const start = screen.getByTestId('calendar-day-2026-05-15');
+      fireEvent.click(start);
+      fireEvent.keyDown(start, { key: 'ArrowDown' });
+      // 15 May + 7 days = 22 May.
+      expect(screen.getByTestId('calendar-day-2026-05-22')).toHaveAttribute(
+        'tabindex',
+        '0',
+      );
+    });
+
+    it('Enter on a focused cell calls onDateChange with that day', () => {
+      const onDateChange = vi.fn();
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={onDateChange}
+        />,
+      );
+      const cell = screen.getByTestId('calendar-day-2026-05-15');
+      fireEvent.keyDown(cell, { key: 'Enter' });
+      expect(onDateChange).toHaveBeenCalled();
+      const got = onDateChange.mock.calls[0]![0] as Date;
+      expect(got.getFullYear()).toBe(2026);
+      expect(got.getMonth()).toBe(4);
+      expect(got.getDate()).toBe(15);
+    });
+
+    it('only one cell is in the tab order at a time', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      const focusable = document.querySelectorAll<HTMLElement>(
+        '[data-date][tabindex="0"]',
+      );
+      expect(focusable.length).toBe(1);
+    });
+  });
+
   describe('tentative / agent treatment (PR 15, §8.4)', () => {
     it('marks tentative status in the aria-label', () => {
       const tentative: CalendarViewEvent = {
