@@ -209,6 +209,45 @@ describe('CalendarView', () => {
       expect(screen.getByText('Team Standup')).toBeInTheDocument();
       expect(screen.getByText('Lunch Meeting')).toBeInTheDocument();
     });
+
+    it('renders all-day events in a dedicated strip (PR 13, §8.4)', () => {
+      const allDay: CalendarViewEvent = {
+        id: 'evt-ad',
+        title: 'Company Holiday',
+        start: '2026-05-15T00:00',
+        duration: 'P1D',
+        status: 'confirmed',
+      };
+      render(
+        <CalendarView
+          events={[...SAMPLE_EVENTS, allDay]}
+          view="week"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+
+      // All-day strip label visible.
+      expect(screen.getByText(/all-day/i)).toBeInTheDocument();
+      // The chip renders the title and is in the strip (data-testid).
+      const chips = screen.getAllByTestId('all-day-chip');
+      expect(chips).toHaveLength(1);
+      expect(chips[0]!.textContent).toBe('Company Holiday');
+    });
+
+    it('omits the all-day strip when the week has no P1D events', () => {
+      render(
+        <CalendarView
+          events={SAMPLE_EVENTS}
+          view="week"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+        />,
+      );
+      expect(screen.queryByText(/all-day/i)).not.toBeInTheDocument();
+    });
   });
 
   describe('day view', () => {

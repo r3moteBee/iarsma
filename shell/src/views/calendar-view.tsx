@@ -326,63 +326,65 @@ export function CalendarView({
       aria-labelledby="calendar-heading"
       tabIndex={-1}
     >
-      {/* Header */}
+      {/* Header — §8.4 reorganization: left = month label + ‹ Today ›
+       *  nav; right = SegmentedControl + New Event (primary). Reads
+       *  cleaner and matches the mail reading-pane bar. */}
       <div className={styles.header}>
         <h2 id="calendar-heading" className="sr-only">Calendar</h2>
 
-        {/* View toggle — shared SegmentedControl (§12). */}
-        <SegmentedControl
-          label="Calendar view"
-          options={CALENDAR_VIEW_OPTIONS}
-          value={view}
-          onChange={onViewChange}
-          size="sm"
-        />
+        {/* Left cluster: label + nav */}
+        <div className={styles.headerLeft}>
+          <span className={styles.monthLabel}>
+            {MONTH_NAMES[currentDate.getMonth()]} {currentDate.getFullYear()}
+          </span>
+          <nav className={styles.nav} aria-label="Calendar navigation">
+            <button
+              type="button"
+              className={styles.navBtn}
+              onClick={navigatePrev}
+              aria-label="Previous"
+            >
+              &lsaquo;
+            </button>
+            <button
+              type="button"
+              className={styles.navBtn}
+              onClick={navigateToday}
+              aria-label="Today"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              className={styles.navBtn}
+              onClick={navigateNext}
+              aria-label="Next"
+            >
+              &rsaquo;
+            </button>
+          </nav>
+        </div>
 
-        {/* New Event button */}
-        {(onSaveEvent !== undefined || onUpdateEvent !== undefined) ? (
-          <Button
-            variant="primary"
+        {/* Right cluster: view toggle + primary action */}
+        <div className={styles.headerRight}>
+          <SegmentedControl
+            label="Calendar view"
+            options={CALENDAR_VIEW_OPTIONS}
+            value={view}
+            onChange={onViewChange}
             size="sm"
-            onClick={() => openNewEventForm(formatDateId(currentDate))}
-            aria-label="New Event"
-          >
-            + New Event
-          </Button>
-        ) : null}
-
-        {/* Month/year label */}
-        <span className={styles.monthLabel}>
-          {MONTH_NAMES[currentDate.getMonth()]} {currentDate.getFullYear()}
-        </span>
-
-        {/* Navigation */}
-        <nav className={styles.nav} aria-label="Calendar navigation">
-          <button
-            type="button"
-            className={styles.navBtn}
-            onClick={navigatePrev}
-            aria-label="Previous"
-          >
-            &lsaquo;
-          </button>
-          <button
-            type="button"
-            className={styles.navBtn}
-            onClick={navigateToday}
-            aria-label="Today"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            className={styles.navBtn}
-            onClick={navigateNext}
-            aria-label="Next"
-          >
-            &rsaquo;
-          </button>
-        </nav>
+          />
+          {(onSaveEvent !== undefined || onUpdateEvent !== undefined) ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => openNewEventForm(formatDateId(currentDate))}
+              aria-label="New Event"
+            >
+              + New Event
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {isLoading === true ? <p>Loading calendar...</p> : null}
@@ -625,6 +627,10 @@ function WeekView({
   const now = useNowTick();
   const todayIndex = weekDays.findIndex((d) => isSameDay(d, now));
 
+  const hasAllDay = weekDays.some(
+    (day) => getAllDayEventsForDay(events, day).length > 0,
+  );
+
   return (
     <div className={styles.weekGrid} role="region" aria-label="Week calendar grid">
       {/* Corner cell + day headers */}
@@ -634,6 +640,21 @@ function WeekView({
           {DAY_NAMES[day.getDay()]} {day.getDate()}
         </div>
       ))}
+
+      {/* All-day strip — §8.4. Only renders when at least one day in
+       *  the week has a P1D event, so empty weeks don't waste a row. */}
+      {hasAllDay ? (
+        <>
+          <div className={styles.allDayLabel}>All-day</div>
+          {weekDays.map((day) => (
+            <div key={`allday-${formatDateId(day)}`} className={styles.allDayCell}>
+              {getAllDayEventsForDay(events, day).map((evt) => (
+                <AllDayChip key={evt.id} event={evt} onEventClick={onEventClick} />
+              ))}
+            </div>
+          ))}
+        </>
+      ) : null}
 
       {/* Time rows */}
       {hours.map((hour) => (
@@ -740,6 +761,7 @@ function DayView({
   readonly onCreateEvent?: ((date: Date) => void) | undefined;
 }) {
   const dayEvents = getEventsForDay(events, currentDate);
+  const allDayEvents = getAllDayEventsForDay(events, currentDate);
   const hours = Array.from({ length: 24 }, (_, i) => i);
   const shortLabel = `${DAY_NAMES[currentDate.getDay()]}, ${MONTH_NAMES[currentDate.getMonth()]} ${currentDate.getDate()}`;
   const now = useNowTick();
@@ -750,6 +772,18 @@ function DayView({
       <div className={styles.dayHeaderFull} role="heading" aria-level={3}>
         {shortLabel}
       </div>
+
+      {/* All-day strip — §8.4. */}
+      {allDayEvents.length > 0 ? (
+        <>
+          <div className={styles.allDayLabel}>All-day</div>
+          <div className={styles.allDayCell}>
+            {allDayEvents.map((evt) => (
+              <AllDayChip key={evt.id} event={evt} onEventClick={onEventClick} />
+            ))}
+          </div>
+        </>
+      ) : null}
 
       {hours.map((hour) => {
         const slotEvents = getEventsForHourSlot(dayEvents, currentDate, hour);
@@ -882,6 +916,46 @@ function EventBlock({
   );
 }
 
+// ── All-day chip (week + day all-day strip) ──────────────────────
+
+function AllDayChip({
+  event,
+  onEventClick,
+}: {
+  readonly event: CalendarViewEvent;
+  readonly onEventClick?: ((eventId: string) => void) | undefined;
+}) {
+  return (
+    <span
+      className={styles.allDayChip}
+      data-testid="all-day-chip"
+      style={
+        event.calendarColor !== undefined
+          ? {
+              borderLeftColor: event.calendarColor,
+              background: `color-mix(in srgb, ${event.calendarColor} 14%, transparent)`,
+            }
+          : undefined
+      }
+      onClick={(e) => {
+        e.stopPropagation();
+        onEventClick?.(event.id);
+      }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onEventClick?.(event.id);
+        }
+      }}
+      aria-label={`${event.title}, all day`}
+    >
+      {event.title}
+    </span>
+  );
+}
+
 // ── Slot filtering helper ─────────────────────────────────────────
 
 function getEventsForHourSlot(
@@ -890,8 +964,20 @@ function getEventsForHourSlot(
   hour: number,
 ): CalendarViewEvent[] {
   return events.filter((evt) => {
+    if (evt.duration === 'P1D') return false; // All-day → strip, not slot.
     const evtDate = new Date(evt.start);
     return isSameDay(evtDate, day) && evtDate.getHours() === hour;
+  });
+}
+
+function getAllDayEventsForDay(
+  events: readonly CalendarViewEvent[],
+  day: Date,
+): CalendarViewEvent[] {
+  return events.filter((evt) => {
+    if (evt.duration !== 'P1D') return false;
+    const evtDate = new Date(evt.start);
+    return isSameDay(evtDate, day);
   });
 }
 
