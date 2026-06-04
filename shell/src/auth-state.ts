@@ -15,6 +15,8 @@ import {
   type ActionLogStore,
 } from './runtime/action-log.js';
 import { indexedDbActionLogStore } from './runtime/action-log-store.js';
+import { inMemoryUndoRegistry, type UndoRegistry } from './runtime/undo-registry.js';
+import { indexedDbUndoRegistry } from './runtime/undo-registry-store.js';
 import {
   indexedDbAuthStorage,
   inMemoryAuthStorage,
@@ -99,6 +101,23 @@ const actionLogStore: ActionLogStore = isBrowser
 export const actionLog: ActionLog = createActionLog({
   store: actionLogStore,
 });
+
+/**
+ * Singleton UndoRegistry (PR 20 of the undo-registry plan).
+ *
+ * In the browser, undo entries persist to IndexedDB encrypted under
+ * the same wrap key as auth tokens, AAD-domain-separated by purpose
+ * `undo.entries.v1`. Test / SSR environments fall back to the
+ * in-memory store.
+ *
+ * Failure to register an undo is best-effort: the user-facing tool
+ * call still succeeds, the user just doesn't see an Undo button for
+ * that entry. Failure modes log to console; see
+ * docs/superpowers/specs/2026-06-04-undo-registry-design.md §2.3.
+ */
+export const undoRegistry: UndoRegistry = isBrowser
+  ? indexedDbUndoRegistry({ auth: authStorage })
+  : inMemoryUndoRegistry();
 
 /**
  * Mirror of the `urn:iarsma:agent-context` URN value (D-032). Set by
