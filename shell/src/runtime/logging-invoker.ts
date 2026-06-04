@@ -131,7 +131,7 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
           opts.undoRegistry !== undefined &&
           mode === 'commit'
         ) {
-          const inv = buildInverse(name, input);
+          const inv = buildInverse(name, input, result);
           if (inv !== null) {
             try {
               await opts.undoRegistry.register({

@@ -361,7 +361,22 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
               patch: { mailboxIds: buildSoftDeletePatch(trashId, memberships) },
             },
           });
-          return result as unknown as O;
+          // PR 22 — enrich the return shape with the pre-move
+          // memberships + the resolved trash id so the loggingInvoker
+          // (buildInverse) can construct a restore-mailboxes inverse
+          // without re-fetching anything. The base MailModifyResult
+          // type doesn't know about these extras — callers that
+          // care about modifiedCount continue to read it; everyone
+          // else ignores the extras.
+          const previousMailboxesByEmail: Record<string, readonly string[]> = {};
+          for (const [emailId, mailboxes] of memberships) {
+            previousMailboxesByEmail[emailId] = mailboxes;
+          }
+          return {
+            ...result,
+            previousMailboxesByEmail,
+            trashMailboxId: trashId,
+          } as unknown as O;
         }
         case 'mail.purge': {
           // PR 19 — the hard JMAP Email/set destroy. UI-only; the MCP

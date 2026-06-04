@@ -138,4 +138,54 @@ describe('buildInverse', () => {
     expect(buildInverse('mail.purge', { emailIds: ['em-1'] })).toBeNull();
     expect(buildInverse('thread.list', { mailboxId: 'in' })).toBeNull();
   });
+
+  describe('mail.delete (PR 22)', () => {
+    it('builds the restore-mailboxes inverse from previousMailboxesByEmail', () => {
+      const inv = buildInverse(
+        'mail.delete',
+        { emailIds: ['em-1', 'em-2'] },
+        {
+          modifiedCount: 2,
+          previousMailboxesByEmail: {
+            'em-1': ['Mb-inbox'],
+            'em-2': ['Mb-inbox', 'Mb-starred'],
+          },
+          trashMailboxId: 'Mb-trash',
+        },
+      );
+      expect(inv?.inverseAction).toBe('mail.modify');
+      expect(inv?.inverseParams).toEqual({
+        emailIds: ['em-1', 'em-2'],
+        patch: {
+          mailboxIds: {
+            'Mb-inbox': true,
+            'Mb-starred': true,
+            'Mb-trash': false,
+          },
+        },
+      });
+    });
+
+    it('returns null when previousMailboxesByEmail is absent', () => {
+      // The MCP server's mail.delete handler doesn't return the
+      // soft-delete metadata (a future PR can fix that). For now,
+      // no metadata = no undo registration.
+      expect(buildInverse('mail.delete', { emailIds: ['em-1'] }, { modifiedCount: 1 })).toBeNull();
+    });
+
+    it('omits Trash-off when trashMailboxId is absent (degraded)', () => {
+      const inv = buildInverse(
+        'mail.delete',
+        { emailIds: ['em-1'] },
+        {
+          modifiedCount: 1,
+          previousMailboxesByEmail: { 'em-1': ['Mb-inbox'] },
+        },
+      );
+      expect(inv?.inverseParams).toEqual({
+        emailIds: ['em-1'],
+        patch: { mailboxIds: { 'Mb-inbox': true } },
+      });
+    });
+  });
 });

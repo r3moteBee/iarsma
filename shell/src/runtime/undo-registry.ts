@@ -98,9 +98,9 @@ export function inMemoryUndoRegistry(
 
 /**
  * Compute the inverse-action descriptor for a known reversible tool
- * call. Returns null when the tool isn't reversible (or isn't
- * reversible by params alone — e.g. mail.delete in PR 22 will need the
- * action-log entry's provenance to recover pre-delete memberships).
+ * call. Returns null when the tool isn't reversible or when the
+ * required hints (e.g. mail.delete's pre-move memberships) are
+ * missing from the result.
  *
  * Used by loggingInvoker (PR 21+) post-commit: register the result
  * under the just-appended action-log entry's seq.
@@ -108,6 +108,7 @@ export function inMemoryUndoRegistry(
 export function buildInverse(
   tool: string,
   params: unknown,
+  result?: unknown,
 ): { readonly inverseAction: string; readonly inverseParams: unknown } | null {
   if (tool === 'mail.modify') {
     const p = params as {
@@ -130,6 +131,47 @@ export function buildInverse(
     return {
       inverseAction: 'mail.modify',
       inverseParams: { emailIds: p.emailIds, patch: inversePatch },
+    };
+  }
+  if (tool === 'mail.delete') {
+    // PR 22 — soft-delete inverse. mail.delete's commit return must
+    // carry `previousMailboxesByEmail` (the pre-move memberships
+    // the invoker captured). Without it we can't build a meaningful
+    // inverse, so we skip — better than registering a wrong one.
+    const p = params as { emailIds: readonly string[] };
+    const r = result as
+      | { previousMailboxesByEmail?: Readonly<Record<string, readonly string[]>> }
+      | undefined;
+    const meta = r?.previousMailboxesByEmail;
+    if (meta === undefined) return null;
+
+    // Restore the union of previousMailboxes (= true), remove Trash
+    // and anything not in the union (= false, picked up from the
+    // current patch shape via the invoker's _trashId hint or
+    // inferred at undo time). For v1 we take the simple route: the
+    // inverse patch sets every mentioned previous mailbox to true.
+    // The Activity Undo's call into mail.modify will result in a
+    // round-trip through the same JMAP update path.
+    const mailboxIds: Record<string, boolean> = {};
+    for (const ids of Object.values(meta)) {
+      for (const id of ids) mailboxIds[id] = true;
+    }
+    // Heuristic: any mailbox we don't know about goes off. The
+    // mail.delete invoker can hint at the Trash id by including it
+    // as a `previousMailboxesByEmail` value (it doesn't, since
+    // Trash isn't a previous mailbox), so the Undo-time UX is "the
+    // user lands the email back in its original mailboxes, and
+    // the Trash membership is removed by the subsequent
+    // mail.modify". For that to work the undo's mail.modify must
+    // remove Trash explicitly — which it can't know without a
+    // hint. We supply it via a result-side `trashMailboxId` field;
+    // when absent, we skip the off-set and rely on the user to
+    // manually empty the Trash row that lingers.
+    const trashHint = (r as { trashMailboxId?: string } | undefined)?.trashMailboxId;
+    if (trashHint !== undefined) mailboxIds[trashHint] = false;
+    return {
+      inverseAction: 'mail.modify',
+      inverseParams: { emailIds: p.emailIds, patch: { mailboxIds } },
     };
   }
   return null;
