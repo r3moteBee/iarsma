@@ -377,6 +377,42 @@ describe('AgentSettingsView', () => {
     });
   });
 
+  describe('Sending section (PR 23, §8.5)', () => {
+    function openSendingTab(): void {
+      fireEvent.click(screen.getByTestId('settings-tab-sending'));
+    }
+
+    it('renders the Sending tab with the delay input', () => {
+      // Clear localStorage so the test starts from defaults.
+      localStorage.removeItem('iarsma-send-delay-ms');
+      render(<AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />);
+      openSendingTab();
+      // The labelled "Delay" input is populated with the default
+      // seconds value (10s).
+      const input = screen.getByLabelText(/delay/i) as HTMLInputElement;
+      expect(input).toBeInTheDocument();
+      expect(input.value).toBe('10');
+    });
+
+    it('writes to the sendDelayMsAtom (× 1000) when the input changes', () => {
+      localStorage.removeItem('iarsma-send-delay-ms');
+      render(<AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />);
+      openSendingTab();
+      const input = screen.getByLabelText(/delay/i) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: '5' } });
+      expect(localStorage.getItem('iarsma-send-delay-ms')).toBe('5000');
+    });
+
+    it('clamps writes above the max (30s)', () => {
+      localStorage.removeItem('iarsma-send-delay-ms');
+      render(<AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />);
+      openSendingTab();
+      const input = screen.getByLabelText(/delay/i) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: '60' } });
+      expect(localStorage.getItem('iarsma-send-delay-ms')).toBe('30000');
+    });
+  });
+
   describe('accessibility', () => {
     it('has no axe violations', async () => {
       const { container } = render(
