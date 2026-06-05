@@ -1241,8 +1241,35 @@ const searchInputRefHandle: { current: HTMLInputElement | null } = {
 function useGlobalKeyboardShortcuts(): void {
   const setOpen = useSetAtom(keyboardHelpOpenAtom);
   const setComposeState = useSetAtom(composeStateAtom);
+  const invoker = useInvoker();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // PR 25 — Cmd-Z / Ctrl-Z = undo the most recent reversible
+      // action (the highest-seq active UndoEntry). Suppressed inside
+      // editable elements so the browser's native text-undo still
+      // works while composing. Shift-modified is Redo by convention
+      // and isn't wired yet — let it pass through.
+      if ((event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey) {
+        if (isEditableElement(event.target)) return;
+        event.preventDefault();
+        void (async () => {
+          const active = await undoRegistry.list({ activeOnly: true });
+          if (active.length === 0) return;
+          // Newest first — the user's intuition is "undo the thing
+          // I just did".
+          const latest = [...active].sort(
+            (a, b) => b.forEntrySeq - a.forEntrySeq,
+          )[0]!;
+          try {
+            await invoker.invoke(latest.inverseAction, latest.inverseParams);
+            await undoRegistry.consume(latest.forEntrySeq);
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('[iarsma] cmd-z undo failed:', e);
+          }
+        })();
+        return;
+      }
       if (event.key === '?') {
         if (isEditableElement(event.target)) return;
         event.preventDefault();
@@ -1277,7 +1304,7 @@ function useGlobalKeyboardShortcuts(): void {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setOpen, setComposeState]);
+  }, [setOpen, setComposeState, invoker]);
 }
 
 function isEditableElement(target: EventTarget | null): boolean {

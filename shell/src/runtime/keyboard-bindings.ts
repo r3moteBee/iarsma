@@ -41,6 +41,11 @@ export const KEYBOARD_BINDINGS: ReadonlyArray<Binding> = [
   { keys: '?', action: 'Show this keyboard help', scope: 'global' },
   { keys: 'c', action: 'Compose new message', scope: 'global' },
   { keys: '/', action: 'Focus the search input', scope: 'global' },
+  {
+    keys: '⌘Z / Ctrl-Z',
+    action: 'Undo the most recent reversible action',
+    scope: 'global',
+  },
   { keys: 'Esc', action: 'Close any open overlay', scope: 'global' },
   // Mailbox sidebar ────────────────────────────────────────────────
   { keys: '↑', action: 'Focus previous mailbox', scope: 'mailbox-sidebar' },
