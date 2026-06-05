@@ -137,6 +137,24 @@
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+/* Outbox count badge — small accent pill on the right side of the
+ * Outbox nav row when one or more sends are pending (PR 27). */
+.outboxBadge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-on);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .navIcon {
   width: 20px;
   height: 20px;

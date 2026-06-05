@@ -38,7 +38,7 @@ import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
 import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
 import { hiddenCalendarIdsAtom, toggleCalendarId } from './runtime/calendar-visibility.js';
 import { createSendBuffer, type SendBuffer } from './runtime/send-buffer.js';
-import { SendBufferProvider } from './runtime/send-buffer-context.js';
+import { SendBufferProvider, useOutboxCount } from './runtime/send-buffer-context.js';
 import type { MailSendInput, MailSendResult } from './runtime/jmap-client.js';
 import { BottomNav } from './components/bottom-nav.js';
 import { SegmentedControl, type SegmentedOption } from './components/segmented-control.js';
@@ -51,6 +51,7 @@ import { FilesView, type FileTreeNode, type FileContent as FilesViewContent, typ
 import { githubClient, type GitHubConfig } from './runtime/github-client.js';
 import { indexedDbGitHubConfigStore, inMemoryGitHubConfigStore, type GitHubStoredConfig } from './runtime/github-config-store.js';
 import { ActivityView } from './views/activity-view.js';
+import { OutboxView } from './views/outbox-view.js';
 import { activityFiltersAtom, useActivityLog } from './runtime/use-activity-log.js';
 import { ApprovalsView } from './views/approvals-view.js';
 import {
@@ -881,6 +882,7 @@ function SignedInShell({
   // View title for mobile top bar
   const VIEW_TITLES: Record<ActiveView, string> = {
     mail: 'Mail',
+    outbox: 'Outbox',
     calendar: 'Calendar',
     contacts: 'Contacts',
     files: 'Files',
@@ -888,6 +890,8 @@ function SignedInShell({
     activity: 'Activity',
     settings: 'Settings',
   };
+
+  const outboxCount = useOutboxCount();
 
   return (
     <main
@@ -907,6 +911,7 @@ function SignedInShell({
           onThemeChange={setThemePreference}
           isOpen={sidebarOpen}
           onClose={closeSidebar}
+          outboxCount={outboxCount}
           {...(sidebarMailboxes !== undefined ? { mailboxes: sidebarMailboxes } : {})}
           onMailboxSelect={setSelectedMailboxId}
           {...(selectedMailboxId !== null ? { selectedMailboxId } : {})}
@@ -1100,6 +1105,8 @@ function SignedInShell({
               setCrudRefresh((n) => n + 1);
             }}
           />
+        ) : activeView === 'outbox' ? (
+          <OutboxView />
         ) : activeView === 'activity' ? (
           <ActivityView
             entries={activity.entries}
@@ -1164,6 +1171,7 @@ function SignedInShell({
         <BottomNav
           activeView={activeView}
           onNavigate={setActiveView}
+          outboxCount={outboxCount}
           onSignOut={onSignOut}
         />
       )}

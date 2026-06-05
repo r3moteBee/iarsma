@@ -97,6 +97,17 @@ function ActivityIcon() {
   );
 }
 
+function OutboxIcon() {
+  // Paper-plane glyph — distinct from the static Mail/envelope icon so
+  // "mail waiting to leave" reads at a glance.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 2L11 13" />
+      <path d="M22 2L15 22 11 13 2 9 22 2z" />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -172,6 +183,10 @@ export type SidebarProps = {
   readonly onThemeChange: (theme: ThemePreference) => void;
   readonly isOpen?: boolean;
   readonly onClose?: () => void;
+  /** Number of pending sends in the SendBuffer (PR 27). The Outbox
+   *  nav item hides when 0 and shows with a count badge when > 0 —
+   *  Outlook semantics: the folder appears only when relevant. */
+  readonly outboxCount?: number;
 };
 
 // ── Nav item definitions ────────────────────────────────────────
@@ -184,6 +199,7 @@ type NavDef = {
 
 const NAV_ITEMS: readonly NavDef[] = [
   { view: 'mail', label: 'Mail', icon: MailIcon },
+  { view: 'outbox', label: 'Outbox', icon: OutboxIcon },
   { view: 'calendar', label: 'Calendar', icon: CalendarIcon },
   { view: 'contacts', label: 'Contacts', icon: ContactsIcon },
   { view: 'files', label: 'Files', icon: FilesIcon },
@@ -207,6 +223,7 @@ export function Sidebar({
   onThemeChange,
   isOpen,
   onClose,
+  outboxCount,
 }: SidebarProps) {
   const hasMailboxes = mailboxes !== undefined && mailboxes.length > 0;
 
@@ -259,6 +276,18 @@ export function Sidebar({
         {/* Navigation items with mailboxes nested under Mail */}
         <nav className={styles.nav} aria-label="Views">
           {NAV_ITEMS.map(({ view, label, icon: Icon }) => {
+            // PR 27 — Outbox nav row only renders when there's at
+            // least one pending send. Active view stays selectable
+            // even when the badge drops to 0 mid-navigation; once
+            // the user navigates away it disappears.
+            if (
+              view === 'outbox' &&
+              (outboxCount === undefined || outboxCount === 0) &&
+              activeView !== 'outbox'
+            ) {
+              return null;
+            }
+            const showBadge = view === 'outbox' && (outboxCount ?? 0) > 0;
             const navButton = (
               <button
                 type="button"
@@ -266,9 +295,19 @@ export function Sidebar({
                 onClick={() => handleNavClick(view)}
                 aria-current={activeView === view ? 'page' : undefined}
                 data-testid={`nav-${view}`}
+                aria-label={
+                  showBadge
+                    ? `${label} (${outboxCount} pending)`
+                    : undefined
+                }
               >
                 <span className={styles.navIcon}><Icon /></span>
                 {label}
+                {showBadge ? (
+                  <span className={styles.outboxBadge} aria-hidden="true">
+                    {outboxCount}
+                  </span>
+                ) : null}
               </button>
             );
             // Mail gets a paired section-collapse caret when mailboxes
