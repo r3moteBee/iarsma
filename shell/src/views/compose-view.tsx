@@ -425,14 +425,38 @@ function ComposeModal(props: {
       // commits and logs, just without the preview-hash link to
       // the dry-run. A follow-up can teach the buffer to carry
       // commit options through.
+      // PR 26 — once the send actually commits, purge the autosaved
+      // draft (otherwise Send leaves a stale copy in Drafts forever).
+      // On the buffered path: the SendBuffer's onPurgeDraft runs the
+      // purge inside its fire callback, so Undo (cancel-before-fire)
+      // preserves the draft.
+      const draftToPurge = lastDraftIdRef.current ?? undefined;
       if (sendBuffer !== null && sendDelayMs > 0) {
-        sendBuffer.enqueue(input as MailSendInput, sendDelayMs);
+        sendBuffer.enqueue(
+          input as MailSendInput,
+          sendDelayMs,
+          draftToPurge !== undefined ? { purgeDraftId: draftToPurge } : undefined,
+        );
       } else {
         await sendHook.commit(
           input,
           sendPreviewHash !== null ? { previewHashHex: sendPreviewHash } : {},
         );
+        if (draftToPurge !== undefined) {
+          // Best-effort. If the purge fails, the send still
+          // succeeded — the user just sees the leftover draft and
+          // can delete it manually.
+          try {
+            await invoker.invoke('mail.purge', { emailIds: [draftToPurge] });
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.warn('[iarsma] failed to purge draft after send:', e);
+          }
+        }
       }
+      // Clear the draft ref so a re-opened Compose doesn't try to
+      // touch the now-deleted draft again.
+      lastDraftIdRef.current = null;
       setSendPreview(null);
       setSendPreviewHash(null);
       onClose();
