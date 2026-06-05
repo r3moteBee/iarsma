@@ -203,6 +203,12 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
             'mail.send',
             params,
           )) as MailSendResult,
+        // PR 26 — purge the autosaved draft once the buffered send
+        // commits. Buffer only calls this on a successful fire,
+        // never on cancel, so Undo keeps the user's draft.
+        onPurgeDraft: async (emailId) => {
+          await invoker.invoke('mail.purge', { emailIds: [emailId] });
+        },
       }),
     [invoker],
   );

@@ -92,4 +92,54 @@ describe('SendBuffer', () => {
     const b = buffer.enqueue(PARAMS, 1000);
     expect(a).not.toBe(b);
   });
+
+  describe('purgeDraftId on fire (PR 26)', () => {
+    it('purges the autosaved draft after the send commits', async () => {
+      const purge = vi.fn<(id: string) => Promise<void>>(async () => {});
+      const buffer2 = createSendBuffer({ onFire: fire, onPurgeDraft: purge });
+      buffer2.enqueue(PARAMS, 5000, { purgeDraftId: 'em-draft-1' });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fire).toHaveBeenCalled();
+      expect(purge).toHaveBeenCalledWith('em-draft-1');
+    });
+
+    it('does NOT purge the draft when the user cancels (Undo)', async () => {
+      const purge = vi.fn<(id: string) => Promise<void>>(async () => {});
+      const buffer2 = createSendBuffer({ onFire: fire, onPurgeDraft: purge });
+      const id = buffer2.enqueue(PARAMS, 5000, { purgeDraftId: 'em-draft-1' });
+      buffer2.cancel(id);
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(fire).not.toHaveBeenCalled();
+      expect(purge).not.toHaveBeenCalled();
+    });
+
+    it('does NOT purge the draft when the send fails', async () => {
+      const failingFire = vi.fn<(p: MailSendInput) => Promise<MailSendResult>>(
+        async () => {
+          throw new Error('jmap exploded');
+        },
+      );
+      const purge = vi.fn<(id: string) => Promise<void>>(async () => {});
+      const buffer2 = createSendBuffer({
+        onFire: failingFire,
+        onPurgeDraft: purge,
+      });
+      buffer2.enqueue(PARAMS, 5000, { purgeDraftId: 'em-draft-1' });
+      await vi.advanceTimersByTimeAsync(5000);
+      // advanceTimersByTimeAsync flushes the microtask queue after
+      // each timer fires, so the failing-fire's .catch path has
+      // already run by here.
+      expect(failingFire).toHaveBeenCalled();
+      expect(purge).not.toHaveBeenCalled();
+    });
+
+    it('omits purgeDraftId → no purge call (no autosaved draft path)', async () => {
+      const purge = vi.fn<(id: string) => Promise<void>>(async () => {});
+      const buffer2 = createSendBuffer({ onFire: fire, onPurgeDraft: purge });
+      buffer2.enqueue(PARAMS, 5000);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fire).toHaveBeenCalled();
+      expect(purge).not.toHaveBeenCalled();
+    });
+  });
 });
