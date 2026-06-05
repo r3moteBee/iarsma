@@ -1,0 +1,39 @@
+/* SendToast (PR 24 §8.5) — bottom-right pile of pending-send rows.
+ *
+ * One row per active SendBuffer hold. Auto-dismisses when the timer
+ * fires (the buffer list goes empty for that holdId). Click Undo →
+ * sendBuffer.cancel — no JMAP call, no log entry.
+ */
+
+.stack {
+  position: fixed;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  z-index: 50;
+  /* Touch room for mobile bottom-nav so the toast never sits on
+   * top of the nav. */
+  bottom: calc(var(--space-md) + env(safe-area-inset-bottom, 0px));
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-md);
+  color: var(--text-1);
+  min-width: 240px;
+}
+
+.label {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}

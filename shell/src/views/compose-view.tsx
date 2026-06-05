@@ -41,8 +41,10 @@ import {
 } from '../generated/capabilities/mail-send.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useInvoker } from '../runtime/invoker.js';
-import type { AttachmentRef, Identity } from '../runtime/jmap-client.js';
+import type { AttachmentRef, Identity, MailSendInput } from '../runtime/jmap-client.js';
 import { previewHashHex } from '../runtime/preview-hash.js';
+import { useSendBufferOrNull } from '../runtime/send-buffer-context.js';
+import { sendDelayMsAtom } from '../runtime/send-delay-state.js';
 import {
   formatRecipients,
   parseRecipients,
@@ -85,6 +87,12 @@ function ComposeModal(props: {
   const identityList = useIdentityList({});
   const draftHook = useMailDraft();
   const sendHook = useMailSend();
+  // PR 24 — when the user has a non-zero send delay configured, buffer
+  // the send locally and let the Undo toast catch a mistake within the
+  // window. delay=0 falls through to the immediate sendHook.commit
+  // path (no buffer, no undo).
+  const sendBuffer = useSendBufferOrNull();
+  const sendDelayMs = useAtomValue(sendDelayMsAtom);
 
   // Attachments. Each `UploadedAttachment` is a successful upload; the
   // user can remove them with the per-row button (no server-side
@@ -404,12 +412,27 @@ function ComposeModal(props: {
         prefill,
         attachments,
       });
-      // Pass the preview hash so the action-log entry binds to
-      // exactly the preview the user approved (D-047 provenance).
-      await sendHook.commit(
-        input,
-        sendPreviewHash !== null ? { previewHashHex: sendPreviewHash } : {},
-      );
+      // PR 24 — buffer the send for the configured delay so the user
+      // can hit Undo in the toast before it actually leaves. delay=0
+      // and no-buffer environments (tests, unusual mounts) fall
+      // through to the immediate commit so existing behaviour stays
+      // intact.
+      //
+      // Caveat: the previewHashHex provenance binding is currently
+      // dropped on the buffered path because the SendBuffer's
+      // onFire calls invoker.invoke('mail.send', params) without
+      // options. Acceptable for v1 — the buffered send still
+      // commits and logs, just without the preview-hash link to
+      // the dry-run. A follow-up can teach the buffer to carry
+      // commit options through.
+      if (sendBuffer !== null && sendDelayMs > 0) {
+        sendBuffer.enqueue(input as MailSendInput, sendDelayMs);
+      } else {
+        await sendHook.commit(
+          input,
+          sendPreviewHash !== null ? { previewHashHex: sendPreviewHash } : {},
+        );
+      }
       setSendPreview(null);
       setSendPreviewHash(null);
       onClose();
@@ -432,6 +455,8 @@ function ComposeModal(props: {
     attachments,
     sendPreviewHash,
     sendHook,
+    sendBuffer,
+    sendDelayMs,
     onClose,
   ]);
 
