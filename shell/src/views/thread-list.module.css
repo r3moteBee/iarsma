@@ -153,13 +153,19 @@
 }
 
 /* The primary row button — fills the <li>, hosts the click + focus.
- * Visually it IS the row; structurally it's a regular <button>. */
+ * Visually it IS the row; structurally it's a regular <button>.
+ *
+ * The horizontal gap is intentionally --space-md (not --space-sm)
+ * so the avatar reads as a distinct column from the sender text
+ * — without it the avatar and the leading edge of "From" run
+ * together at scale. Vertical padding scales via --density.
+ */
 .row {
   display: grid;
   grid-template-columns: auto 40px 1fr auto;
   grid-template-areas: 'dot av main meta';
   align-items: center;
-  gap: 0 var(--space-sm);
+  gap: 0 var(--space-md);
   width: 100%;
   min-height: var(--row-mail);
   padding: var(--space-sm) var(--space-md);
@@ -220,11 +226,34 @@
    * to non-color users; aria-label on the row carries the kind too. */
 }
 
-/* ── Main column (sender / subject / preview) ─────────────────── */
-
+/* ── Main column (sender / subject / preview) ───────────────────
+ *
+ * Bug fix (PR 28): the previous markup nested `<span>`s under .main
+ * with `margin-top: 1px` between them. Spans are inline by default,
+ * so `text-overflow: ellipsis; white-space: nowrap` had nothing to
+ * clamp — the three lines collapsed into a single inline run and
+ * "ran together" visually.
+ *
+ * Switching .main to flex-column forces each child onto its own
+ * line, the gap supplies the inter-line breathing room, and the
+ * children's own ellipsis/overflow now work because they're block
+ * boxes in a flex container.
+ *
+ * Apple Mail / Spark / Newton all use this 3-line layout (sender
+ * bold / subject medium / preview muted) — same shape we're after.
+ */
 .main {
   grid-area: main;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* 3-4px gap reads as line spacing, not as separate paragraphs.
+   * Scales with density so a Spacious user gets a hair more. */
+  gap: calc(3px * var(--density));
+  /* Vertical centering with the avatar — at row min-height 72px
+   * and 3 stacked lines (~18px each + gap), the content sits
+   * comfortably. */
+  justify-content: center;
 }
 
 .sender {
@@ -233,6 +262,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Tighter line-height than the body default so the 3-line
+   * sender/subject/preview stack stays inside the 72px row. */
+  line-height: 1.25;
 }
 
 .rowLiUnread .sender {
@@ -245,7 +277,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 1px;
+  line-height: 1.3;
 }
 
 .rowLiUnread .subject {
@@ -258,7 +290,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 1px;
+  line-height: 1.3;
 }
 
 /* ── Meta column (date + tags) ────────────────────────────────── */
@@ -269,8 +301,11 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
+  /* Align with the first text line (sender) so the date reads as
+   * its label, not floating mid-row. Padding-top accounts for the
+   * row's vertical padding + the main column's center offset. */
   align-self: start;
-  padding-top: 2px;
+  padding-top: calc(var(--space-sm) + 2px);
 }
 
 .date {
@@ -325,5 +360,34 @@
   }
   .rowLiSelected .rowActions {
     display: flex;
+  }
+}
+
+/* ── Narrow-screen layout (PR 28) ────────────────────────────────
+ *
+ * On phones and tablet-portrait, the 3-line stack is too tall and
+ * the preview row competes with the subject for legibility. Apple
+ * Mail / Gmail mobile both drop the preview at this width. Iarsma
+ * keeps sender + subject; preview lives one tap away in the
+ * reading pane.
+ *
+ * 520px is the breakpoint where the thread-list pane itself becomes
+ * the primary surface (mail-layout.module.css collapses the
+ * reading pane around the same width).
+ */
+@media (max-width: 520px) {
+  .preview {
+    display: none;
+  }
+  /* With one fewer row the avatar can shrink a hair so the line
+   * stays vertically centered. */
+  .avatar {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+  }
+  .row {
+    grid-template-columns: auto 34px 1fr auto;
+    gap: 0 var(--space-sm);
   }
 }
