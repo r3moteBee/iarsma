@@ -15,9 +15,9 @@ import {
 describe('KEYBOARD_BINDINGS', () => {
   it('declares the binding set with the expected counts per scope', () => {
     const grouped = bindingsByScope();
-    // Global: `?`, `c`, `/`, Esc (4). Mailbox sidebar 7, thread list 5,
-    // thread view 5. Bump deliberately as bindings land.
-    expect(grouped.get('global')?.length).toBe(4);
+    // Global: `?`, `c`, `/`, ⌘Z/Ctrl-Z, Esc (5). Mailbox sidebar 7,
+    // thread list 5, thread view 5. Bump deliberately as bindings land.
+    expect(grouped.get('global')?.length).toBe(5);
     expect(grouped.get('mailbox-sidebar')?.length).toBe(7);
     expect(grouped.get('thread-list')?.length).toBe(5);
     expect(grouped.get('thread-view')?.length).toBe(5);
