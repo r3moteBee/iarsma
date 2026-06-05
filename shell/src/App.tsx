@@ -37,6 +37,9 @@ import { handleCallback, signOut } from './runtime/oauth.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
 import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
 import { hiddenCalendarIdsAtom, toggleCalendarId } from './runtime/calendar-visibility.js';
+import { createSendBuffer, type SendBuffer } from './runtime/send-buffer.js';
+import { SendBufferProvider } from './runtime/send-buffer-context.js';
+import type { MailSendInput, MailSendResult } from './runtime/jmap-client.js';
 import { BottomNav } from './components/bottom-nav.js';
 import { SegmentedControl, type SegmentedOption } from './components/segmented-control.js';
 import { Sidebar } from './components/sidebar.js';
@@ -57,6 +60,7 @@ import {
 } from './runtime/approval-store.js';
 import { CalendarView } from './views/calendar-view.js';
 import { CommandPalette, type CommandItem } from './components/command-palette.js';
+import { SendToast } from './components/send-toast.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { SignedOutView } from './views/signed-out-view.js';
 import { ThreadList } from './views/thread-list.js';
@@ -184,9 +188,30 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
     setAgentContext(config.agentContext ?? null);
   }, [config, setAgentContext]);
 
+  // PR 24 — SendBuffer holds outgoing mail.send for the configured
+  // delay window. Constructed at the invoker scope so onFire goes
+  // through the full logging+caching chain (one append per actual
+  // send, not per buffer-enqueue).
+  const sendBuffer = useMemo<SendBuffer>(
+    () =>
+      createSendBuffer({
+        onFire: async (params) =>
+          // Commit path (no dryRun option) → invoker returns the
+          // natural MailSendResult, never a preview. The union
+          // return signature of invoke is satisfied by the cast.
+          (await invoker.invoke<MailSendInput, MailSendResult>(
+            'mail.send',
+            params,
+          )) as MailSendResult,
+      }),
+    [invoker],
+  );
+
   return (
     <IarsmaProvider value={invoker}>
-      <Shell config={config} />
+      <SendBufferProvider value={sendBuffer}>
+        <Shell config={config} />
+      </SendBufferProvider>
     </IarsmaProvider>
   );
 }
@@ -1139,6 +1164,7 @@ function SignedInShell({
 
       <KeyboardHelpOverlay />
       <ComposeView />
+      <SendToast />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
