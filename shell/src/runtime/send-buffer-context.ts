@@ -7,7 +7,7 @@
  * the Activity view's pending-send rows.
  */
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import type { SendBuffer } from './send-buffer.js';
 
 const SendBufferContext = createContext<SendBuffer | null>(null);
@@ -30,4 +30,21 @@ export function useSendBuffer(): SendBuffer {
  *  isolated tests). */
 export function useSendBufferOrNull(): SendBuffer | null {
   return useContext(SendBufferContext);
+}
+
+/** Polled count of active SendBuffer holds (PR 27). Returns 0 when
+ *  the provider isn't mounted. 500ms tick is coarse enough to avoid
+ *  re-rendering the sidebar every frame but fine enough that the
+ *  badge appears/disappears feel instant. */
+export function useOutboxCount(): number {
+  const buffer = useContext(SendBufferContext);
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (buffer === null) return;
+    const tick = (): void => setCount(buffer.list().length);
+    tick();
+    const handle = window.setInterval(tick, 500);
+    return () => window.clearInterval(handle);
+  }, [buffer]);
+  return count;
 }

@@ -62,6 +62,15 @@ function ActivityIcon() {
   );
 }
 
+function OutboxIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 2L11 13" />
+      <path d="M22 2L15 22 11 13 2 9 22 2z" />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -97,6 +106,9 @@ export type BottomNavProps = {
   readonly activeView: ActiveView;
   readonly onNavigate: (view: ActiveView) => void;
   readonly pendingApprovals?: number;
+  /** Number of pending sends in the SendBuffer (PR 27). When > 0, an
+   *  Outbox entry appears in the More sheet with a badge. */
+  readonly outboxCount?: number;
   readonly onSignOut: () => void;
 };
 
@@ -106,6 +118,7 @@ export function BottomNav({
   activeView,
   onNavigate,
   pendingApprovals,
+  outboxCount,
   onSignOut,
 }: BottomNavProps) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -127,7 +140,8 @@ export function BottomNav({
     },
   ];
 
-  const isSecondaryActive = activeView === 'activity' || activeView === 'settings';
+  const isSecondaryActive =
+    activeView === 'activity' || activeView === 'settings' || activeView === 'outbox';
 
   return (
     <>
@@ -145,6 +159,27 @@ export function BottomNav({
         aria-label="More options"
         data-testid="more-sheet"
       >
+        {/* Outbox only appears when there's something pending (or we're
+         *  already on it so the user can navigate back out). */}
+        {(outboxCount !== undefined && outboxCount > 0) || activeView === 'outbox' ? (
+          <button
+            type="button"
+            className={styles.sheetItem}
+            role="menuitem"
+            onClick={() => { onNavigate('outbox'); setMoreOpen(false); }}
+            aria-label={
+              outboxCount !== undefined && outboxCount > 0
+                ? `Outbox (${outboxCount} pending)`
+                : 'Outbox'
+            }
+          >
+            <span className={styles.navIcon}><OutboxIcon /></span>
+            Outbox
+            {outboxCount !== undefined && outboxCount > 0 ? (
+              <span className={styles.badge}>{outboxCount > 99 ? '99+' : outboxCount}</span>
+            ) : null}
+          </button>
+        ) : null}
         <button
           type="button"
           className={styles.sheetItem}
