@@ -455,3 +455,59 @@ Work items 11 and 12 in the plan were already partially built in Phase 0 (the di
 - Per-principal isolation of thoughts — OB1 today is single-tenant from the agent's perspective; metadata-filter conventions for per-user isolation are a future OB1 upstream item.
 - Migrating the TS adapter into a WIT-backed `MemoryBackend` component — wait for the first real caller; refactor then.
 - Replacing the file-based pin with a Renovate / Dependabot rule — manual review of OB1 diffs is the right posture until the project stabilizes.
+
+## D-055 — `mail.delete` is move-to-Trash; `mail.purge` is destroy
+**Date:** 2026-06-05
+**Decision:** PR 19 of the undo-registry plan changes the `mail.delete` tool contract: it no longer issues a JMAP `Email/set destroy`. It now resolves the `role:'trash'` mailbox, captures each email's current `mailboxIds`, and issues `Email/set update` that swaps every source mailbox for Trash. The actual destroy moves to a new `mail.purge` tool. `mail.purge` is **UI-only** — the MCP server doesn't expose it, the agent-token scope vocabulary doesn't grant it, so agents calling `mail.delete` always get the safer soft-delete path.
+
+**Why:** §8.5 of the UI redesign asks for "undo recent actions where reversible (move-back, unsend within window, restore deleted)." Plain JMAP has no `restore deleted` — `Email/set destroy` is irreversible by design. Two ways out:
+
+1. Capture the full email body + headers + attachments before each delete into an "undo cache" and re-create on restore. Expensive (full payload per delete), messy for attachments, complicates the action-log size budget.
+2. Tighten `mail.delete` to a structured `mail.modify` that moves to Trash. Destroy becomes a separate, named tool (`mail.purge`) the user reaches only from an explicit "Delete forever" affordance.
+
+Option 2 is the cheaper and more honest design. It matches the mental model every other modern mail UI uses (the inbox/trash split is what users expect); it makes the inverse trivial (`{ [trash]: false, ...sources: true }`); it sequesters the destructive surface to a single tool that the threat model can reason about.
+
+The contract change is strictly safer for every existing caller — they all now get soft delete for free. The only thing that breaks is automated workflows that explicitly relied on instant destruction. That's exactly the population we want to break loudly so they can think about it.
+
+`mail.purge` is UI-only because the threat model for "agent permanently destroys mail" is materially different from "agent moves mail to trash, where a human can fish it back out before the periodic purge." We don't grant agents the higher authority by default. If a future workflow legitimately needs agent-side purge, it should land as a new scope (`mail:purge`) with an explicit human grant, not as an accidental inheritance from `mail:delete`.
+
+**How to apply:**
+- New deletion-like tools (`event.delete`, `contact.delete`, etc.) follow the same shape when they enter the undo registry: soft-delete via the resource's equivalent of Trash, with a separate `*.purge` for the destroy. Until that lands, those tools remain irreversible.
+- The soft-delete commit returns `{ modifiedCount, previousMailboxesByEmail, trashMailboxId }`. The `previousMailboxesByEmail` field is what the UndoRegistry's `buildInverse` reads — keep it on every future tool that wants its undo derived from a captured pre-state.
+- Heterogeneous bulk deletes (one email from Inbox, another from Archive) currently use a combined `mailboxIds` patch that strips the union of source mailboxes from every email. Common case (delete N from one mailbox) works; mixed batches lose the Archive email's Archive membership. Per-email modifies via `Promise.all` is the v2 fix; flag in the buildSoftDeletePatch comment.
+- The MCP server's `mail.delete` handler routes through the shell's `mail.delete` tool (which now soft-deletes) but constructs its own JMAP calls in some paths. Those paths don't return `previousMailboxesByEmail` to the loggingInvoker, so MCP-driven deletes don't get an undo registration. Acceptable for v1 — the human's UI-driven deletes are the high-value case; agents are stuck with "I can't undo what I did" by design, which matches the rest of the agent posture.
+
+**Out of scope (follow-ups):**
+- Per-email-memberships modify (`Promise.all` over N updates) for heterogeneous bulk deletes.
+- MCP handler routing `previousMailboxesByEmail` through so agent deletes also become undoable for the human.
+- Trash retention policy (auto-purge after N days). Today the Trash mailbox is forever-until-explicitly-purged.
+- Surfacing `mail.purge` on the Trash view ("Empty trash" + per-row "Delete forever"). PR 19 only lands the tool; the UI affordance is a follow-up.
+
+## D-056 — Hold-then-send is in-memory; page close cancels
+**Date:** 2026-06-05
+**Decision:** PR 23 / 24 of the undo-registry plan introduces a `SendBuffer` that delays outgoing `mail.send` calls by a user-configured window (default 10s, range 0–30s) so an Undo toast can catch a mistake before the message actually leaves. The buffer is **in-memory only**: holds live in a `Map<holdId, Entry>` inside one tab, scheduled via `setTimeout`. A page reload, tab close, or browser crash during the hold window **cancels** the send — no JMAP call, no action-log entry.
+
+**Why:** Three behaviors we could pick from when the page closes mid-hold:
+
+1. **Cancel-on-close** (chosen). The user thought they hit Undo by closing the tab; we honor that.
+2. **Fire-on-close.** Save the hold to IndexedDB, set a wall-clock fire time, re-arm on next page open. The mail eventually goes out.
+3. **Resume-on-reopen.** Same as fire-on-close but only fire if the user reopens the tab before the wall-clock time elapses.
+
+Cancel-on-close wins because the failure mode is symmetric with the user's mental model: "I cancelled" (close tab) → mail doesn't send. "I confirmed" (no action during the hold) → mail sends. Fire-on-close inverts this — the user closes the tab thinking they aborted, the system disagrees, the mail goes out hours later from a tab they no longer have. That's the same class of bug as "are you sure you want to leave this page?" being defeatable, but with worse consequences.
+
+The action log records what actually happened **on the server**, not what the user intended. A cancelled send leaves no entry — that's correct. Adding a "cancelled-send" log entry would muddle the chain's meaning; it would also tempt callers to use the action-log as a UI-intent log rather than the audit-of-server-state surface it's defined as (D-052).
+
+In-memory also dodges a class of races: persisted holds would need clock-skew handling, cross-tab coordination (what if Tab A enqueued and Tab B is the one open at fire time?), and a recovery story when the wrap key has rotated since the hold was written. Each is solvable; together they're a feature surface we don't need for the brief's "unsend within window" ask. The window is short (10s default, 30s max); the user is at the keyboard during it. In-memory matches the actual use.
+
+`SendDelayMs = 0` is the documented opt-out: immediate send, no undo, no buffer. The Settings copy explains the trade.
+
+**How to apply:**
+- New "hold-then-act" surfaces (e.g., a future "Discard with undo" for drafts) follow the same shape: in-memory, cancel-on-close, no log entry until commit.
+- If a future requirement *does* need fire-on-close (e.g., scheduled send for a specific future time), build it as a separate JMAP-side concept that uses the server's `EmailSubmission` future-send field. **Don't extend SendBuffer** — its in-memory contract is what makes the failure modes predictable.
+- The buffered send currently drops the `previewHashHex` provenance link because `SendBuffer.onFire` calls `invoker.invoke('mail.send', params)` without commit options. Teaching the buffer to carry commit options through is a small follow-up; until it lands, buffered sends commit with `provenance.previewHashHex = ''` (the same "no preview hash" default used by scripted callers per D-047).
+
+**Out of scope (follow-ups):**
+- Persisted holds + cross-tab arbitration.
+- Server-side delayed delivery (JMAP `EmailSubmission` `holdUntil`) as an alternative path.
+- Threading `previewHashHex` through the buffer so the dry-run hash binds to the action-log entry on the buffered path.
+- A keyboard shortcut to undo the most recent pending send (Cmd-Z works for *committed* actions via the UndoRegistry; pending-send undo is toast-button only).
