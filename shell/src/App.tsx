@@ -39,7 +39,11 @@ import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.j
 import { hiddenCalendarIdsAtom, toggleCalendarId } from './runtime/calendar-visibility.js';
 import { createSendBuffer, type SendBuffer } from './runtime/send-buffer.js';
 import { SendBufferProvider, useOutboxCount } from './runtime/send-buffer-context.js';
-import type { MailSendInput, MailSendResult } from './runtime/jmap-client.js';
+import type { MailSendInput, MailSendResult, Session } from './runtime/jmap-client.js';
+import {
+  pushGenerationAtom,
+  usePushSubscription,
+} from './runtime/push-subscription.js';
 import { BottomNav } from './components/bottom-nav.js';
 import { SegmentedControl, type SegmentedOption } from './components/segmented-control.js';
 import { Sidebar } from './components/sidebar.js';
@@ -409,6 +413,26 @@ function SignedInShell({
   const bumpAuth = useSetAtom(authVersionAtom);
   const invoker = useInvoker();
   const [crudRefresh, setCrudRefresh] = useState(0);
+
+  // PR 29 — JMAP push (RFC 8620 §7) replaces the manual-refresh model.
+  // Opens an EventSource to the server's eventSourceUrl; on any
+  // StateChange, bumps pushGenerationAtom which useReadHook folds into
+  // its refetch key. The shell-side cachedInvoker handles the actual
+  // dedup + stale-while-revalidate.
+  //
+  // Connection only opens once session.data resolves (so the
+  // eventSourceUrl is known) and tears down on sign-out (session.data
+  // returns undefined when tokens clear).
+  const bumpPushGeneration = useSetAtom(pushGenerationAtom);
+  const pushSession: Session | null = useMemo(() => {
+    if (session.data === undefined) return null;
+    return session.data as Session;
+  }, [session.data]);
+  usePushSubscription({
+    session: pushSession,
+    getAuthToken: () => authStorage.loadTokens()?.accessToken ?? null,
+    onStateChange: () => bumpPushGeneration((n) => n + 1),
+  });
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
   const [mailLayout, setMailLayout] = useAtom(mailLayoutAtom);
   const [selectedMailboxId, setSelectedMailboxId] = useAtom(selectedMailboxIdAtom);

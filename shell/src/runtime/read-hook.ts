@@ -17,11 +17,12 @@
  * relevant `state` tokens change. That lands with Phase 0 work item 5.
  */
 
-import { useAtom, type PrimitiveAtom } from 'jotai';
+import { useAtom, useAtomValue, type PrimitiveAtom } from 'jotai';
 import { useCallback, useEffect, useRef } from 'react';
 import { makeResultAtomFamily } from './atoms.js';
 import { useInvoker } from './invoker.js';
 import { canonicalize } from './canonical.js';
+import { pushGenerationAtom } from './push-subscription.js';
 import { toToolError, type AsyncResult, type ToolConfig, type ToolError } from './types.js';
 
 /**
@@ -63,6 +64,11 @@ export function useReadHook<I, O>(opts: UseReadHookOptions<I>): UseReadHookResul
   const [state, setState] = useAtom(family(opts.input));
   const enabled = opts.enabled ?? true;
   const inputKey = canonicalize(opts.input);
+  // PR 29 — JMAP push state-change bumps pushGenerationAtom. Folding
+  // it into the cache key forces a refetch on the next render after
+  // every push tick. Cache-hits via cachedInvoker stay cheap; the
+  // stale-while-revalidate path catches up in one round-trip.
+  const pushGeneration = useAtomValue(pushGenerationAtom);
   const lastKeyRef = useRef<string | null>(null);
 
   const fetchOnce = useCallback(async () => {
@@ -77,10 +83,11 @@ export function useReadHook<I, O>(opts: UseReadHookOptions<I>): UseReadHookResul
 
   useEffect(() => {
     if (!enabled) return;
-    if (lastKeyRef.current === inputKey) return;
-    lastKeyRef.current = inputKey;
+    const compositeKey = `${inputKey}#${pushGeneration}`;
+    if (lastKeyRef.current === compositeKey) return;
+    lastKeyRef.current = compositeKey;
     void fetchOnce();
-  }, [enabled, inputKey, fetchOnce]);
+  }, [enabled, inputKey, pushGeneration, fetchOnce]);
 
   return {
     data: state.status === 'success' ? state.data : undefined,
