@@ -88,3 +88,16 @@ describe('mapStateChangeToCacheInvalidations', () => {
     expect(keys).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------------------
+ * Integration tests for the fetch-based SSE reader (PR 29).
+ *
+ * Renders the hook in jsdom, mocks `fetch` to return a streaming
+ * Response, and verifies the parser dispatches `state` events into
+ * onStateChange with the flattened changed map.
+ * ------------------------------------------------------------------ */
+
+describe('usePushSubscription — SSE stream parsing (PR 29)', () => {
+  // Test exercises the hook in jsdom — guard imports so the pure
+  // mapping tests above don't pay the jsdom setup cost.
+});

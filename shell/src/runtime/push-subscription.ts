@@ -13,11 +13,20 @@
  *     it reopens. This avoids holding idle SSE connections for
  *     backgrounded tabs.
  *
- * Auth: the bearer token is appended as a query parameter
- * (`access_token=<token>`) per RFC 8620 §7.3.1 — EventSource does not
- * support custom request headers.
+ * Auth: Stalwart's `/jmap/eventsource/` endpoint requires
+ * `Authorization: Bearer <token>`. Browsers don't allow setting
+ * headers on the native EventSource API, so we use a fetch-based
+ * stream reader that parses the `text/event-stream` protocol
+ * manually. The implementation handles:
+ *   - SSE field lines (`event:`, `data:`, `:` comments for pings)
+ *   - Multi-line `data:` payloads (CRLF or LF terminators)
+ *   - Reconnect on stream end / network error, with a 1.5s backoff
+ *
+ * PR 29 — the original Phase-3c implementation used native
+ * EventSource + `?access_token=`, which Stalwart rejects with 401.
  */
 
+import { atom } from 'jotai';
 import { useEffect, useRef } from 'react';
 import type { Session } from './jmap-client.js';
 import type { CachePurposeKey } from './cache-storage.js';
@@ -29,6 +38,18 @@ import type { CachePurposeKey } from './cache-storage.js';
 export type StateChange = {
   readonly changed: Readonly<Record<string, string>>;
 };
+
+/**
+ * Monotonic generation counter that bumps on every JMAP push state
+ * change. Read-hooks include it as a refetch dep, so any subscription
+ * to this atom causes a re-fetch the next time the hook's effect runs.
+ *
+ * Coarser than per-type invalidation (every state change nudges every
+ * read-hook), but the stale-while-revalidate path on cachedInvoker
+ * makes the redundant calls cheap — cache hits return immediately while
+ * the actual JMAP fetch happens in the background. PR 29.
+ */
+export const pushGenerationAtom = atom(0);
 
 // ──────────────────────────────────────────────────────────────────────
 // Pure mapping function
@@ -92,67 +113,161 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
     }
 
     const session = opts.session;
-    let es: EventSource | null = null;
+    let abort: AbortController | null = null;
     let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
 
-    function buildUrl(): string | null {
-      const token = getAuthTokenRef.current();
-      if (token === null) {
-        return null;
-      }
-      // RFC 8620 §7.3: append query parameters.
+    function buildUrl(): string {
       const separator = session.eventSourceUrl.includes('?') ? '&' : '?';
-      return `${session.eventSourceUrl}${separator}types=*&closeafter=state&ping=30&access_token=${encodeURIComponent(token)}`;
+      return `${session.eventSourceUrl}${separator}types=*&closeafter=state&ping=30`;
     }
 
-    function open(): void {
-      close();
-      const url = buildUrl();
-      if (url === null) {
-        // eslint-disable-next-line no-console
-        console.warn('[iarsma] push-subscription: no auth token, skipping EventSource open');
-        return;
-      }
-      es = new EventSource(url);
-
-      es.addEventListener('state', (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data as string) as {
-            changed?: Record<string, Record<string, string>>;
-          };
-          // JMAP StateChange object (RFC 8620 §7.1): the `changed` map
-          // is `accountId → { typeName → stateToken }`. We flatten all
-          // accounts into a single type→state map because iarsma is
-          // single-account.
-          if (data.changed !== undefined) {
-            const merged: Record<string, string> = {};
-            for (const accountChanges of Object.values(data.changed)) {
-              for (const [type, state] of Object.entries(accountChanges)) {
-                merged[type] = state;
-              }
-            }
-            if (Object.keys(merged).length > 0) {
-              onStateChangeRef.current({ changed: merged });
+    function handleStateEventData(rawData: string): void {
+      try {
+        const data = JSON.parse(rawData) as {
+          changed?: Record<string, Record<string, string>>;
+        };
+        // JMAP StateChange object (RFC 8620 §7.1): the `changed` map
+        // is `accountId → { typeName → stateToken }`. Flatten all
+        // accounts into a single type→state map because iarsma is
+        // single-account.
+        if (data.changed !== undefined) {
+          const merged: Record<string, string> = {};
+          for (const accountChanges of Object.values(data.changed)) {
+            for (const [type, state] of Object.entries(accountChanges)) {
+              merged[type] = state;
             }
           }
-        } catch {
-          // eslint-disable-next-line no-console
-          console.warn('[iarsma] push-subscription: failed to parse state event');
+          if (Object.keys(merged).length > 0) {
+            onStateChangeRef.current({ changed: merged });
+          }
         }
-      });
-
-      es.onerror = () => {
-        // EventSource auto-reconnects on error (browser built-in).
-        // Log a warning so transient issues are visible in devtools.
+      } catch {
         // eslint-disable-next-line no-console
-        console.warn('[iarsma] push-subscription: EventSource error (will auto-reconnect)');
-      };
+        console.warn('[iarsma] push-subscription: failed to parse state event');
+      }
+    }
+
+    // Minimal text/event-stream parser per WHATWG HTML §9.2.5 — handles
+    // SSE field lines + multi-line data + flush on blank line.
+    function parseSseChunk(
+      chunk: string,
+      state: { buffer: string; eventName: string; dataLines: string[] },
+    ): void {
+      state.buffer += chunk;
+      let nlIndex: number;
+      while ((nlIndex = state.buffer.indexOf('\n')) !== -1) {
+        let line = state.buffer.slice(0, nlIndex);
+        state.buffer = state.buffer.slice(nlIndex + 1);
+        // Strip optional trailing \r from CRLF line endings.
+        if (line.endsWith('\r')) line = line.slice(0, -1);
+        if (line === '') {
+          // Blank line = dispatch.
+          if (state.dataLines.length > 0) {
+            const payload = state.dataLines.join('\n');
+            // Stalwart fires the StateChange as event: 'state'. The
+            // generic 'message' channel is unused.
+            if (state.eventName === 'state' || state.eventName === 'message') {
+              handleStateEventData(payload);
+            }
+          }
+          state.eventName = 'message';
+          state.dataLines = [];
+          continue;
+        }
+        if (line.startsWith(':')) {
+          // Comment / keep-alive ping — ignore.
+          continue;
+        }
+        const colon = line.indexOf(':');
+        const field = colon === -1 ? line : line.slice(0, colon);
+        let value = colon === -1 ? '' : line.slice(colon + 1);
+        // One leading space is allowed and stripped (HTML spec).
+        if (value.startsWith(' ')) value = value.slice(1);
+        if (field === 'event') {
+          state.eventName = value;
+        } else if (field === 'data') {
+          state.dataLines.push(value);
+        }
+        // 'id' and 'retry' fields ignored — we don't resume on Last-
+        // Event-ID; the next StateChange after reconnect catches us up.
+      }
+    }
+
+    async function open(): Promise<void> {
+      close();
+      if (cancelled) return;
+      const token = getAuthTokenRef.current();
+      if (token === null) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[iarsma] push-subscription: no auth token; skipping SSE open',
+        );
+        return;
+      }
+      abort = new AbortController();
+      const ac = abort;
+      try {
+        const response = await fetch(buildUrl(), {
+          method: 'GET',
+          headers: {
+            accept: 'text/event-stream',
+            authorization: `Bearer ${token}`,
+          },
+          signal: ac.signal,
+          cache: 'no-store',
+        });
+        if (!response.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[iarsma] push-subscription: SSE returned ${response.status} ${response.statusText}`,
+          );
+          scheduleReconnect();
+          return;
+        }
+        const body = response.body;
+        if (body === null) {
+          scheduleReconnect();
+          return;
+        }
+        const reader = body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        const state = { buffer: '', eventName: 'message', dataLines: [] as string[] };
+        while (!ac.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          parseSseChunk(decoder.decode(value, { stream: true }), state);
+        }
+        // Stream ended without abort — server closed (e.g. closeafter=state).
+        // Reconnect so we keep receiving the next round of events.
+        if (!ac.signal.aborted) scheduleReconnect();
+      } catch (e) {
+        if (!ac.signal.aborted) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] push-subscription: SSE error', e);
+          scheduleReconnect();
+        }
+      }
+    }
+
+    function scheduleReconnect(): void {
+      if (cancelled) return;
+      if (reconnectTimer !== null) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        void open();
+      }, 1500);
     }
 
     function close(): void {
-      if (es !== null) {
-        es.close();
-        es = null;
+      if (abort !== null) {
+        abort.abort();
+        abort = null;
+      }
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
     }
 
@@ -172,18 +287,17 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
           clearTimeout(hiddenTimer);
           hiddenTimer = null;
         }
-        // Reopen if closed (either by the hidden timer or by an error
-        // that exhausted reconnect attempts — unlikely but defensive).
-        if (es === null) {
-          open();
+        if (abort === null && reconnectTimer === null) {
+          void open();
         }
       }
     }
 
-    open();
+    void open();
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
+      cancelled = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       if (hiddenTimer !== null) {
         clearTimeout(hiddenTimer);
