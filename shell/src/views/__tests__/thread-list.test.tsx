@@ -577,6 +577,50 @@ describe('ThreadList — search mode', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// Per-row Delete (PR 31) — soft delete outside Trash
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadList — per-row Delete outside Trash (PR 31)', () => {
+  it('clicking Delete on an Inbox row calls mail.delete (soft, no confirm)', async () => {
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb01', role: 'inbox' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+      'mail.delete': async (input) => {
+        calls.push({ name: 'mail.delete', input });
+        return { modifiedCount: 1 };
+      },
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    // The button label is the soft-delete variant ("Delete:"), not
+    // "Delete forever:".
+    const deleteButtons = screen.getAllByRole('button', { name: /^delete: /i });
+    expect(deleteButtons.length).toBe(FIXTURES.threads.length);
+    // No confirm dialog opens on click; the mail.delete call happens
+    // straight through.
+    fireEvent.click(deleteButtons[0]!);
+    await waitFor(() => {
+      expect(calls.find((c) => c.name === 'mail.delete')).not.toBeUndefined();
+    });
+    expect((calls[0]?.input as { emailIds: string[] }).emailIds).toEqual([
+      FIXTURES.threads[0]!.latestEmail.id,
+    ]);
+    // No "Delete forever?" dialog should be in the DOM.
+    expect(screen.queryByRole('dialog', { name: /delete forever\?/i })).not.toBeInTheDocument();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
 // Trash UI — PR 30
 // ──────────────────────────────────────────────────────────────────────
 
@@ -623,10 +667,9 @@ describe('ThreadList — Trash UI (PR 30)', () => {
     renderTrash();
     await waitForList();
     fireEvent.click(screen.getByRole('button', { name: /empty trash/i }));
-    expect(screen.getByRole('dialog', { name: /empty trash\?/i })).toBeInTheDocument();
-    expect(
-      screen.getByText(/permanently deleted/i),
-    ).toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', { name: /empty trash\?/i });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText(/permanently deleted/i)).toBeInTheDocument();
   });
 
   it('confirming Empty trash calls mail.list-ids then mail.purge with the returned ids', async () => {
@@ -669,6 +712,45 @@ describe('ThreadList — Trash UI (PR 30)', () => {
     );
     await waitForList();
     expect(screen.queryByRole('button', { name: /empty trash/i })).not.toBeInTheDocument();
+  });
+
+  it('per-row Delete in Trash opens a confirm + calls mail.purge', async () => {
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb-trash', role: 'trash' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+      'mail.list-ids': async () => ({ emailIds: [] }),
+      'mail.purge': async (input) => {
+        calls.push({ name: 'mail.purge', input });
+        return { deletedCount: 1 };
+      },
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb-trash">
+            <ThreadList />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    // Each row has a Delete forever button (since we're in Trash).
+    const deleteButtons = screen.getAllByRole('button', { name: /delete forever:/i });
+    expect(deleteButtons.length).toBe(FIXTURES.threads.length);
+    fireEvent.click(deleteButtons[0]!);
+    // Confirm dialog appears (the per-row purge dialog).
+    const dialog = screen.getByRole('dialog', { name: /delete forever\?/i });
+    expect(dialog).toBeInTheDocument();
+    // Confirm — should call mail.purge with that row's emailId.
+    fireEvent.click(within(dialog).getByRole('button', { name: /delete forever/i }));
+    await waitFor(() => {
+      expect(calls.find((c) => c.name === 'mail.purge')).not.toBeUndefined();
+    });
+    expect((calls[0]?.input as { emailIds: string[] }).emailIds).toEqual([
+      FIXTURES.threads[0]!.latestEmail.id,
+    ]);
   });
 
   it('skips the purge call when the trash mailbox is already empty', async () => {

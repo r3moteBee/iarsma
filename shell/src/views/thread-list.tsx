@@ -410,6 +410,52 @@ function ThreadListBody(props: {
     [invoker, refetch],
   );
 
+  // PR 31 — per-row delete. Outside Trash, this is a soft delete to
+  // Trash (mail.delete) — no confirm because Activity Undo exists.
+  // Inside Trash, the same icon means "Delete forever" (mail.purge)
+  // and goes through a confirm dialog handled in the row component.
+  const handleSoftDelete = useCallback(
+    (emailId: string) => {
+      void (async () => {
+        try {
+          await invoker.invoke('mail.delete', { emailIds: [emailId] });
+          await refetch();
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] mail.delete failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch],
+  );
+
+  // Track which row (if any) is awaiting purge-forever confirmation.
+  // null = no confirm open; a string is the emailId being prompted.
+  const [purgeConfirmEmailId, setPurgeConfirmEmailId] = useState<string | null>(null);
+  const [purgingRow, setPurgingRow] = useState(false);
+
+  const handlePurgeRow = useCallback(
+    (emailId: string): void => {
+      setPurgeConfirmEmailId(emailId);
+    },
+    [],
+  );
+
+  const confirmPurgeRow = useCallback(async (): Promise<void> => {
+    if (purgeConfirmEmailId === null) return;
+    setPurgingRow(true);
+    try {
+      await invoker.invoke('mail.purge', { emailIds: [purgeConfirmEmailId] });
+      setPurgeConfirmEmailId(null);
+      await refetch();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[iarsma] mail.purge (row) failed:', e);
+    } finally {
+      setPurgingRow(false);
+    }
+  }, [invoker, purgeConfirmEmailId, refetch]);
+
   const items = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
 
@@ -530,6 +576,8 @@ function ThreadListBody(props: {
                 onClick={() => onSelect(vi.index)}
                 onToggleFlag={(id, current) => toggleKeyword(id, '$flagged', !current)}
                 onToggleRead={(id, current) => toggleKeyword(id, '$seen', !current)}
+                onDelete={isTrash ? handlePurgeRow : handleSoftDelete}
+                deleteMode={isTrash ? 'purge' : 'soft'}
               />
             );
           })}
@@ -595,6 +643,43 @@ function ThreadListBody(props: {
           <Notice variant="error">{emptyError}</Notice>
         ) : null}
       </Dialog>
+      {/* PR 31 — per-row Delete forever confirm. Only triggered
+       *  from rows inside the Trash mailbox; outside Trash the
+       *  row Delete is a soft-delete with no confirm (Activity
+       *  Undo catches mistakes). */}
+      <Dialog
+        open={purgeConfirmEmailId !== null}
+        onClose={() => {
+          if (purgingRow) return;
+          setPurgeConfirmEmailId(null);
+        }}
+        title="Delete forever?"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setPurgeConfirmEmailId(null)}
+              disabled={purgingRow}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                void confirmPurgeRow();
+              }}
+              disabled={purgingRow}
+            >
+              {purgingRow ? 'Deleting…' : 'Delete forever'}
+            </Button>
+          </>
+        }
+      >
+        <p>
+          This message will be permanently deleted. This can't be
+          undone.
+        </p>
+      </Dialog>
     </section>
   );
 }
@@ -614,6 +699,13 @@ type ThreadRowProps = {
    *  state. */
   readonly onToggleFlag: (emailId: string, current: boolean) => void;
   readonly onToggleRead: (emailId: string, current: boolean) => void;
+  /** PR 31 — per-row delete. Outside Trash this is fire-and-forget
+   *  soft-delete (Activity undo catches mistakes). In Trash the
+   *  parent opens a confirm dialog before calling. */
+  readonly onDelete: (emailId: string) => void;
+  /** 'soft' → mail.delete + no confirm; 'purge' → ask parent to
+   *  open the destructive confirm dialog. PR 31. */
+  readonly deleteMode: 'soft' | 'purge';
 };
 
 const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(props, ref) {
@@ -627,6 +719,8 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
     onClick,
     onToggleFlag,
     onToggleRead,
+    onDelete,
+    deleteMode,
   } = props;
   const e = thread.latestEmail;
   const seen = e.keywords.find((k) => k.name === '$seen')?.value ?? false;
@@ -754,6 +848,22 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
         >
           {seen ? <MarkUnreadIcon /> : <MarkReadIcon />}
         </button>
+        <button
+          type="button"
+          className={styles['iconBtn']}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            onDelete(e.id);
+          }}
+          aria-label={
+            deleteMode === 'purge'
+              ? `Delete forever: ${subject}`
+              : `Delete: ${subject}`
+          }
+          title={deleteMode === 'purge' ? 'Delete forever' : 'Delete'}
+        >
+          <TrashIcon />
+        </button>
       </div>
     </li>
   );
@@ -792,6 +902,18 @@ function MarkUnreadIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="4" width="20" height="16" rx="2" />
       <path d="M22 7l-10 7L2 7" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2" />
     </svg>
   );
 }
