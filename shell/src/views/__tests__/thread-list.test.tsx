@@ -575,3 +575,115 @@ describe('ThreadList — search mode', () => {
     });
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Trash UI — PR 30
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadList — Trash UI (PR 30)', () => {
+  function renderTrash(opts: {
+    listIds?: () => Promise<{ emailIds: string[] }>;
+    purge?: () => Promise<{ deletedCount: number }>;
+  } = {}) {
+    const listIds = opts.listIds ?? (async () => ({ emailIds: ['em-1', 'em-2'] }));
+    const purge = opts.purge ?? (async () => ({ deletedCount: 2 }));
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb-trash', role: 'trash' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+      'mail.list-ids': async (input) => {
+        calls.push({ name: 'mail.list-ids', input });
+        return listIds();
+      },
+      'mail.purge': async (input) => {
+        calls.push({ name: 'mail.purge', input });
+        return purge();
+      },
+    });
+    const r = render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb-trash">
+            <ThreadList />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    return { ...r, calls };
+  }
+
+  it('shows the Empty trash button when the active mailbox is Trash', async () => {
+    renderTrash();
+    await waitForList();
+    expect(screen.getByRole('button', { name: /empty trash/i })).toBeInTheDocument();
+  });
+
+  it('clicking Empty trash opens a confirm dialog explaining permanence', async () => {
+    renderTrash();
+    await waitForList();
+    fireEvent.click(screen.getByRole('button', { name: /empty trash/i }));
+    expect(screen.getByRole('dialog', { name: /empty trash\?/i })).toBeInTheDocument();
+    expect(
+      screen.getByText(/permanently deleted/i),
+    ).toBeInTheDocument();
+  });
+
+  it('confirming Empty trash calls mail.list-ids then mail.purge with the returned ids', async () => {
+    const { calls } = renderTrash();
+    await waitForList();
+    fireEvent.click(screen.getByRole('button', { name: /empty trash/i }));
+    const dialog = screen.getByRole('dialog', { name: /empty trash\?/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /empty trash/i }));
+    await waitFor(() => {
+      expect(calls.some((c) => c.name === 'mail.purge')).toBe(true);
+    });
+    const purgeCall = calls.find((c) => c.name === 'mail.purge');
+    expect(purgeCall?.input).toEqual({ emailIds: ['em-1', 'em-2'] });
+  });
+
+  it('cancel closes the dialog without calling mail.purge', async () => {
+    const { calls } = renderTrash();
+    await waitForList();
+    fireEvent.click(screen.getByRole('button', { name: /empty trash/i }));
+    const dialog = screen.getByRole('dialog', { name: /empty trash\?/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /cancel/i }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(calls.find((c) => c.name === 'mail.purge')).toBeUndefined();
+  });
+
+  it('does NOT show Empty trash in a non-trash mailbox', async () => {
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    expect(screen.queryByRole('button', { name: /empty trash/i })).not.toBeInTheDocument();
+  });
+
+  it('skips the purge call when the trash mailbox is already empty', async () => {
+    const { calls } = renderTrash({
+      listIds: async () => ({ emailIds: [] }),
+    });
+    await waitForList();
+    fireEvent.click(screen.getByRole('button', { name: /empty trash/i }));
+    const dialog = screen.getByRole('dialog', { name: /empty trash\?/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /empty trash/i }));
+    await waitFor(() => {
+      expect(calls.some((c) => c.name === 'mail.list-ids')).toBe(true);
+    });
+    // Empty result → no purge call attempted.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(calls.find((c) => c.name === 'mail.purge')).toBeUndefined();
+  });
+});

@@ -32,6 +32,7 @@ import {
   fetchContactUpdateCommit,
   fetchEventCreateCommit,
   fetchEventDeleteCommit,
+  fetchEmailIdsInMailbox,
   fetchEmailMailboxMemberships,
   fetchEventGet,
   fetchEventList,
@@ -377,6 +378,24 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             previousMailboxesByEmail,
             trashMailboxId: trashId,
           } as unknown as O;
+        }
+        case 'mail.list-ids': {
+          // PR 30 — non-destructive helper that returns all email ids
+          // in a given mailbox (up to maxIds, default 500). Powers
+          // the Trash view's "Empty trash" affordance without
+          // requiring a thread-by-thread walk.
+          const params = _input as unknown as {
+            mailboxId: string;
+            maxIds?: number;
+          };
+          const session = await getSession();
+          const ids = await fetchEmailIdsInMailbox({
+            ...opts,
+            session,
+            mailboxId: params.mailboxId,
+            ...(params.maxIds !== undefined ? { maxIds: params.maxIds } : {}),
+          });
+          return { emailIds: ids } as unknown as O;
         }
         case 'mail.purge': {
           // PR 19 — the hard JMAP Email/set destroy. UI-only; the MCP

@@ -39,6 +39,8 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import { Button } from '../components/button.js';
+import { Dialog } from '../components/dialog.js';
 import { EmptyState } from '../components/empty-state.js';
 import { Notice } from '../components/notice.js';
 import { Skeleton } from '../components/skeleton.js';
@@ -163,6 +165,7 @@ function ThreadListSearchMode({ query }: { readonly query: string }) {
       error={error}
       isLoading={isLoading}
       isDrafts={false}
+      isTrash={false}
       emptyMessage={`No results for "${query}".`}
       mailboxId={null}
       title={`Search: ${query}`}
@@ -183,6 +186,7 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
   }, [mailboxes.data, mailboxId]);
 
   const isDrafts = currentMailbox?.role === 'drafts';
+  const isTrash = currentMailbox?.role === 'trash';
 
   // Reset thread selection when the mailbox changes.
   useEffect(() => {
@@ -206,7 +210,10 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
       error={error}
       isLoading={isLoading}
       isDrafts={isDrafts}
-      emptyMessage="No threads in this mailbox."
+      isTrash={isTrash}
+      emptyMessage={
+        isTrash ? 'Trash is empty.' : 'No threads in this mailbox.'
+      }
       mailboxId={mailboxId}
       title={title}
       countText={countText}
@@ -220,19 +227,25 @@ function ThreadListBody(props: {
   readonly error: ToolError | undefined;
   readonly isLoading: boolean;
   readonly isDrafts: boolean;
+  /** Mailbox role === 'trash' (PR 30). Toggles destructive UI:
+   *  toolbar Empty trash button + per-row Delete forever. */
+  readonly isTrash: boolean;
   readonly emptyMessage: string;
   readonly mailboxId: string | null;
   readonly title: string;
   readonly countText: string | null;
   readonly onRefresh: () => Promise<void> | void;
 }) {
-  const { data, error, isLoading, isDrafts, emptyMessage, title, countText, onRefresh } =
+  const { data, error, isLoading, isDrafts, isTrash, emptyMessage, mailboxId, title, countText, onRefresh } =
     props;
   const refetch = onRefresh;
   const selectedThreadId = useAtomValue(selectedThreadIdAtom);
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
   const setComposeState = useSetAtom(composeStateAtom);
   const invoker = useInvoker();
+  const [emptyConfirmOpen, setEmptyConfirmOpen] = useState(false);
+  const [emptying, setEmptying] = useState(false);
+  const [emptyError, setEmptyError] = useState<string | null>(null);
 
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
 
@@ -400,6 +413,33 @@ function ThreadListBody(props: {
   const items = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
 
+  // PR 30 — Empty trash. Queries the trash mailbox for email ids
+  // via mail.list-ids (up to maxIds=500 per call; clicking again
+  // handles more), then calls mail.purge with the batch.
+  const handleEmptyTrash = async (): Promise<void> => {
+    if (!isTrash || mailboxId === null) return;
+    setEmptyError(null);
+    setEmptying(true);
+    try {
+      const listResult = await invoker.invoke<unknown, { emailIds: string[] }>(
+        'mail.list-ids',
+        { mailboxId },
+      );
+      const ids = (listResult as { emailIds: string[] }).emailIds ?? [];
+      if (ids.length === 0) {
+        setEmptyConfirmOpen(false);
+        return;
+      }
+      await invoker.invoke('mail.purge', { emailIds: ids });
+      setEmptyConfirmOpen(false);
+      await refetch();
+    } catch (e) {
+      setEmptyError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEmptying(false);
+    }
+  };
+
   // Always render the header — even on loading/empty/error states —
   // so the pane doesn't blink between "no chrome" and "header + body"
   // when data lands. Only the inner body switches by state.
@@ -424,7 +464,19 @@ function ThreadListBody(props: {
           <RefreshIcon />
         </button>
         <span className={styles['toolbarSpacer']} />
-        {/* Multi-select + bulk actions land in PR 4.5. */}
+        {/* PR 30 — Empty trash button. Only shown in the Trash
+         *  mailbox. Disabled when there's nothing to empty. */}
+        {isTrash ? (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setEmptyConfirmOpen(true)}
+            disabled={(data?.total ?? 0) === 0 || emptying}
+            aria-label="Empty trash"
+          >
+            {emptying ? 'Emptying…' : 'Empty trash'}
+          </Button>
+        ) : null}
       </div>
     </header>
   );
@@ -500,6 +552,49 @@ function ThreadListBody(props: {
     >
       {headerEl}
       {body}
+      <Dialog
+        open={emptyConfirmOpen}
+        onClose={() => {
+          if (emptying) return;
+          setEmptyConfirmOpen(false);
+          setEmptyError(null);
+        }}
+        title="Empty trash?"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setEmptyConfirmOpen(false)}
+              disabled={emptying}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                void handleEmptyTrash();
+              }}
+              disabled={emptying}
+            >
+              {emptying ? 'Emptying…' : 'Empty trash'}
+            </Button>
+          </>
+        }
+      >
+        <p>
+          Every message in the Trash will be permanently deleted.
+          This can't be undone.
+        </p>
+        {(data?.total ?? 0) > 500 ? (
+          <p>
+            Trash holds {data?.total} messages; this clears the first
+            500. Click Empty trash again to continue.
+          </p>
+        ) : null}
+        {emptyError !== null ? (
+          <Notice variant="error">{emptyError}</Notice>
+        ) : null}
+      </Dialog>
     </section>
   );
 }
