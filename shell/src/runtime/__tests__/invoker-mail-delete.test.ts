@@ -218,6 +218,46 @@ describe('mail.delete (two-stage soft delete, PR 19)', () => {
   });
 });
 
+describe('mail.list-ids (PR 30, powers Empty trash)', () => {
+  it('returns the emailIds returned by Email/query against the mailbox', async () => {
+    const queryOk = JSON.stringify({
+      methodResponses: [
+        ['Email/query', { accountId: 'c', ids: ['em-1', 'em-2', 'em-3'] }, '0'],
+      ],
+    });
+    const { fetch: fetchMock, calls } = makeSequencedFetch([queryOk]);
+    const inv = jmapInvoker({
+      baseUrl: 'https://jmap.example.test',
+      getAuthToken: () => 'tok',
+      fetch: fetchMock,
+    });
+
+    const result = await inv.invoke('mail.list-ids', { mailboxId: 'Mb-trash' });
+    expect(result).toEqual({ emailIds: ['em-1', 'em-2', 'em-3'] });
+
+    // The call must be an Email/query with the inMailbox filter.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/Email\/query/);
+    expect(calls[0]).toMatch(/"inMailbox":"Mb-trash"/);
+    // And — critically — does NOT chain an Email/get; we just want ids.
+    expect(calls[0]).not.toMatch(/Email\/get/);
+  });
+
+  it('returns an empty list when the mailbox is empty', async () => {
+    const queryOk = JSON.stringify({
+      methodResponses: [['Email/query', { accountId: 'c', ids: [] }, '0']],
+    });
+    const { fetch: fetchMock } = makeSequencedFetch([queryOk]);
+    const inv = jmapInvoker({
+      baseUrl: 'https://jmap.example.test',
+      getAuthToken: () => 'tok',
+      fetch: fetchMock,
+    });
+    const result = await inv.invoke('mail.list-ids', { mailboxId: 'Mb-trash' });
+    expect(result).toEqual({ emailIds: [] });
+  });
+});
+
 describe('mail.purge (hard destroy, PR 19)', () => {
   it('issues Email/set destroy for the given emailIds', async () => {
     const { fetch: fetchMock, calls } = makeSequencedFetch([EMAIL_SET_DESTROY_OK]);

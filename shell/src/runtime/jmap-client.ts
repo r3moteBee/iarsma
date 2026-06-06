@@ -326,6 +326,100 @@ export async function fetchEmailMailboxMemberships(
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Email/query — lean id-only fetch (PR 30, Empty trash)
+// ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Return all email ids in `mailboxId`, paginating internally up to
+ * `maxIds`. Used by the Trash view to drive bulk mail.purge without
+ * caring about thread structure or message bodies.
+ *
+ * If the mailbox has more than `maxIds` emails (default 500), the
+ * caller gets the first slice; another call after the purge gets
+ * the next slice. UX: Empty trash with 600 emails takes two clicks
+ * — acceptable trade vs. unbounded query/purge round trips.
+ */
+export async function fetchEmailIdsInMailbox(
+  opts: JmapClientOptions & {
+    readonly session: Session;
+    readonly mailboxId: string;
+    readonly maxIds?: number;
+  },
+): Promise<readonly string[]> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const limit = opts.maxIds ?? 500;
+  const body = JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: opts.session.primaryAccountIdMail,
+          filter: { inMailbox: opts.mailboxId },
+          limit,
+        },
+        '0',
+      ],
+    ],
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Email/query (ids) returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/query (ids) response: ${describe(e)}`,
+      e,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Email/query (ids): not an object.');
+  }
+  const responses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(responses) || responses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/query (ids): no methodResponses array.',
+    );
+  }
+  const first = responses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) {
+    throw makeError(
+      'jmap_parse_error',
+      'Email/query (ids): malformed methodResponse entry.',
+    );
+  }
+  const result = first[1] as { ids?: unknown };
+  if (!Array.isArray(result.ids)) return [];
+  return result.ids.filter((id): id is string => typeof id === 'string');
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Email/query + Email/get (chained — thread.list)
 // ──────────────────────────────────────────────────────────────────────
 
