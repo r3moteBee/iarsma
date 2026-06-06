@@ -29,6 +29,7 @@
 
 import { createHash } from 'node:crypto';
 import { makeScopeSet, type ScopeSet } from './scope-filter.js';
+import { TOOL_SCOPES } from './tool-scopes.js';
 import type { ResolvedIdentity, TokenEntry, TokenStore } from './token-store.js';
 
 export type StalwartSessionTokenStoreOptions = {
@@ -41,12 +42,19 @@ export type StalwartSessionTokenStoreOptions = {
   /** Override clock for tests. Epoch millis. */
   readonly now?: () => number;
   /**
-   * Permissive-scope override. Default: empty scope set (no MCP-side
-   * filtering; Stalwart enforces). Tests may pass a non-empty set to
-   * verify the dispatcher's scope-gating path.
+   * Scope set the identity carries. Default (PR 39 / D-058): every
+   * scope iarsma's tool registry knows about, so the dispatcher's
+   * scope gate passes through and Stalwart enforces the real
+   * permission set on each JMAP method call. Tests pass a narrower
+   * set to exercise the dispatcher's denial path.
    */
   readonly scopes?: ScopeSet;
 };
+
+/** All distinct scope strings the MCP server's tool registry uses. */
+const ALL_KNOWN_SCOPES: ScopeSet = makeScopeSet(
+  [...new Set(Object.values(TOOL_SCOPES))],
+);
 
 type CachedResult =
   | { readonly kind: 'valid'; readonly identity: ResolvedIdentity; readonly expiresAt: number }
@@ -65,7 +73,7 @@ export function stalwartSessionTokenStore(
     cacheTtlMs = 30_000,
     fetch: fetchFn = globalThis.fetch,
     now = Date.now,
-    scopes = makeScopeSet([]),
+    scopes = ALL_KNOWN_SCOPES,
   } = opts;
 
   const cache = new Map<string, CachedResult>();
