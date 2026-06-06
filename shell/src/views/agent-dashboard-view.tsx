@@ -1,23 +1,31 @@
 /**
- * AgentDashboardView — top-level "Agents" surface (Phase 4 #9 / PR 38).
+ * AgentDashboardView — single surface for agent observability +
+ * lifecycle (Phase 4 #9 / PR 38; consolidated with token issuance
+ * + revoke in PR 40).
  *
- * Pure presentational; consumes pre-derived metrics from
- * `useAgentDashboard`. Issue + revoke flows stay in Settings → Agent
- * tokens; this view is observability — what each agent is doing,
- * when it last ran, and which ones haven't done anything.
+ * Layout (top → bottom):
+ *   1. Aggregate cards (active count, actions / commits / dry-runs
+ *      in last 24h).
+ *   2. Collapsible MCP connection docs.
+ *   3. Issue-new-token form.
+ *   4. Per-agent table — scopes, status, last-used, in-window
+ *      action counts, Activity link, Revoke button.
  *
- * The kill-switch button is a navigation shortcut to Settings (the
- * actual revoke confirmation dialog lives there). Filtering Activity
- * by agent is one click — pre-sets the actor filter and navigates in.
+ * Pure presentational; the only state it manages is the per-row
+ * Revoke confirm dialog. Aggregate metrics + agent rollups arrive
+ * pre-derived from `useAgentDashboard`.
  */
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Badge } from '../components/badge.js';
 import { Button } from '../components/button.js';
+import { Dialog } from '../components/dialog.js';
+import type { IssuedToken } from '../runtime/agent-token-issuer.js';
 import type {
   AgentDashboardAggregate,
   AgentDashboardEntry,
 } from '../runtime/use-agent-dashboard.js';
+import { IssueTokenForm, McpConnectionDocs } from './agent-settings-view.js';
 import styles from './agent-dashboard-view.module.css';
 
 // ── Props ─────────────────────────────────────────────────────────
@@ -25,10 +33,16 @@ import styles from './agent-dashboard-view.module.css';
 export type AgentDashboardViewProps = {
   readonly aggregate: AgentDashboardAggregate;
   readonly agents: readonly AgentDashboardEntry[];
-  /** Navigate to Settings → Agent tokens for revoke / issue flows. */
-  readonly onManageTokens: () => void;
   /** Pre-filter Activity by this agent's name + navigate to it. */
   readonly onViewActivity: (agentName: string) => void;
+  /** Issue a new agent token (resolves to the secret payload). */
+  readonly onIssue: (
+    name: string,
+    scopes: readonly string[],
+    lifetimeSec: number,
+  ) => Promise<IssuedToken>;
+  /** Revoke an existing agent token by id. */
+  readonly onRevoke: (tokenId: string) => Promise<void>;
 };
 
 // ── Component ─────────────────────────────────────────────────────
@@ -36,27 +50,20 @@ export type AgentDashboardViewProps = {
 export function AgentDashboardView({
   aggregate,
   agents,
-  onManageTokens,
   onViewActivity,
+  onIssue,
+  onRevoke,
 }: AgentDashboardViewProps) {
   return (
     <section className={styles.dashboard} aria-labelledby="agents-heading">
       <header className={styles.header}>
         <h1 id="agents-heading">Agents</h1>
-        <button
-          type="button"
-          className={styles.manageButton}
-          onClick={onManageTokens}
-          data-testid="manage-tokens-button"
-        >
-          Manage tokens
-        </button>
       </header>
 
       <p className={styles.lede}>
-        Observability for the agents currently authorized against this
-        mailbox. Issue or revoke tokens under{' '}
-        <strong>Settings → Agent tokens</strong>.
+        Issue, revoke, and audit the agents authorized against this
+        mailbox. Token records live in Stalwart, so this list and the
+        Revoke buttons work from any device you sign in on.
       </p>
 
       {/* Aggregate metrics — large readable numbers, no chart yet. */}
@@ -82,11 +89,13 @@ export function AgentDashboardView({
         />
       </div>
 
+      <McpConnectionDocs />
+      <IssueTokenForm onIssue={onIssue} />
+
       {/* Per-agent table. Empty state when the user hasn't issued any. */}
       {agents.length === 0 ? (
         <div className={styles.empty} data-testid="agents-empty-state">
-          <p>No agent tokens issued yet.</p>
-          <Button onClick={onManageTokens}>Issue your first token</Button>
+          <p>No agent tokens issued yet — use the form above to create one.</p>
         </div>
       ) : (
         <div className={styles.tableWrap}>
@@ -108,55 +117,132 @@ export function AgentDashboardView({
             </thead>
             <tbody>
               {agents.map((a) => (
-                <tr
+                <AgentRow
                   key={a.tokenId}
-                  data-testid={`agent-row-${a.tokenId}`}
-                  className={a.revoked ? styles.revokedRow : undefined}
-                >
-                  <td>
-                    <span className={styles.agentName}>{a.name}</span>
-                    <span className={styles.tokenIdHint} title={a.tokenId}>
-                      {shortId(a.tokenId)}
-                    </span>
-                  </td>
-                  <td>
-                    <ul className={styles.scopeList}>
-                      {a.scopes.map((s) => (
-                        <li key={s}>
-                          <Badge variant="scope" color="neutral">{s}</Badge>
-                        </li>
-                      ))}
-                    </ul>
-                  </td>
-                  <td>{statusFor(a)}</td>
-                  <td>{a.lastUsedAt !== undefined ? formatTimestamp(a.lastUsedAt) : '—'}</td>
-                  <td className={styles.numericCol}>
-                    {a.actionsInWindow}
-                    {a.actionsInWindow > 0 ? (
-                      <span className={styles.commitSplit}>
-                        {' '}({a.commitsInWindow} commit, {a.dryRunsInWindow} dry)
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className={styles.numericCol}>{a.totalActions}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className={styles.activityLink}
-                      onClick={() => onViewActivity(a.name)}
-                      aria-label={`View activity for ${a.name}`}
-                      data-testid={`view-activity-${a.tokenId}`}
-                    >
-                      Activity →
-                    </button>
-                  </td>
-                </tr>
+                  agent={a}
+                  onViewActivity={onViewActivity}
+                  onRevoke={onRevoke}
+                />
               ))}
             </tbody>
           </table>
         </div>
       )}
     </section>
+  );
+}
+
+// ── Per-row component (owns its revoke confirm-dialog state) ─────
+
+function AgentRow({
+  agent: a,
+  onViewActivity,
+  onRevoke,
+}: {
+  readonly agent: AgentDashboardEntry;
+  readonly onViewActivity: (agentName: string) => void;
+  readonly onRevoke: (tokenId: string) => Promise<void>;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+
+  const closeConfirm = (): void => {
+    if (revoking) return;
+    setConfirmOpen(false);
+  };
+
+  const handleRevoke = async (): Promise<void> => {
+    setRevoking(true);
+    try {
+      await onRevoke(a.tokenId);
+      setConfirmOpen(false);
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  return (
+    <tr
+      data-testid={`agent-row-${a.tokenId}`}
+      className={a.revoked ? styles.revokedRow : undefined}
+    >
+      <td>
+        <span className={styles.agentName}>{a.name}</span>
+        <span className={styles.tokenIdHint} title={a.tokenId}>
+          {shortId(a.tokenId)}
+        </span>
+      </td>
+      <td>
+        <ul className={styles.scopeList}>
+          {a.scopes.map((s) => (
+            <li key={s}>
+              <Badge variant="scope" color="neutral">{s}</Badge>
+            </li>
+          ))}
+        </ul>
+      </td>
+      <td>{statusFor(a)}</td>
+      <td>{a.lastUsedAt !== undefined ? formatTimestamp(a.lastUsedAt) : '—'}</td>
+      <td className={styles.numericCol}>
+        {a.actionsInWindow}
+        {a.actionsInWindow > 0 ? (
+          <span className={styles.commitSplit}>
+            {' '}({a.commitsInWindow} commit, {a.dryRunsInWindow} dry)
+          </span>
+        ) : null}
+      </td>
+      <td className={styles.numericCol}>{a.totalActions}</td>
+      <td>
+        <button
+          type="button"
+          className={styles.activityLink}
+          onClick={() => onViewActivity(a.name)}
+          aria-label={`View activity for ${a.name}`}
+          data-testid={`view-activity-${a.tokenId}`}
+        >
+          Activity →
+        </button>
+        {!a.revoked ? (
+          <>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => setConfirmOpen(true)}
+              aria-label={`Revoke ${a.name}`}
+            >
+              Revoke
+            </Button>
+            <Dialog
+              open={confirmOpen}
+              onClose={closeConfirm}
+              title="Revoke token?"
+              footer={
+                <>
+                  <Button variant="secondary" onClick={closeConfirm} disabled={revoking}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      void handleRevoke();
+                    }}
+                    disabled={revoking}
+                  >
+                    {revoking ? 'Revoking…' : 'Revoke'}
+                  </Button>
+                </>
+              }
+            >
+              <p>
+                Revoke the <strong>{a.name}</strong> token? Agents
+                using it will start getting 401s within a few seconds.
+                This can't be undone.
+              </p>
+            </Dialog>
+          </>
+        ) : null}
+      </td>
+    </tr>
   );
 }
 

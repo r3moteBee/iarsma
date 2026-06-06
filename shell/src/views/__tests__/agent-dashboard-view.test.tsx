@@ -1,13 +1,29 @@
 /**
  * @vitest-environment jsdom
  *
- * Tests for AgentDashboardView (PR 38).
+ * Tests for AgentDashboardView (PR 38; revoke + issue inline in PR 40).
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// Same shim agent-settings-view.test.tsx uses — the dashboard now
+// pulls in IssueTokenForm + McpConnectionDocs which transitively
+// import wasm-bindings via invoker.ts.
+vi.mock('@iarsma/wasm-bindings/jmap-client', () => ({
+  mailbox: {},
+  email: {},
+  identity: {},
+}));
+vi.mock('@iarsma/wasm-bindings/action-log', () => ({
+  chain: {
+    canonicalize: () => new Uint8Array(0),
+    verifyLinks: () => undefined,
+  },
+}));
+
 import { AgentDashboardView } from '../agent-dashboard-view.js';
+import type { IssuedToken } from '../../runtime/agent-token-issuer.js';
 import type {
   AgentDashboardAggregate,
   AgentDashboardEntry,
@@ -38,6 +54,19 @@ function agent(over: Partial<AgentDashboardEntry>): AgentDashboardEntry {
   };
 }
 
+function noopIssue(): Promise<IssuedToken> {
+  return Promise.resolve({
+    tokenId: 'fake',
+    clientId: 'fake',
+    clientSecret: 'fake-secret',
+    expiresAt: '2027-01-01T00:00:00Z',
+  });
+}
+
+function noopRevoke(): Promise<void> {
+  return Promise.resolve();
+}
+
 afterEach(cleanup);
 
 describe('AgentDashboardView', () => {
@@ -46,18 +75,43 @@ describe('AgentDashboardView', () => {
       <AgentDashboardView
         aggregate={AGG}
         agents={[]}
-        onManageTokens={() => {}}
         onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
       />,
     );
     expect(screen.getByText(/active agents/i)).toBeInTheDocument();
     expect(screen.getByText(/actions \(last 24h\)/i)).toBeInTheDocument();
     expect(screen.getByText(/commits \(last 24h\)/i)).toBeInTheDocument();
     expect(screen.getByText(/dry-runs \(last 24h\)/i)).toBeInTheDocument();
-    // Numeric values render in their own .aggregateValue divs — the
-    // exact-text selector returns one match per number.
-    expect(screen.getByText('5')).toBeInTheDocument(); // totalActions
-    expect(screen.getByText('3')).toBeInTheDocument(); // commits
+    expect(screen.getByText('5')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+  });
+
+  it('renders the inline Issue form (moved from Settings in PR 40)', () => {
+    render(
+      <AgentDashboardView
+        aggregate={AGG}
+        agents={[]}
+        onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
+      />,
+    );
+    expect(screen.getByText(/issue new token/i)).toBeInTheDocument();
+  });
+
+  it('renders the collapsible MCP docs (moved from Settings in PR 40)', () => {
+    render(
+      <AgentDashboardView
+        aggregate={AGG}
+        agents={[]}
+        onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
+      />,
+    );
+    expect(screen.getByText(/how to connect an mcp agent/i)).toBeInTheDocument();
   });
 
   it('shows the empty-state CTA when no agents exist', () => {
@@ -65,8 +119,9 @@ describe('AgentDashboardView', () => {
       <AgentDashboardView
         aggregate={{ ...AGG, activeAgentCount: 0 }}
         agents={[]}
-        onManageTokens={() => {}}
         onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
       />,
     );
     expect(screen.getByTestId('agents-empty-state')).toBeInTheDocument();
@@ -93,15 +148,14 @@ describe('AgentDashboardView', () => {
             scopes: ['mail:read'],
           }),
         ]}
-        onManageTokens={() => {}}
         onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
       />,
     );
     expect(screen.getByTestId('agent-row-t-alice')).toBeInTheDocument();
     expect(screen.getByTestId('agent-row-t-bob')).toBeInTheDocument();
-    // Alice has activity → her count + per-row split appears.
     expect(screen.getByText(/2 commit, 1 dry/)).toBeInTheDocument();
-    // Bob has no activity → "—" rendered for last-used.
     const bobRow = screen.getByTestId('agent-row-t-bob');
     expect(bobRow.textContent).toContain('—');
   });
@@ -113,8 +167,9 @@ describe('AgentDashboardView', () => {
         agents={[
           agent({ tokenId: 't-zomb', name: 'zombie', revoked: true }),
         ]}
-        onManageTokens={() => {}}
         onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
       />,
     );
     expect(screen.getByText(/revoked/i)).toBeInTheDocument();
@@ -131,25 +186,12 @@ describe('AgentDashboardView', () => {
             expiresAt: '2020-01-01T00:00:00Z',
           }),
         ]}
-        onManageTokens={() => {}}
         onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
       />,
     );
     expect(screen.getByText(/expired/i)).toBeInTheDocument();
-  });
-
-  it('wires onManageTokens to the Manage tokens button', () => {
-    const onManageTokens = vi.fn();
-    render(
-      <AgentDashboardView
-        aggregate={AGG}
-        agents={[]}
-        onManageTokens={onManageTokens}
-        onViewActivity={() => {}}
-      />,
-    );
-    fireEvent.click(screen.getByTestId('manage-tokens-button'));
-    expect(onManageTokens).toHaveBeenCalledTimes(1);
   });
 
   it('wires onViewActivity to the per-row Activity link with the agent name', () => {
@@ -158,11 +200,45 @@ describe('AgentDashboardView', () => {
       <AgentDashboardView
         aggregate={AGG}
         agents={[agent({ tokenId: 't-alice', name: 'alice' })]}
-        onManageTokens={() => {}}
         onViewActivity={onViewActivity}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
       />,
     );
     fireEvent.click(screen.getByTestId('view-activity-t-alice'));
     expect(onViewActivity).toHaveBeenCalledWith('alice');
+  });
+
+  it('Revoke button opens a confirm dialog and calls onRevoke on confirm', async () => {
+    const onRevoke = vi.fn(noopRevoke);
+    render(
+      <AgentDashboardView
+        aggregate={AGG}
+        agents={[agent({ tokenId: 't-rev', name: 'doomed' })]}
+        onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={onRevoke}
+      />,
+    );
+    const row = screen.getByTestId('agent-row-t-rev');
+    fireEvent.click(within(row).getByRole('button', { name: /^Revoke doomed/ }));
+    // Dialog open — its own "Revoke" button is the destructive one.
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Revoke$/ }));
+    expect(onRevoke).toHaveBeenCalledWith('t-rev');
+  });
+
+  it('Revoke button is absent on already-revoked rows', () => {
+    render(
+      <AgentDashboardView
+        aggregate={AGG}
+        agents={[agent({ tokenId: 't-z', name: 'zombie', revoked: true })]}
+        onViewActivity={() => {}}
+        onIssue={noopIssue}
+        onRevoke={noopRevoke}
+      />,
+    );
+    const row = screen.getByTestId('agent-row-t-z');
+    expect(within(row).queryByRole('button', { name: /^Revoke zombie/ })).toBeNull();
   });
 });
