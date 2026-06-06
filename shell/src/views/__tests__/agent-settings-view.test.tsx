@@ -15,8 +15,24 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// Stub the wasm-bindings barrels — the runtime invoker.ts (now
+// pulled in transitively by VacationSection's useInvoker) loads
+// the JMAP WASM module on import, which jsdom can't satisfy.
+vi.mock('@iarsma/wasm-bindings/jmap-client', () => ({
+  mailbox: {},
+  email: {},
+  identity: {},
+}));
+vi.mock('@iarsma/wasm-bindings/action-log', () => ({
+  chain: {
+    canonicalize: () => new Uint8Array(0),
+    verifyLinks: () => undefined,
+  },
+}));
+
 import type { AgentTokenInfo, IssuedToken } from '../../runtime/agent-token-issuer.js';
 import { runAxe } from '../../__tests__/util/axe.js';
+import { IarsmaProvider } from '../../runtime/invoker.js';
 import { AgentSettingsView } from '../agent-settings-view.js';
 
 afterEach(cleanup);
@@ -410,6 +426,110 @@ describe('AgentSettingsView', () => {
       const input = screen.getByLabelText(/delay/i) as HTMLInputElement;
       fireEvent.change(input, { target: { value: '60' } });
       expect(localStorage.getItem('iarsma-send-delay-ms')).toBe('30000');
+    });
+  });
+
+  describe('Vacation responder section (PR 32)', () => {
+    function openVacationTab(): void {
+      fireEvent.click(screen.getByTestId('settings-tab-vacation'));
+    }
+
+    function renderWithInvoker(
+      invoker: { invoke: ReturnType<typeof vi.fn> },
+    ) {
+      // VacationSection calls useInvoker() on mount; we wrap the
+      // settings view in an IarsmaProvider so the hook resolves.
+      return render(
+        <IarsmaProvider value={invoker}>
+          <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />
+        </IarsmaProvider>,
+      );
+    }
+
+    it('hydrates the form from vacation.get on mount', async () => {
+      const invoke = vi.fn(async (name: string) => {
+        if (name === 'vacation.get') {
+          return {
+            id: 'singleton',
+            isEnabled: true,
+            subject: 'Out of office',
+            textBody: 'Back next week.',
+            fromDate: '2026-06-10T00:00:00Z',
+          };
+        }
+        return undefined;
+      });
+      renderWithInvoker({ invoke });
+      openVacationTab();
+      // The status checkbox reflects the server's isEnabled=true.
+      await waitFor(() => {
+        const cb = screen.getByLabelText(/enable vacation responder/i) as HTMLInputElement;
+        expect(cb.checked).toBe(true);
+      });
+      // Subject + body are populated.
+      expect((screen.getByLabelText(/subject/i) as HTMLInputElement).value).toBe(
+        'Out of office',
+      );
+      expect((screen.getByLabelText(/message/i) as HTMLTextAreaElement).value).toBe(
+        'Back next week.',
+      );
+      // Date field strips the ISO time component.
+      expect((screen.getByLabelText(/start date/i) as HTMLInputElement).value).toBe(
+        '2026-06-10',
+      );
+    });
+
+    it('Save calls vacation.set with the form contents', async () => {
+      const calls: Array<{ name: string; input: unknown }> = [];
+      const invoke = vi.fn(async (name: string, input: unknown) => {
+        calls.push({ name, input });
+        if (name === 'vacation.get') {
+          return { id: 'singleton', isEnabled: false };
+        }
+        return { ok: true };
+      });
+      renderWithInvoker({ invoke });
+      openVacationTab();
+      // Wait for initial load.
+      await waitFor(() => {
+        expect(calls.some((c) => c.name === 'vacation.get')).toBe(true);
+      });
+      // Toggle on + fill subject + body.
+      fireEvent.click(screen.getByLabelText(/enable vacation responder/i));
+      fireEvent.change(screen.getByLabelText(/subject/i), {
+        target: { value: 'On vacation' },
+      });
+      fireEvent.change(screen.getByLabelText(/message/i), {
+        target: { value: 'Back Monday.' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+      await waitFor(() => {
+        expect(calls.find((c) => c.name === 'vacation.set')).toBeDefined();
+      });
+      const setCall = calls.find((c) => c.name === 'vacation.set');
+      expect(setCall?.input).toMatchObject({
+        isEnabled: true,
+        subject: 'On vacation',
+        textBody: 'Back Monday.',
+      });
+    });
+
+    it('disables Save when enabled is on but subject is empty', async () => {
+      const invoke = vi.fn(async (name: string) => {
+        if (name === 'vacation.get') {
+          return { id: 'singleton', isEnabled: false };
+        }
+        return undefined;
+      });
+      renderWithInvoker({ invoke });
+      openVacationTab();
+      await waitFor(() => {
+        expect(screen.getByLabelText(/enable vacation responder/i)).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByLabelText(/enable vacation responder/i));
+      // Save is disabled because subject is empty.
+      const save = screen.getByRole('button', { name: /^save$/i });
+      expect(save).toBeDisabled();
     });
   });
 
