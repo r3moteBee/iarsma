@@ -197,6 +197,39 @@ function ComposeModal(props: {
   const [bccText, setBccText] = useState(formatRecipients(prefill.bcc));
   const [subject, setSubject] = useState(prefill.subject ?? '');
   const [bodyHtml, setBodyHtml] = useState(prefill.bodyHtml ?? '');
+
+  // PR 33 — auto-prepend the selected identity's textSignature when
+  // composing a brand-new message (no prefill body, no draft body
+  // yet). Replies + drafts skip this so the quoted content / saved
+  // composition is never clobbered. Fires once per Compose session.
+  const sigInsertedRef = useRef(false);
+  // Auto-insert effect itself — placed here so it runs after the
+  // body state is declared above. Fires once selectedIdentity
+  // resolves; the ref guard prevents re-insertion.
+  useEffect(() => {
+    if (sigInsertedRef.current) return;
+    if (selectedIdentity === null) return;
+    if ((prefill.bodyHtml ?? '') !== '') {
+      // Reply / draft / forward — leave existing content untouched.
+      // Future polish: insert above the quoted block on replies.
+      sigInsertedRef.current = true;
+      return;
+    }
+    if (bodyHtml !== '') {
+      // The user already typed something — don't clobber it.
+      sigInsertedRef.current = true;
+      return;
+    }
+    const sig = selectedIdentity.textSignature ?? '';
+    if (sig.trim() === '') {
+      sigInsertedRef.current = true;
+      return;
+    }
+    // Two newlines between the (empty) message area and the
+    // signature so the contenteditable shows a clean break.
+    setBodyHtml(`\n\n${sig}`);
+    sigInsertedRef.current = true;
+  }, [selectedIdentity, prefill.bodyHtml, bodyHtml]);
   // `bodyText` is derived from the composer's HTML for the JMAP request.
   // Phase 2 ships single-format-at-a-time: if the user pasted HTML we
   // send HTML; otherwise a plain-text body. The composer is HTML-first
