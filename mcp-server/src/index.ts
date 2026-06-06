@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
 import { stalwartIntrospectionTokenStore } from './stalwart-introspection-token-store.js';
+import { stalwartSessionTokenStore } from './stalwart-session-token-store.js';
 import { fileTokenStore, type TokenStore } from './token-store.js';
 import { createFilesListHandler } from './handlers/files-list.js';
 import { createFilesReadHandler } from './handlers/files-read.js';
@@ -148,16 +149,22 @@ async function main(): Promise<void> {
   // surfaces expose the same tool list.
   const httpConfig = loadHttpTransportConfig(process.env);
   if (httpConfig !== null) {
-    // Token store selection (precedence: introspection > tokens.json > legacy).
+    // Token store selection (D-058 precedence):
     //
-    //   1. Introspection (D-057, multi-tenant): when
-    //      `IARSMA_INTROSPECTION_ADMIN_TOKEN` is set, every request's
-    //      bearer is validated against Stalwart's OIDC introspection
-    //      endpoint. The agent's own bearer flows through to JMAP.
-    //   2. File store: pre-D-057 single-host mode — `IARSMA_TOKENS_FILE`
-    //      points at a JSON file with per-agent secrets.
-    //   3. None: only the legacy `IARSMA_MCP_HTTP_TOKEN` static
-    //      verifier in http-transport applies (dev-only).
+    //   1. **session-validate** (default, D-058): when
+    //      `IARSMA_JMAP_BASE_URL` is set, every request's bearer is
+    //      validated by making a JMAP `/.well-known/jmap` call. Works
+    //      for Stalwart API keys (created via the webmail's
+    //      `x:ApiKey/set` flow) and any other Stalwart-issued
+    //      bearer that authenticates against JMAP. No operator
+    //      credential.
+    //   2. **introspection** (D-057, legacy OAuth deploys): set
+    //      `IARSMA_INTROSPECTION_ADMIN_TOKEN` to force the older
+    //      OAuth introspection path. Only useful for deploys that
+    //      still issue agent tokens through `oauth/token`
+    //      `client_credentials` instead of `x:ApiKey/set`.
+    //   3. **tokens.json** (legacy single-host): `IARSMA_TOKENS_FILE`.
+    //   4. None: only the static `IARSMA_MCP_HTTP_TOKEN` verifier.
     let tokenStore: TokenStore | undefined;
     let tokenStoreLabel = '<none — legacy IARSMA_MCP_HTTP_TOKEN only>';
     const adminToken = process.env['IARSMA_INTROSPECTION_ADMIN_TOKEN']?.trim();
@@ -170,6 +177,11 @@ async function main(): Promise<void> {
         adminToken,
       });
       tokenStoreLabel = `stalwart-introspection @ ${introspectionIssuer}`;
+    } else if (sessionGetDeps !== null) {
+      tokenStore = stalwartSessionTokenStore({
+        jmapBaseUrl: sessionGetDeps.jmapBaseUrl,
+      });
+      tokenStoreLabel = `stalwart-session @ ${sessionGetDeps.jmapBaseUrl}`;
     } else {
       const tokensFile = process.env['IARSMA_TOKENS_FILE'];
       if (tokensFile !== undefined && tokensFile !== '') {

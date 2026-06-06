@@ -2,33 +2,34 @@
 
 Single-command deployment for the agent-facing MCP server alongside an existing Stalwart instance. Multi-tenant: one server handles agents for every mailbox on the Stalwart host. The webmail (`iarsma-base-webmail.zip` served by Stalwart) handles user-facing token issuance + audit; this recipe brings up the always-on process that agents actually connect to.
 
-## How it works (D-057)
+## How it works (D-058)
 
-Each user issues their own OAuth tokens from the Iarsma webmail's "Agent tokens" panel; tokens come straight from Stalwart's OIDC `client_credentials` endpoint. Agents present those tokens directly to the MCP server, which validates each one at request time by POSTing to Stalwart's introspection endpoint (RFC 7662). The agent's own bearer is then forwarded verbatim to JMAP — calls run with the user's permissions, never an operator credential.
+Each user issues their own **Stalwart API key** from the Iarsma webmail's "Agent tokens" panel; the key is created server-side via JMAP `x:ApiKey/set` with Replace-mode permissions matching the agent's iarsma scopes. Agents present the API key secret as a Bearer token to the MCP server, which validates each one at request time by making a JMAP session call — Stalwart returns 401 if the key is revoked or unknown, 200 otherwise. The same bearer is then forwarded verbatim to JMAP for the agent's tool calls.
 
 This means:
 
-- **You never paste agent tokens into the server's `.env`.** Operators only configure one credential — the introspection admin token — and that's it. Adding/revoking agents happens entirely in the webmail UI.
-- **One MCP server serves all users.** Run it once per Stalwart host. Agents on Alice's mailbox and Bob's mailbox both connect to the same URL; the introspection result tells the server which mailbox each request belongs to.
-- **Revocations propagate within seconds.** Introspection results are cached for 30s; once a token is revoked in the UI, the next cache miss returns "inactive" and the agent is locked out.
+- **No operator credential.** The MCP server has no shared secret of its own. Every agent's own bearer is what authorizes both the validation step and the downstream JMAP calls.
+- **List + revoke from any device.** Stalwart owns the canonical key list. Log in on a different machine, you see the same agents; revoke from a fresh browser, it sticks within seconds (cache TTL).
+- **One MCP server serves all users.** Run it once per Stalwart host. Agents on Alice's mailbox and Bob's mailbox both connect to the same URL; the session response tells the server which mailbox each request belongs to.
+- **Revocations propagate within seconds.** Validation results are cached for 30s; once a key is revoked in the UI, the next cache miss returns 401 and the agent is locked out.
 
 ## What you need before starting
 
 - **An existing Stalwart instance** reachable over HTTPS (e.g. `https://sw-mail.example.test`). This recipe does NOT install or manage Stalwart.
-- **A Stalwart admin Bearer token** for the introspection credential — the same kind of token you use to manage the server via JMAP `x:Action`. Create one under your admin account before starting.
 - **Docker** and the **Docker Compose plugin** installed on the host you want to run the MCP server on (your pantheon server, a side container next to Stalwart, anywhere reachable by the agents you'll point at it).
 - The repo checked out: `git clone https://github.com/r3moteBee/iarsma.git`
 
-## Three-step quickstart
+## Two-step quickstart
 
 ```bash
 cd iarsma/deployment/mcp
 
-# 1. Copy the env template and fill in your values.
+# 1. Copy the env template and set IARSMA_JMAP_BASE_URL to your
+#    Stalwart URL. No operator credential needed — every agent
+#    bearer is validated by Stalwart on each call.
 cp .env.example .env
 $EDITOR .env
-#   IARSMA_JMAP_BASE_URL              → your Stalwart URL
-#   IARSMA_INTROSPECTION_ADMIN_TOKEN  → your Stalwart admin Bearer
+#   IARSMA_JMAP_BASE_URL → your Stalwart URL
 
 # 2. Build the image + start the server.
 docker compose up -d
@@ -37,7 +38,7 @@ docker compose up -d
 docker compose logs -f iarsma-mcp
 # Expect:
 #   "Streamable HTTP transport listening on 0.0.0.0:8765 ..."
-#   "Token store: stalwart-introspection @ https://sw-mail.example.test"
+#   "Token store: stalwart-session @ https://sw-mail.example.test"
 ```
 
 That's it. **Any user** with a token issued from their Iarsma webmail can now connect their agent to `http://<this-host>:8765/mcp` with `Authorization: Bearer <their-issued-token>`.
@@ -106,10 +107,10 @@ Then set `IARSMA_WEBMAIL_MCP_URL=https://mcp.example.test/mcp` in `.env` so the 
 | Symptom | Likely cause |
 |---|---|
 | `Streamable HTTP transport listening` doesn't appear | Missing `IARSMA_MCP_HTTP_PORT`. The server falls back to stdio if HTTP env isn't configured. |
-| Logs show `Token store: <none — legacy IARSMA_MCP_HTTP_TOKEN only>` | `IARSMA_INTROSPECTION_ADMIN_TOKEN` is unset. Set it and restart. |
-| Every agent gets `401 Unauthorized` | The bearer the agent presents doesn't introspect to `active=true`. Check the token is unrevoked in the webmail UI and not expired. |
-| First agent call hangs, then 401 | The MCP server can't reach Stalwart's `/.well-known/openid-configuration`. Verify `IARSMA_JMAP_BASE_URL` is reachable from inside the container. |
-| `introspection error: 401 Unauthorized` in logs | `IARSMA_INTROSPECTION_ADMIN_TOKEN` is wrong, expired, or doesn't have admin scope on Stalwart. |
+| Logs show `Token store: <none — legacy IARSMA_MCP_HTTP_TOKEN only>` | `IARSMA_JMAP_BASE_URL` is unset. Set it and restart. |
+| Every agent gets `401 Unauthorized` | The bearer the agent presents doesn't authenticate against Stalwart. Check the key is unrevoked under the webmail's Agent tokens panel (it'll be there since Stalwart owns the list now). |
+| First agent call hangs, then 401 | The MCP server can't reach Stalwart's `/.well-known/jmap`. Verify `IARSMA_JMAP_BASE_URL` is reachable from inside the container. |
+| `session-validate non-OK 5xx` in logs | Stalwart returned an unexpected error to the validation call. Investigate Stalwart-side; the MCP server fails closed and rejects the request. |
 | Agents get `not_implemented` for tools | `IARSMA_JMAP_BASE_URL` not set — the JMAP handler couldn't bind upstream. |
 | Container exits immediately | `docker compose logs iarsma-mcp` — most likely a missing required env var, or `IARSMA_JMAP_BASE_URL` isn't reachable from inside the container. |
 | Port `8765` already used | Override `IARSMA_MCP_HTTP_PORT` in `.env` (e.g., `9000`) and rerun `docker compose up -d`. |
