@@ -53,27 +53,34 @@ function makeFetch(
 const ctx = { dryRun: false, scopes: makeScopeSet(['session:read']) };
 
 describe('loadSessionGetDeps', () => {
-  it('returns null when either env var is unset', () => {
+  it('returns null only when IARSMA_JMAP_BASE_URL is unset (D-057: per-request bearers)', () => {
     expect(loadSessionGetDeps({})).toBeNull();
-    expect(
-      loadSessionGetDeps({ IARSMA_JMAP_BASE_URL: 'https://x' }),
-    ).toBeNull();
+    // IARSMA_AGENT_TOKEN alone is not enough — we still need a JMAP URL.
     expect(loadSessionGetDeps({ IARSMA_AGENT_TOKEN: 't' })).toBeNull();
   });
 
-  it('returns null when env vars are empty/whitespace', () => {
+  it('returns deps with no bearer when only IARSMA_JMAP_BASE_URL is set', () => {
+    const deps = loadSessionGetDeps({ IARSMA_JMAP_BASE_URL: 'https://x' });
+    expect(deps?.jmapBaseUrl).toBe('https://x');
+    expect(deps?.bearerToken).toBeUndefined();
+  });
+
+  it('returns null when IARSMA_JMAP_BASE_URL is whitespace-only', () => {
     expect(
       loadSessionGetDeps({
         IARSMA_JMAP_BASE_URL: '   ',
         IARSMA_AGENT_TOKEN: 't',
       }),
     ).toBeNull();
-    expect(
-      loadSessionGetDeps({
-        IARSMA_JMAP_BASE_URL: 'https://x',
-        IARSMA_AGENT_TOKEN: '',
-      }),
-    ).toBeNull();
+  });
+
+  it('returns deps without bearer when IARSMA_AGENT_TOKEN is empty', () => {
+    const deps = loadSessionGetDeps({
+      IARSMA_JMAP_BASE_URL: 'https://x',
+      IARSMA_AGENT_TOKEN: '',
+    });
+    expect(deps?.jmapBaseUrl).toBe('https://x');
+    expect(deps?.bearerToken).toBeUndefined();
   });
 
   it('returns deps when both vars are set', () => {

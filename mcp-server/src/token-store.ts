@@ -46,7 +46,14 @@ export type ResolvedIdentity = {
 };
 
 export interface TokenStore {
-  resolve(bearerToken: string): ResolvedIdentity | null;
+  /**
+   * Validate a bearer token and surface the agent identity.
+   *
+   * Returns `null` when the token is unknown / inactive / revoked /
+   * expired. Implementations may issue network calls (e.g. Stalwart
+   * introspection), so this is async.
+   */
+  resolve(bearerToken: string): Promise<ResolvedIdentity | null>;
   reload(): void;
   register(entry: TokenEntry): void;
   remove(tokenId: string): TokenEntry | null;
@@ -94,7 +101,7 @@ export function fileTokenStore(filePath: string): TokenStore {
   load();
 
   return {
-    resolve(bearerToken: string): ResolvedIdentity | null {
+    async resolve(bearerToken: string): Promise<ResolvedIdentity | null> {
       const match = entries.find((e) => constantTimeEqual(e.secret, bearerToken));
       if (match === undefined) return null;
       return {
@@ -139,7 +146,7 @@ export function singleTokenStore(
     scopes: makeScopeSet(identity?.scopes ?? []),
   };
   return {
-    resolve(bearerToken: string): ResolvedIdentity | null {
+    async resolve(bearerToken: string): Promise<ResolvedIdentity | null> {
       return constantTimeEqual(bearerToken, secret) ? resolved : null;
     },
     register(): void {},

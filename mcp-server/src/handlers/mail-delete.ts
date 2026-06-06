@@ -15,6 +15,7 @@ import {
   session as jmapClientSession,
 } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolHandler } from '../invocation.js';
+import { resolveBearer } from './_resolve-bearer.js';
 import {
   type SessionGetDeps as JmapDeps,
   loadSessionGetDeps,
@@ -51,7 +52,7 @@ const JMAP_USING_MAIL = [
 
 export function createMailDeleteHandler(deps: MailDeleteDeps): ToolHandler {
   return async (input, ctx) => {
-    const token = ctx?.bearerToken ?? deps.bearerToken;
+    const token = resolveBearer(ctx?.bearerToken, deps.bearerToken);
     const params = parseInput(input);
 
     // Both branches need the session — resolve it once.
@@ -76,10 +77,10 @@ export function createMailDeleteHandler(deps: MailDeleteDeps): ToolHandler {
     }
 
     if (ctx.dryRun) {
-      return fetchPreview(fetchImpl, deps.bearerToken, session, params);
+      return fetchPreview(fetchImpl, token, session, params);
     }
 
-    return commitDestroy(fetchImpl, deps.bearerToken, session, params);
+    return commitDestroy(fetchImpl, token, session, params);
   };
 }
 

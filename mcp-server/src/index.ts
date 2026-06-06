@@ -12,7 +12,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadAgentContext } from './agent-context.js';
-import { fileTokenStore } from './token-store.js';
+import { stalwartIntrospectionTokenStore } from './stalwart-introspection-token-store.js';
+import { fileTokenStore, type TokenStore } from './token-store.js';
 import { createFilesListHandler } from './handlers/files-list.js';
 import { createFilesReadHandler } from './handlers/files-read.js';
 import { createFilesProposeWriteHandler } from './handlers/files-propose-write.js';
@@ -77,8 +78,10 @@ async function main(): Promise<void> {
   if (sessionGetDeps === null) {
     // eslint-disable-next-line no-console
     console.error(
-      '[iarsma-mcp] IARSMA_JMAP_BASE_URL or IARSMA_AGENT_TOKEN unset — ' +
-        '`session.get` will surface as not_implemented this run.',
+      '[iarsma-mcp] IARSMA_JMAP_BASE_URL unset — JMAP-backed ' +
+        'capabilities will surface as not_implemented this run. ' +
+        'Per-request bearers (D-057) still need IARSMA_JMAP_BASE_URL ' +
+        'to know which Stalwart to call.',
     );
   } else {
     handlers.set('session.get', createSessionGetHandler(sessionGetDeps));
@@ -145,20 +148,42 @@ async function main(): Promise<void> {
   // surfaces expose the same tool list.
   const httpConfig = loadHttpTransportConfig(process.env);
   if (httpConfig !== null) {
-    // Per-agent token store (Phase 3a). When IARSMA_TOKENS_FILE is set,
-    // the MCP server validates bearer tokens against the file store
-    // (with per-agent scopes). Falls back to the static IARSMA_MCP_HTTP_TOKEN.
-    const tokensFile = process.env['IARSMA_TOKENS_FILE'];
-    const tokenStore = tokensFile !== undefined && tokensFile !== ''
-      ? fileTokenStore(tokensFile)
-      : undefined;
-    if (tokenStore !== undefined) {
-      process.on('SIGHUP', () => {
-        // eslint-disable-next-line no-console
-        console.error('[iarsma-mcp] SIGHUP received — reloading token store');
-        tokenStore.reload();
+    // Token store selection (precedence: introspection > tokens.json > legacy).
+    //
+    //   1. Introspection (D-057, multi-tenant): when
+    //      `IARSMA_INTROSPECTION_ADMIN_TOKEN` is set, every request's
+    //      bearer is validated against Stalwart's OIDC introspection
+    //      endpoint. The agent's own bearer flows through to JMAP.
+    //   2. File store: pre-D-057 single-host mode — `IARSMA_TOKENS_FILE`
+    //      points at a JSON file with per-agent secrets.
+    //   3. None: only the legacy `IARSMA_MCP_HTTP_TOKEN` static
+    //      verifier in http-transport applies (dev-only).
+    let tokenStore: TokenStore | undefined;
+    let tokenStoreLabel = '<none — legacy IARSMA_MCP_HTTP_TOKEN only>';
+    const adminToken = process.env['IARSMA_INTROSPECTION_ADMIN_TOKEN']?.trim();
+    const introspectionIssuer =
+      process.env['IARSMA_INTROSPECTION_ISSUER_URL']?.trim() ??
+      sessionGetDeps?.jmapBaseUrl;
+    if (adminToken !== undefined && adminToken !== '' && introspectionIssuer !== undefined) {
+      tokenStore = stalwartIntrospectionTokenStore({
+        issuerUrl: introspectionIssuer,
+        adminToken,
       });
+      tokenStoreLabel = `stalwart-introspection @ ${introspectionIssuer}`;
+    } else {
+      const tokensFile = process.env['IARSMA_TOKENS_FILE'];
+      if (tokensFile !== undefined && tokensFile !== '') {
+        const fileStore = fileTokenStore(tokensFile);
+        tokenStore = fileStore;
+        tokenStoreLabel = `file-store ${tokensFile}`;
+        process.on('SIGHUP', () => {
+          // eslint-disable-next-line no-console
+          console.error('[iarsma-mcp] SIGHUP received — reloading token store');
+          fileStore.reload();
+        });
+      }
     }
+
     const makeServer = () => createIarsmaMcpServer({
       tools,
       handlers,
@@ -171,13 +196,12 @@ async function main(): Promise<void> {
     });
     // eslint-disable-next-line no-console
     console.error(
-      `[iarsma-mcp] Streamable HTTP transport listening on ${httpConfig.host ?? '0.0.0.0'}:${port}. POST /mcp with Authorization: Bearer <token>.` +
-        (tokenStore !== undefined ? ` Token store: ${tokensFile}` : ''),
+      `[iarsma-mcp] Streamable HTTP transport listening on ${httpConfig.host ?? '0.0.0.0'}:${port}. POST /mcp with Authorization: Bearer <token>. Token store: ${tokenStoreLabel}`,
     );
   } else {
     // eslint-disable-next-line no-console
     console.error(
-      '[iarsma-mcp] HTTP transport disabled — set IARSMA_MCP_HTTP_PORT + IARSMA_MCP_HTTP_TOKEN to enable.',
+      '[iarsma-mcp] HTTP transport disabled — set IARSMA_MCP_HTTP_PORT to enable.',
     );
   }
 }

@@ -24,6 +24,7 @@ import {
   session as jmapClientSession,
 } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolHandler } from '../invocation.js';
+import { resolveBearer } from './_resolve-bearer.js';
 import {
   type SessionGetDeps as JmapDeps,
   loadSessionGetDeps,
@@ -109,7 +110,7 @@ const EMAIL_FULL_PROPERTIES = [
 
 export function createThreadGetHandler(deps: ThreadGetDeps): ToolHandler {
   return async (input, ctx) => {
-    const token = ctx?.bearerToken ?? deps.bearerToken;
+    const token = resolveBearer(ctx?.bearerToken, deps.bearerToken);
     const params = parseInput(input);
     const fetchImpl = deps.fetch ?? fetch;
 

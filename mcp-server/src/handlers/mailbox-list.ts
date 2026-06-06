@@ -20,6 +20,7 @@ import {
   session as jmapClientSession,
 } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolHandler } from '../invocation.js';
+import { resolveBearer } from './_resolve-bearer.js';
 import {
   type SessionGetDeps as JmapDeps,
   loadSessionGetDeps,
@@ -70,7 +71,7 @@ const JMAP_USING_MAIL = [
  */
 export function createMailboxListHandler(deps: MailboxListDeps): ToolHandler {
   return async (_input, ctx) => {
-    const token = ctx?.bearerToken ?? deps.bearerToken;
+    const token = resolveBearer(ctx?.bearerToken, deps.bearerToken);
     const fetchImpl = deps.fetch ?? fetch;
 
     // Step 1: resolve the session.
