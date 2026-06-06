@@ -11,8 +11,9 @@
  * affordance density of the rest of the shell.
  */
 
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { useEffect, useState } from 'react';
+import { agentContextAtom } from '../auth-state.js';
 import { AccentPicker } from '../components/accent-picker.js';
 import { Button } from '../components/button.js';
 import { DensitySelector } from '../components/density-selector.js';
@@ -755,8 +756,10 @@ function TokensSection({
         Agent tokens
       </h3>
       <p className={styles['sectionDescription']}>
-        Issue capability-scoped tokens for agents to access this account. Each token can be revoked at any time.
+        Issue capability-scoped tokens for agents to access this account.
+        Each token can be revoked at any time.
       </p>
+      <McpConnectionDocs />
       {isLoading === true ? <p>Loading tokens…</p> : null}
       <IssueTokenForm onIssue={onIssue} />
       <TokenTable
@@ -766,6 +769,196 @@ function TokensSection({
         {...(onViewActivity !== undefined ? { onViewActivity } : {})}
       />
     </section>
+  );
+}
+
+// ── MCP connection instructions (PR 34) ────────────────────────────
+
+/**
+ * Collapsible docs panel that walks the user through:
+ *   1. The MCP endpoint URL (from agentContextAtom — populated when
+ *      the operator set VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL).
+ *   2. The Authorization header shape using a token issued below.
+ *   3. A copy-paste curl example.
+ *   4. A copy-paste @modelcontextprotocol/sdk client example.
+ *   5. A note on scope enforcement — the agent only sees the tools
+ *      the token's scope set permits.
+ *
+ * Defaults to closed so it doesn't dominate the page for users who
+ * already wired their agents up.
+ */
+function McpConnectionDocs() {
+  const agentContext = useAtomValue(agentContextAtom);
+  const mcpUrl = agentContext?.webmailMcpUrl ?? null;
+  // Placeholder used in the code examples when no URL is configured.
+  const displayUrl = mcpUrl ?? '<your-mcp-url>';
+
+  const curlExample = `TOKEN="<paste-the-secret-shown-when-you-issued-the-token>"
+MCP="${displayUrl}"
+
+curl -s -X POST "$MCP" \\
+  -H "authorization: Bearer $TOKEN" \\
+  -H "content-type: application/json" \\
+  -H "accept: application/json, text/event-stream" \\
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": { "name": "mailbox.list", "arguments": {} }
+  }'`;
+
+  const sdkExample = `import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const transport = new StreamableHTTPClientTransport(
+  new URL('${displayUrl}'),
+  {
+    requestInit: {
+      headers: {
+        authorization: \`Bearer \${process.env.IARSMA_TOKEN}\`,
+      },
+    },
+  },
+);
+
+const client = new Client(
+  { name: 'my-agent', version: '0.1.0' },
+  { capabilities: {} },
+);
+await client.connect(transport);
+
+// The server reports only the tools your token's scopes permit.
+const { tools } = await client.listTools();
+console.log(tools.map((t) => t.name));`;
+
+  return (
+    <details className={styles['mcpDocs']}>
+      <summary>How to connect an MCP agent</summary>
+      <div className={styles['mcpDocsBody']}>
+        <h4>1. Endpoint</h4>
+        <p>
+          {mcpUrl !== null ? (
+            <>
+              The MCP server speaks{' '}
+              <a
+                href="https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http"
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Streamable HTTP
+              </a>{' '}
+              at <CopyableValue value={mcpUrl} />
+            </>
+          ) : (
+            <>
+              <span className={styles['mcpUrlMissing']}>
+                The MCP URL for this deployment isn't configured in
+                the shell. Ask the operator to set{' '}
+                <code>VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL</code>, or
+                use the path the operator gave you.
+              </span>
+            </>
+          )}
+        </p>
+
+        <h4>2. Issue a token</h4>
+        <p>
+          Use the form below. Pick scopes carefully — agents only see
+          the tools their token permits, and revoking a token is the
+          only kill switch. The secret shown after issuance won't
+          appear again, so copy it into the agent's config
+          immediately.
+        </p>
+
+        <h4>3. Authenticate</h4>
+        <p>
+          Every MCP request must carry the issued secret as a Bearer
+          token:
+        </p>
+        <CodeBlock value="authorization: Bearer <secret>" />
+
+        <h4>4. Try it with curl</h4>
+        <p>One-shot read-only sanity check:</p>
+        <CodeBlock value={curlExample} />
+
+        <h4>5. Or use the official MCP SDK</h4>
+        <p>TypeScript example using <code>@modelcontextprotocol/sdk</code>:</p>
+        <CodeBlock value={sdkExample} />
+
+        <h4>6. What the agent can do</h4>
+        <p>
+          Tool names match the scopes you grant. For example,{' '}
+          <code>mail:read</code> exposes <code>mailbox.list</code>,{' '}
+          <code>thread.list</code>, <code>thread.get</code>, and{' '}
+          <code>thread.search</code>; <code>mail:send</code> adds{' '}
+          <code>mail.send</code>; <code>mail:modify</code> adds{' '}
+          <code>mail.modify</code> (flag/mark-read/move). Destructive
+          tools like <code>mail.send</code> and <code>mail.modify</code>{' '}
+          honor a <em>dry-run</em> mode you should always exercise
+          before committing.
+        </p>
+
+        <h4>7. Activity</h4>
+        <p>
+          Every agent call appears in the{' '}
+          <strong>Activity</strong> view with a hash-chain audit
+          entry. Each token row above has an <em>Activity</em> link
+          that pre-filters Activity by that agent.
+        </p>
+      </div>
+    </details>
+  );
+}
+
+/** Inline value with a one-shot Copy affordance. Used for the MCP
+ *  URL and the Authorization line. */
+function CopyableValue({ value }: { readonly value: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = (): void => {
+    if (typeof navigator === 'undefined' || navigator.clipboard === undefined) return;
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <>
+      <span className={styles['mcpUrl']}>{value}</span>{' '}
+      <button
+        type="button"
+        className={styles['codeBlockCopy']}
+        style={{ position: 'static', marginLeft: 4 }}
+        onClick={onCopy}
+        aria-label="Copy MCP URL"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </>
+  );
+}
+
+/** Code block with a Copy button in the top-right corner. */
+function CodeBlock({ value }: { readonly value: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = (): void => {
+    if (typeof navigator === 'undefined' || navigator.clipboard === undefined) return;
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className={styles['codeBlock']}>
+      <pre>{value}</pre>
+      <button
+        type="button"
+        className={styles['codeBlockCopy']}
+        onClick={onCopy}
+        aria-label="Copy code"
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
   );
 }
 

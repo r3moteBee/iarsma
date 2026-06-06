@@ -197,7 +197,11 @@ describe('AgentSettingsView', () => {
       await waitFor(() => {
         expect(screen.getByText(/secret-new-value/)).toBeInTheDocument();
       });
-      expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
+      // After PR 34 the page also renders Copy buttons inside the
+      // MCP-connection docs; scope the assertion to the secret reveal.
+      expect(
+        screen.getByRole('button', { name: /copy secret/i }),
+      ).toBeInTheDocument();
       expect(screen.getByText(/won't be shown again/i)).toBeInTheDocument();
     });
   });
@@ -426,6 +430,36 @@ describe('AgentSettingsView', () => {
       const input = screen.getByLabelText(/delay/i) as HTMLInputElement;
       fireEvent.change(input, { target: { value: '60' } });
       expect(localStorage.getItem('iarsma-send-delay-ms')).toBe('30000');
+    });
+  });
+
+  describe('MCP connection docs (PR 34)', () => {
+    it('renders the collapsible docs panel above the issue form', () => {
+      render(<AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />);
+      openTokensTab();
+      // The <summary> for the <details> renders the label as a clickable
+      // element regardless of open/closed state.
+      expect(screen.getByText(/how to connect an mcp agent/i)).toBeInTheDocument();
+    });
+
+    it('warns when no MCP URL is configured in the shell', () => {
+      render(<AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />);
+      openTokensTab();
+      // Open the details element so the body is visible to the test.
+      fireEvent.click(screen.getByText(/how to connect an mcp agent/i));
+      expect(
+        screen.getByText(/MCP URL for this deployment isn't configured/i),
+      ).toBeInTheDocument();
+    });
+
+    it('shows the curl + SDK examples once opened', () => {
+      render(<AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />);
+      openTokensTab();
+      fireEvent.click(screen.getByText(/how to connect an mcp agent/i));
+      // curl block.
+      expect(screen.getByText(/tools\/call/i)).toBeInTheDocument();
+      // SDK block (StreamableHTTPClientTransport).
+      expect(screen.getByText(/StreamableHTTPClientTransport/)).toBeInTheDocument();
     });
   });
 
