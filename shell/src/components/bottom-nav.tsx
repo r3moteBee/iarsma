@@ -109,6 +109,8 @@ export type BottomNavProps = {
   /** Number of pending sends in the SendBuffer (PR 27). When > 0, an
    *  Outbox entry appears in the More sheet with a badge. */
   readonly outboxCount?: number;
+  /** Unread Inbox count for the Mail tab badge (Phase 3 #9). */
+  readonly inboxUnreadCount?: number;
   readonly onSignOut: () => void;
 };
 
@@ -119,6 +121,7 @@ export function BottomNav({
   onNavigate,
   pendingApprovals,
   outboxCount,
+  inboxUnreadCount,
   onSignOut,
 }: BottomNavProps) {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -129,7 +132,7 @@ export function BottomNav({
     icon: () => React.JSX.Element;
     badge?: number | undefined;
   }[] = [
-    { view: 'mail', label: 'Mail', icon: MailIcon },
+    { view: 'mail', label: 'Mail', icon: MailIcon, badge: inboxUnreadCount },
     { view: 'calendar', label: 'Calendar', icon: CalendarIcon },
     { view: 'contacts', label: 'Contacts', icon: ContactsIcon },
     {
@@ -211,14 +214,17 @@ export function BottomNav({
 
       {/* Bottom nav bar */}
       <nav className={styles.bottomNav} aria-label="Bottom navigation" data-testid="bottom-nav">
-        {primaryItems.map(({ view, label, icon: Icon, badge }) => (
+        {primaryItems.map(({ view, label, icon: Icon, badge }) => {
+          // "Mail" badges read as "unread"; everything else reads as "pending".
+          const badgeWord = view === 'mail' ? 'unread' : 'pending';
+          return (
           <button
             key={view}
             type="button"
             className={`${styles.navButton} ${activeView === view ? styles.navButtonActive : ''}`}
             onClick={() => { onNavigate(view); setMoreOpen(false); }}
             aria-current={activeView === view ? 'page' : undefined}
-            aria-label={badge !== undefined && badge > 0 ? `${label} (${badge} pending)` : label}
+            aria-label={badge !== undefined && badge > 0 ? `${label} (${badge} ${badgeWord})` : label}
             data-testid={`bottom-nav-${view}`}
           >
             <span className={styles.navIcon}><Icon /></span>
@@ -227,7 +233,8 @@ export function BottomNav({
               <span className={styles.badge}>{badge > 99 ? '99+' : badge}</span>
             )}
           </button>
-        ))}
+          );
+        })}
         <button
           type="button"
           className={`${styles.navButton} ${isSecondaryActive ? styles.navButtonActive : ''}`}

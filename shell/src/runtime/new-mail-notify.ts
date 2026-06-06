@@ -32,6 +32,21 @@ export function announceNewMail(sender: string): void {
   el.textContent = `New message from ${sender}`;
 }
 
+/**
+ * Count-based announce (Phase 3 #9). Push deltas don't tell us who
+ * sent the new mail without a follow-up fetch, so the bare-minimum
+ * announcement is the count change. Singular vs. plural matters for
+ * screen reader prosody.
+ */
+export function announceUnreadDelta(delta: number): void {
+  if (delta <= 0) return;
+  const el = ensureLiveRegion();
+  el.textContent =
+    delta === 1
+      ? '1 new message in Inbox.'
+      : `${delta} new messages in Inbox.`;
+}
+
 export function updateTabTitle(unreadCount: number): void {
   if (typeof document === 'undefined') return;
   document.title = unreadCount > 0 ? `(${unreadCount}) Iarsma` : 'Iarsma';

@@ -187,6 +187,10 @@ export type SidebarProps = {
    *  nav item hides when 0 and shows with a count badge when > 0 —
    *  Outlook semantics: the folder appears only when relevant. */
   readonly outboxCount?: number;
+  /** Unread Inbox count for the Mail nav badge (Phase 3 #9). Shows
+   *  next to "Mail" when > 0; lifted out of the per-folder tree so
+   *  the user sees new mail without expanding the section. */
+  readonly inboxUnreadCount?: number;
 };
 
 // ── Nav item definitions ────────────────────────────────────────
@@ -224,6 +228,7 @@ export function Sidebar({
   isOpen,
   onClose,
   outboxCount,
+  inboxUnreadCount,
 }: SidebarProps) {
   const hasMailboxes = mailboxes !== undefined && mailboxes.length > 0;
 
@@ -287,7 +292,20 @@ export function Sidebar({
             ) {
               return null;
             }
-            const showBadge = view === 'outbox' && (outboxCount ?? 0) > 0;
+            // Per-row badge: Outbox shows pending sends; Mail shows
+            // Inbox unread. Other rows currently have no badge.
+            const badgeValue: number | undefined =
+              view === 'outbox' && (outboxCount ?? 0) > 0
+                ? outboxCount
+                : view === 'mail' && (inboxUnreadCount ?? 0) > 0
+                  ? inboxUnreadCount
+                  : undefined;
+            const ariaSuffix =
+              view === 'outbox' && badgeValue !== undefined
+                ? `(${badgeValue} pending)`
+                : view === 'mail' && badgeValue !== undefined
+                  ? `(${badgeValue} unread)`
+                  : undefined;
             const navButton = (
               <button
                 type="button"
@@ -296,16 +314,14 @@ export function Sidebar({
                 aria-current={activeView === view ? 'page' : undefined}
                 data-testid={`nav-${view}`}
                 aria-label={
-                  showBadge
-                    ? `${label} (${outboxCount} pending)`
-                    : undefined
+                  ariaSuffix !== undefined ? `${label} ${ariaSuffix}` : undefined
                 }
               >
                 <span className={styles.navIcon}><Icon /></span>
                 {label}
-                {showBadge ? (
+                {badgeValue !== undefined ? (
                   <span className={styles.outboxBadge} aria-hidden="true">
-                    {outboxCount}
+                    {badgeValue}
                   </span>
                 ) : null}
               </button>
