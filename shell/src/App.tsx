@@ -871,19 +871,17 @@ function SignedInShell({
   }, [sessionData, userToken, metadataStore]);
 
   const [agentTokens, setAgentTokens] = useState<readonly AgentTokenInfo[]>([]);
-  const [agentTokensLoading, setAgentTokensLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setAgentTokensLoading(true);
     issuer.listTokens().then(
-      (list) => { if (!cancelled) { setAgentTokens(list); setAgentTokensLoading(false); } },
-      () => { if (!cancelled) setAgentTokensLoading(false); },
+      (list) => { if (!cancelled) setAgentTokens(list); },
+      () => { /* swallow — UI shows the empty state when nothing loads */ },
     );
     return () => { cancelled = true; };
   }, [issuer]);
 
-  const handleIssue = async (name: string, scopes: string[], lifetimeSec: number) => {
+  const handleIssue = async (name: string, scopes: readonly string[], lifetimeSec: number) => {
     const result = await issuer.issueToken({ name, scopes, lifetimeSec });
     const refreshed = await issuer.listTokens();
     setAgentTokens(refreshed);
@@ -1193,7 +1191,8 @@ function SignedInShell({
           <AgentDashboardView
             aggregate={agentDashboard.aggregate}
             agents={agentDashboard.agents}
-            onManageTokens={() => setActiveView('settings')}
+            onIssue={handleIssue}
+            onRevoke={handleRevoke}
             onViewActivity={(agentName) => {
               setActivityFilters((prev) => ({ ...prev, actor: agentName }));
               setActiveView('activity');
@@ -1234,19 +1233,6 @@ function SignedInShell({
           />
         ) : activeView === 'settings' ? (
           <AgentSettingsView
-            tokens={agentTokens}
-            onIssue={handleIssue}
-            onRevoke={handleRevoke}
-            isLoading={agentTokensLoading}
-            lastUsedByToken={activity.lastUsedByToken}
-            onViewActivity={(tokenName) => {
-              // Pre-set the actor filter via the shared atom, then
-              // navigate. The Activity view's hook reads the same
-              // atom on next render so the filter is already applied
-              // when the view mounts.
-              setActivityFilters((prev) => ({ ...prev, actor: tokenName }));
-              setActiveView('activity');
-            }}
             files={{
               currentConfig: githubConfig !== null ? { owner: githubConfig.owner, repo: githubConfig.repo, branch: githubConfig.branch } : null,
               onConnect: handleFilesConnect,

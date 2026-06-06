@@ -17,7 +17,6 @@ import { agentContextAtom } from '../auth-state.js';
 import { AccentPicker } from '../components/accent-picker.js';
 import { Button } from '../components/button.js';
 import { DensitySelector } from '../components/density-selector.js';
-import { Dialog } from '../components/dialog.js';
 import { Input } from '../components/input.js';
 import { Notice } from '../components/notice.js';
 import { useInvoker } from '../runtime/invoker.js';
@@ -28,7 +27,7 @@ import {
   sendDelayMsAtom,
 } from '../runtime/send-delay-state.js';
 import { themePreferenceAtom, type ThemePreference } from '../runtime/theme.js';
-import type { AgentTokenInfo, IssuedToken } from '../runtime/agent-token-issuer.js';
+import type { IssuedToken } from '../runtime/agent-token-issuer.js';
 import { FilesSettingsPanel } from './files-settings-panel.js';
 import type { FilesSettingsPanelProps } from './files-settings-panel.js';
 import styles from './agent-settings-view.module.css';
@@ -56,17 +55,6 @@ const LIFETIME_OPTIONS: readonly { readonly label: string; readonly seconds: num
 // ── Props ──────────────────────────────────────────────────────────
 
 type AgentSettingsViewProps = {
-  readonly tokens: readonly AgentTokenInfo[];
-  readonly onIssue: (name: string, scopes: string[], lifetimeSec: number) => Promise<IssuedToken>;
-  readonly onRevoke: (tokenId: string) => Promise<void>;
-  readonly isLoading?: boolean;
-  /** Per-token "last used" map (§8.11). Keyed by tokenId; values are
-   *  ISO timestamps. Tokens that have never been used are absent. */
-  readonly lastUsedByToken?: ReadonlyMap<string, string>;
-  /** Navigate to Activity view with an actor filter pre-scoped to
-   *  the given tokenName. App.tsx wires both the navigation and the
-   *  cross-view filter atom. */
-  readonly onViewActivity?: (tokenName: string) => void;
   /** Optional GitHub Files integration settings. */
   readonly files?: FilesSettingsPanelProps;
   /** Account info — signed-in email + sign-out handler. */
@@ -79,7 +67,6 @@ type SectionId =
   | 'sending'
   | 'signatures'
   | 'vacation'
-  | 'tokens'
   | 'files'
   | 'account';
 
@@ -88,12 +75,14 @@ type SectionDef = {
   readonly label: string;
 };
 
+// PR 40 — `tokens` moved to the Agents top-level view. The form,
+// docs panel, and table all live there now; Settings only carries
+// settings that don't have their own surface.
 const SECTIONS: readonly SectionDef[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'sending', label: 'Sending' },
   { id: 'signatures', label: 'Signatures' },
   { id: 'vacation', label: 'Vacation responder' },
-  { id: 'tokens', label: 'Agent tokens' },
   { id: 'files', label: 'Files' },
   { id: 'account', label: 'Account' },
 ];
@@ -101,12 +90,6 @@ const SECTIONS: readonly SectionDef[] = [
 // ── Component ──────────────────────────────────────────────────────
 
 export function AgentSettingsView({
-  tokens,
-  onIssue,
-  onRevoke,
-  isLoading,
-  lastUsedByToken,
-  onViewActivity,
   files,
   userName,
   onSignOut,
@@ -137,16 +120,6 @@ export function AgentSettingsView({
         {section === 'sending' ? <SendingSection /> : null}
         {section === 'signatures' ? <SignaturesSection /> : null}
         {section === 'vacation' ? <VacationSection /> : null}
-        {section === 'tokens' ? (
-          <TokensSection
-            tokens={tokens}
-            onIssue={onIssue}
-            onRevoke={onRevoke}
-            {...(isLoading !== undefined ? { isLoading } : {})}
-            {...(lastUsedByToken !== undefined ? { lastUsedByToken } : {})}
-            {...(onViewActivity !== undefined ? { onViewActivity } : {})}
-          />
-        ) : null}
         {section === 'files' ? (
           files !== undefined ? (
             <FilesSection {...files} />
@@ -733,45 +706,6 @@ function toDateInputValue(iso: string | undefined): string {
   return m === null ? '' : m[1]!;
 }
 
-// ── Tokens section ─────────────────────────────────────────────────
-
-function TokensSection({
-  tokens,
-  onIssue,
-  onRevoke,
-  isLoading,
-  lastUsedByToken,
-  onViewActivity,
-}: {
-  readonly tokens: readonly AgentTokenInfo[];
-  readonly onIssue: AgentSettingsViewProps['onIssue'];
-  readonly onRevoke: AgentSettingsViewProps['onRevoke'];
-  readonly isLoading?: boolean;
-  readonly lastUsedByToken?: ReadonlyMap<string, string>;
-  readonly onViewActivity?: (tokenName: string) => void;
-}) {
-  return (
-    <section aria-labelledby="tokens-heading">
-      <h3 id="tokens-heading" className={styles['sectionHeading']}>
-        Agent tokens
-      </h3>
-      <p className={styles['sectionDescription']}>
-        Issue capability-scoped tokens for agents to access this account.
-        Each token can be revoked at any time.
-      </p>
-      <McpConnectionDocs />
-      {isLoading === true ? <p>Loading tokens…</p> : null}
-      <IssueTokenForm onIssue={onIssue} />
-      <TokenTable
-        tokens={tokens}
-        onRevoke={onRevoke}
-        {...(lastUsedByToken !== undefined ? { lastUsedByToken } : {})}
-        {...(onViewActivity !== undefined ? { onViewActivity } : {})}
-      />
-    </section>
-  );
-}
-
 // ── MCP connection instructions (PR 34) ────────────────────────────
 
 /**
@@ -793,7 +727,7 @@ function TokensSection({
  * Defaults to closed so the panel doesn't dominate the page for
  * users who already have their agents wired up.
  */
-function McpConnectionDocs() {
+export function McpConnectionDocs() {
   const agentContext = useAtomValue(agentContextAtom);
   const configuredMcpUrl = agentContext?.webmailMcpUrl ?? null;
   // JMAP base = where this webmail is served. The current page's
@@ -1037,10 +971,14 @@ function CodeBlock({ value }: { readonly value: string }) {
   );
 }
 
-function IssueTokenForm({
+export function IssueTokenForm({
   onIssue,
 }: {
-  readonly onIssue: AgentSettingsViewProps['onIssue'];
+  readonly onIssue: (
+    name: string,
+    scopes: readonly string[],
+    lifetimeSec: number,
+  ) => Promise<IssuedToken>;
 }) {
   const [name, setName] = useState('');
   const [selectedScopes, setSelectedScopes] = useState<Set<string>>(new Set());
@@ -1166,169 +1104,6 @@ function IssueTokenForm({
   );
 }
 
-function TokenTable({
-  tokens,
-  onRevoke,
-  lastUsedByToken,
-  onViewActivity,
-}: {
-  readonly tokens: readonly AgentTokenInfo[];
-  readonly onRevoke: (tokenId: string) => Promise<void>;
-  readonly lastUsedByToken?: ReadonlyMap<string, string>;
-  readonly onViewActivity?: (tokenName: string) => void;
-}) {
-  return (
-    <section aria-labelledby="active-tokens-heading">
-      <h4 id="active-tokens-heading" style={{ margin: '0 0 var(--space-md)' }}>
-        Active Tokens
-      </h4>
-      <table className={styles['tokenTable']}>
-        <thead>
-          <tr>
-            <th scope="col">Name</th>
-            <th scope="col">Scopes</th>
-            <th scope="col">Issued</th>
-            <th scope="col">Expires</th>
-            <th scope="col">Last used</th>
-            <th scope="col">Status</th>
-            <th scope="col">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tokens.map((token) => {
-            const lu = lastUsedByToken?.get(token.tokenId);
-            return (
-              <TokenRow
-                key={token.tokenId}
-                token={token}
-                onRevoke={onRevoke}
-                {...(lu !== undefined ? { lastUsed: lu } : {})}
-                {...(onViewActivity !== undefined ? { onViewActivity } : {})}
-              />
-            );
-          })}
-        </tbody>
-      </table>
-    </section>
-  );
-}
-
-function TokenRow({
-  token,
-  onRevoke,
-  lastUsed,
-  onViewActivity,
-}: {
-  readonly token: AgentTokenInfo;
-  readonly onRevoke: (tokenId: string) => Promise<void>;
-  readonly lastUsed?: string;
-  readonly onViewActivity?: (tokenName: string) => void;
-}) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [revoking, setRevoking] = useState(false);
-  const openConfirm = (): void => setConfirmOpen(true);
-  const closeConfirm = (): void => {
-    if (revoking) return;
-    setConfirmOpen(false);
-  };
-  const handleRevoke = async (): Promise<void> => {
-    setRevoking(true);
-    try {
-      await onRevoke(token.tokenId);
-      setConfirmOpen(false);
-    } finally {
-      setRevoking(false);
-    }
-  };
-
-  return (
-    <tr>
-      <td>{token.name}</td>
-      <td>
-        {token.scopes.map((s) => (
-          <span key={s} className={styles['scopeBadge']}>
-            {s}
-          </span>
-        ))}
-      </td>
-      <td>{formatDate(token.issuedAt)}</td>
-      <td>{formatDate(token.expiresAt)}</td>
-      <td>
-        {lastUsed !== undefined ? (
-          <span title={new Date(lastUsed).toLocaleString()}>
-            {formatRelativeTime(lastUsed)}
-          </span>
-        ) : (
-          <span className={styles['muted'] ?? ''} style={{ color: 'var(--text-3)' }}>
-            Never
-          </span>
-        )}
-      </td>
-      <td>
-        <span
-          className={token.revoked ? styles['statusRevoked'] : styles['statusActive']}
-        >
-          {token.revoked ? 'Revoked' : 'Active'}
-        </span>
-      </td>
-      <td>
-        {onViewActivity !== undefined ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onViewActivity(token.name)}
-            aria-label={`View activity for ${token.name}`}
-          >
-            Activity
-          </Button>
-        ) : null}
-        {!token.revoked ? (
-          <>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={openConfirm}
-              aria-label={`Revoke ${token.name}`}
-            >
-              Revoke
-            </Button>
-            <Dialog
-              open={confirmOpen}
-              onClose={closeConfirm}
-              title="Revoke token?"
-              footer={
-                <>
-                  <Button variant="secondary" onClick={closeConfirm} disabled={revoking}>
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => {
-                      void handleRevoke();
-                    }}
-                    disabled={revoking}
-                  >
-                    {revoking ? 'Revoking…' : 'Revoke token'}
-                  </Button>
-                </>
-              }
-            >
-              <p>
-                <strong>{token.name}</strong> will lose access immediately.
-                Any agent using this token will start receiving 401s on the
-                next call.
-              </p>
-              <p>
-                This is permanent — issued tokens can't be un-revoked.
-                Issue a new token if the agent should regain access.
-              </p>
-            </Dialog>
-          </>
-        ) : null}
-      </td>
-    </tr>
-  );
-}
 
 // ── Files section ──────────────────────────────────────────────────
 
@@ -1376,41 +1151,6 @@ function AccountSection({
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
-}
-
-/** Compact relative time for the token table's "Last used" column.
- *  Scales: <1m → "just now", <1h → "Xm ago", <24h → "Xh ago",
- *  <7d → "Xd ago", otherwise an absolute date. The absolute
- *  timestamp lives on the cell's title attribute for the precise
- *  read. */
-function formatRelativeTime(iso: string): string {
-  try {
-    const then = new Date(iso).getTime();
-    const now = Date.now();
-    const diff = Math.max(0, now - then);
-    const minute = 60 * 1000;
-    const hour = 60 * minute;
-    const day = 24 * hour;
-    if (diff < minute) return 'just now';
-    if (diff < hour) return `${Math.floor(diff / minute)}m ago`;
-    if (diff < day) return `${Math.floor(diff / hour)}h ago`;
-    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-    return formatDate(iso);
-  } catch {
-    return iso;
-  }
-}
 
 const visuallyHidden = {
   position: 'absolute' as const,
