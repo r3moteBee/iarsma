@@ -812,24 +812,24 @@ function McpConnectionDocs() {
 
   // The docker-compose recipe at deployment/mcp/ is the supported
   // path. Operator runs it once per Stalwart host; agent tokens are
-  // never copied into the server's .env (D-057).
-  const composeQuickstart = `# Operator-only — runs once per Stalwart host. Agents do NOT
-# need anything on the server's filesystem; their tokens get
-# validated against Stalwart at request time.
+  // never copied into the server's .env (D-058).
+  const composeQuickstart = `# Operator-only — runs once per Stalwart host. The MCP server has
+# no shared secret of its own: each agent's own Stalwart API key
+# bearer is what authenticates every call.
 git clone https://github.com/r3moteBee/iarsma.git
 cd iarsma/deployment/mcp
 cp .env.example .env
-$EDITOR .env   # Set IARSMA_JMAP_BASE_URL + IARSMA_INTROSPECTION_ADMIN_TOKEN
+$EDITOR .env   # Set IARSMA_JMAP_BASE_URL — that's it
 docker compose up -d
 docker compose logs -f iarsma-mcp
 # Expect: "Streamable HTTP transport listening on 0.0.0.0:${defaultPort}"
-# and:    "Token store: stalwart-introspection @ ${jmapBaseUrl}"`;
+# and:    "Token store: stalwart-session @ ${jmapBaseUrl}"`;
 
-  const envFileContents = `# deployment/mcp/.env — operator config only. Agent tokens
-# (issued below) NEVER appear here — they're validated against
-# Stalwart's introspection endpoint at request time.
+  const envFileContents = `# deployment/mcp/.env — only IARSMA_JMAP_BASE_URL is required.
+# No operator credential. The MCP server validates each agent's
+# bearer by calling Stalwart's JMAP session endpoint — Stalwart
+# is the auth gate, the MCP server is just a proxy.
 IARSMA_JMAP_BASE_URL=${jmapBaseUrl}
-IARSMA_INTROSPECTION_ADMIN_TOKEN=<your-Stalwart-admin-Bearer>
 IARSMA_MCP_HTTP_PORT=${defaultPort}
 IARSMA_MCP_HTTP_HOST=0.0.0.0`;
 
@@ -878,14 +878,15 @@ console.log(tools.map((t) => t.name));`;
         <h4>How this fits together</h4>
         <p>
           This webmail at <CopyableValue value={jmapBaseUrl} />{' '}
-          issues tokens, validates agent activity, and shows audit
-          trails. Agents don't connect here — they connect to a
+          issues <strong>Stalwart API keys</strong> directly into
+          Stalwart's server-side key store, then shows them in the
+          list below. Agents don't connect here — they connect to a
           separate <strong>MCP server</strong> process that talks to
-          Stalwart on each agent's behalf. The MCP server validates
-          each agent's bearer against Stalwart's introspection
-          endpoint at request time, so there's no shared secret
-          piped through the server: revoking a token in this UI
-          locks the agent out within seconds.
+          Stalwart on each agent's behalf. Every agent call is
+          validated against Stalwart by the MCP server using the
+          agent's own bearer; revoking a key here locks the agent
+          out within seconds. The list works from any device because
+          Stalwart owns it, not your browser.
         </p>
         {configuredMcpUrl !== null ? (
           <p>

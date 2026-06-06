@@ -547,3 +547,35 @@ The agent's bearer is the same OAuth access token Stalwart issued — it works f
 - A persistent introspection-cache tier (e.g., Redis) for MCP servers running behind a load balancer where in-process caching is per-replica.
 - Surfacing introspection failures (e.g., admin token expired) in the webmail's Activity view rather than only in the MCP server logs.
 - Replacing the per-request introspection round-trip with a long-lived JWT once Stalwart supports issuing JWT access tokens with embedded scopes (introspection-free fast path).
+
+## D-058 — Agent tokens are Stalwart API keys, not OAuth client_credentials
+**Date:** 2026-06-06
+**Decision:** Revert PR 36's OAuth-based agent token flow. Agent tokens are now **Stalwart API keys** created via JMAP `x:ApiKey/set` with Replace-mode permissions derived from the agent's iarsma scopes. The webmail enumerates and revokes them via `x:ApiKey/query + x:ApiKey/get` and `x:ApiKey/set destroy`. The MCP server validates each bearer by making a JMAP `/.well-known/jmap` call (200 = valid; 401/403 = invalid) — no admin credential, no introspection.
+
+Concretely:
+
+- `stalwartTokenIssuer` (OAuth `client_credentials` against `/oauth/token`) is replaced by `stalwartApiKeyIssuer`, which POSTs `x:ApiKey/set` and pulls the list back from `x:ApiKey/query + x:ApiKey/get`. Stalwart is the canonical store for agent tokens.
+- The MCP server's `stalwartIntrospectionTokenStore` (PR 36) is retained as a legacy code path but no longer the default. The new default is `stalwartSessionTokenStore`, which validates by making a JMAP session call with the agent's bearer and caches the result for 30s.
+- The webmail's IDB-based `AgentMetadataStore` is no longer load-bearing for agent tokens. Nothing user-facing reads from it for the agent token list anymore.
+- `IARSMA_INTROSPECTION_ADMIN_TOKEN` is no longer required. The MCP server's deployment recipe needs only `IARSMA_JMAP_BASE_URL` plus the HTTP transport config.
+
+**Why:** The user discovered the cross-device problem on the morning of 2026-06-06: tokens issued on one machine were invisible on another, and the kill switch on the second machine wouldn't work for tokens it never saw. Tracing this revealed two things:
+
+1. The shell was actually using `localTokenIssuer` — it generated random UUIDs that never reached Stalwart. The whole agent-token surface was visually convincing but functionally a placeholder. (PR 36 set up OAuth-flow infrastructure but App.tsx still wired the local stub.)
+2. Stalwart's OAuth `client_credentials` model is stateless by design: the docs say "tokens can be revoked by changing the owning account's password, which invalidates every token previously issued against it." There is no Stalwart endpoint to list or per-token-revoke OAuth tokens. So even if we'd switched the wire-up from `localTokenIssuer` to `stalwartTokenIssuer`, the cross-device list problem would still exist — Stalwart simply doesn't expose the data.
+
+Stalwart's `x:ApiKey/*` JMAP methods, on the other hand, expose exactly the operations a real agent-token surface needs: per-key list, per-key revoke, server-side scopes (via Replace-mode permissions matching our scope strings 1:1). A live probe against the running deployment returned three pre-existing iarsma-created keys with their permissions intact, confirming the path works end-to-end. The docs caveat that "API keys can't access mail protocols" is misleading — it means you can't IMAP-login with one, but a Replace-mode key with `jmapEmailGet` / `jmapMailboxGet` etc. is a perfectly valid JMAP bearer.
+
+So this PR isn't backtracking PR 36 — it's the realization that the OAuth path was the wrong primitive in the first place. API keys are the resource type Stalwart designed for this use case, and they make every property we want (cross-device list, per-key revoke, no operator credential, server-side scope enforcement) free.
+
+**How to apply:**
+- New issuance code should use `stalwartApiKeyIssuer`. Don't add OAuth-based agent-token code paths.
+- New scopes need to land in *two* places: `mcp-server/src/stalwart-permissions.ts` (server-side JMAP method bundle) AND `shell/src/runtime/stalwart-apikey-issuer.ts` (shell-side bundle that creates the key). Keep them in sync; drift means the created key won't have the permissions the issuance scope string implies.
+- The shell-side `permissionsToScopes` reverse map is a "best fit" — it labels a key with iarsma scope strings derived from the permissions present. If you add a scope whose permission bundle is a strict superset of another, list the more specific scope first or the reverse-map will over-attribute.
+- Stalwart-side validation eliminates the MCP server's prior scope-filtering surface. Tools are now listed permissively; agents see them all and Stalwart returns "permission denied" on calls outside their permission set. If preserving per-tool filtering becomes important, the MCP server can call `x:ApiKey/query + x:ApiKey/get` itself to inspect the calling key's permissions — but this requires `SysApiKeyQuery` permission on the bearer, which agents don't necessarily have. Defer until a concrete UX gap forces it.
+
+**Out of scope (follow-ups):**
+- Removing `stalwartIntrospectionTokenStore` and the OAuth-introspection code paths once we're confident no deployments still need them.
+- A "denied calls" badge on the agent dashboard that aggregates Stalwart's per-call permission errors from the action log — wires the new permissive list-then-deny flow into a visible UX signal.
+- Inferring scopes from Inherit-mode keys when Stalwart eventually exposes the resolved permission set on `x:ApiKey/get`.
+- Replacing the `permissionsToScopes` reverse-map with a Stalwart-stored "iarsma scope tag" string on each key (description prefix or custom field) so the mapping is explicit, not derived.

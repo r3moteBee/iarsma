@@ -33,6 +33,7 @@ import {
 import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
 import { announceUnreadDelta, updateTabTitle } from './runtime/new-mail-notify.js';
 import { localTokenIssuer } from './runtime/local-token-issuer.js';
+import { stalwartApiKeyIssuer } from './runtime/stalwart-apikey-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
@@ -834,7 +835,15 @@ function SignedInShell({
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Agent token management (settings view)
+  // Agent token management (settings view).
+  //
+  // PR 39 / D-058: switched from `localTokenIssuer` (which generated
+  // throw-away local UUIDs that never reached Stalwart) to
+  // `stalwartApiKeyIssuer` which creates real Stalwart API keys via
+  // `x:ApiKey/set`. The Stalwart server is the source of truth: list
+  // and revoke work from any device. Local IDB metadata is no longer
+  // load-bearing; the `metadataStore` stays only as a fallback for
+  // testing environments without a Stalwart session.
   const metadataStore = useMemo(
     () =>
       typeof indexedDB !== 'undefined'
@@ -842,10 +851,24 @@ function SignedInShell({
         : inMemoryAgentMetadataStore(),
     [],
   );
-  const issuer = useMemo(
-    () => localTokenIssuer({ metadataStore }),
-    [metadataStore],
-  );
+  const sessionData = session.data as
+    | { apiUrl: string; primaryAccountIdMail: string }
+    | undefined;
+  const userToken = tokens?.accessToken ?? null;
+  const issuer = useMemo(() => {
+    if (sessionData === undefined || userToken === null) {
+      // Pre-session: fall back to the in-memory local issuer so the
+      // Settings view can still render (no rows to list). Once the
+      // session resolves the real issuer replaces this and the
+      // listTokens effect re-runs.
+      return localTokenIssuer({ metadataStore });
+    }
+    return stalwartApiKeyIssuer({
+      jmapUrl: sessionData.apiUrl,
+      userToken,
+      accountId: sessionData.primaryAccountIdMail,
+    });
+  }, [sessionData, userToken, metadataStore]);
 
   const [agentTokens, setAgentTokens] = useState<readonly AgentTokenInfo[]>([]);
   const [agentTokensLoading, setAgentTokensLoading] = useState(false);
