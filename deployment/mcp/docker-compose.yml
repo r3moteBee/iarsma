@@ -1,4 +1,10 @@
-# Iarsma MCP server — single-command deployment.
+# Iarsma MCP server — single-command deployment (D-057).
+#
+# Multi-tenant by design: one MCP server can validate agent tokens
+# issued for any mailbox on the configured Stalwart host. Agents
+# present their own Stalwart-issued OAuth bearers; this server
+# introspects them at request time and forwards each call to JMAP
+# with the agent's own bearer — never an operator credential.
 #
 # Reads config from .env (copy .env.example as a starting point).
 # Brings up just the MCP server; Stalwart runs separately (this
@@ -7,7 +13,8 @@
 #
 # Usage:
 #   cp .env.example .env
-#   $EDITOR .env        # fill in IARSMA_JMAP_BASE_URL + the tokens
+#   $EDITOR .env        # fill in IARSMA_JMAP_BASE_URL +
+#                       #   IARSMA_INTROSPECTION_ADMIN_TOKEN
 #   docker compose up -d
 #   docker compose logs -f iarsma-mcp   # watch it start
 
@@ -25,18 +32,22 @@ services:
     ports:
       - "${IARSMA_MCP_HTTP_PORT:-8765}:${IARSMA_MCP_HTTP_PORT:-8765}"
     environment:
-      # Where the MCP server talks to Stalwart. Required.
+      # Stalwart base URL the MCP server talks JMAP to (and discovers
+      # the OIDC introspection endpoint from). Required.
       IARSMA_JMAP_BASE_URL: "${IARSMA_JMAP_BASE_URL}"
-      # JMAP bearer the server uses to authenticate to Stalwart on
-      # the account's behalf. For now: the same token the user
-      # issued via the Iarsma UI's "Agent tokens" form. Required.
-      IARSMA_AGENT_TOKEN: "${IARSMA_AGENT_TOKEN}"
-      # HTTP transport binding + auth.
+
+      # Operator credential for calling Stalwart's introspection
+      # endpoint. NEVER given to agents and NEVER used for JMAP.
+      # Required.
+      IARSMA_INTROSPECTION_ADMIN_TOKEN: "${IARSMA_INTROSPECTION_ADMIN_TOKEN}"
+
+      # HTTP transport binding.
       IARSMA_MCP_HTTP_PORT: "${IARSMA_MCP_HTTP_PORT:-8765}"
       IARSMA_MCP_HTTP_HOST: "${IARSMA_MCP_HTTP_HOST:-0.0.0.0}"
-      # The bearer agents present in their Authorization header.
-      # Required.
-      IARSMA_MCP_HTTP_TOKEN: "${IARSMA_MCP_HTTP_TOKEN}"
+
+      # Optional OIDC issuer override (defaults to IARSMA_JMAP_BASE_URL).
+      IARSMA_INTROSPECTION_ISSUER_URL: "${IARSMA_INTROSPECTION_ISSUER_URL:-}"
+
       # Optional: advertise discovery URN values back to MCP clients
       # via the `urn:iarsma:agent-context` capability. Set when the
       # MCP URL the agent should use differs from the container's

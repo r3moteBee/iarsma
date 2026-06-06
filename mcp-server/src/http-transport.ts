@@ -67,9 +67,14 @@ export function readApproval(approvalId: string, filePath?: string): ApprovalSta
 export type HttpTransportConfig = {
   /** Port to bind. Required when HTTP transport is enabled. */
   readonly port: number;
-  /** Shared Bearer secret. Legacy single-token mode — used when no
-   *  TokenStore is provided. */
-  readonly bearerToken: string;
+  /**
+   * Legacy shared Bearer secret. When set, agents authenticate by
+   * presenting this verbatim — used in dev or with a `tokens.json`
+   * fallback store. Under introspection mode (PR 36 / D-057) the
+   * operator omits this entirely; agents present their Stalwart-
+   * issued bearers and the token store does the validation.
+   */
+  readonly bearerToken?: string;
   /** Hostname to bind. Defaults to '0.0.0.0' (all interfaces) — operators
    *  put this behind a reverse proxy + TLS terminator. */
   readonly host?: string;
@@ -80,20 +85,16 @@ export type HttpTransportConfig = {
 
 /**
  * Pull HTTP transport config from environment. Returns `null` when
- * one or both env vars are missing — the caller skips HTTP setup and
- * runs stdio-only.
+ * `IARSMA_MCP_HTTP_PORT` is unset — the caller skips HTTP setup and
+ * runs stdio-only. `IARSMA_MCP_HTTP_TOKEN` is optional; when unset,
+ * the caller must wire a tokenStore (introspection or file) or no
+ * requests will authenticate.
  */
 export function loadHttpTransportConfig(
   env: NodeJS.ProcessEnv,
 ): HttpTransportConfig | null {
   const portRaw = env['IARSMA_MCP_HTTP_PORT'];
-  const tokenRaw = env['IARSMA_MCP_HTTP_TOKEN'];
-  if (
-    portRaw === undefined ||
-    portRaw === '' ||
-    tokenRaw === undefined ||
-    tokenRaw === ''
-  ) {
+  if (portRaw === undefined || portRaw === '') {
     return null;
   }
   const port = Number.parseInt(portRaw, 10);
@@ -102,9 +103,10 @@ export function loadHttpTransportConfig(
       `IARSMA_MCP_HTTP_PORT must be an integer in [1, 65535] (got ${portRaw}).`,
     );
   }
+  const tokenRaw = env['IARSMA_MCP_HTTP_TOKEN'];
   return {
     port,
-    bearerToken: tokenRaw,
+    ...(tokenRaw !== undefined && tokenRaw !== '' ? { bearerToken: tokenRaw } : {}),
     ...(env['IARSMA_MCP_HTTP_HOST'] !== undefined &&
     env['IARSMA_MCP_HTTP_HOST'] !== ''
       ? { host: env['IARSMA_MCP_HTTP_HOST'] }
@@ -161,7 +163,7 @@ export async function startHttpTransport(opts: {
 
       // Non-MCP paths (healthz, agents) don't need session management.
       if (!url.startsWith('/mcp')) {
-        await handleRequest({ req, res, transport: undefined as unknown as StreamableHTTPServerTransport, expectedToken: config.bearerToken, tokenStore: config.tokenStore });
+        await handleRequest({ req, res, transport: undefined as unknown as StreamableHTTPServerTransport, ...(config.bearerToken !== undefined ? { expectedToken: config.bearerToken } : {}), tokenStore: config.tokenStore });
         return;
       }
 
@@ -176,7 +178,8 @@ export async function startHttpTransport(opts: {
         transport = await createSession();
       }
 
-      await handleRequest({ req, res, transport, expectedToken: config.bearerToken, tokenStore: config.tokenStore });
+      await handleRequest({ req, res, transport, ...(config.bearerToken !== undefined ? { expectedToken: config.bearerToken } : {}), tokenStore: config.tokenStore });
+      // Squelch the no-op fallthrough below.
 
       // After handling, capture the session ID the transport assigned
       // (returned in the response header) and register it.
@@ -226,7 +229,11 @@ async function handleRequest(args: {
   readonly req: IncomingMessage;
   readonly res: ServerResponse;
   readonly transport: StreamableHTTPServerTransport;
-  readonly expectedToken: string;
+  /**
+   * Legacy shared bearer. When undefined, every authenticated request
+   * must resolve via the tokenStore — there is no fallback.
+   */
+  readonly expectedToken?: string;
   readonly tokenStore?: TokenStore | undefined;
 }): Promise<void> {
   const { req, res, transport, expectedToken, tokenStore } = args;
@@ -251,7 +258,10 @@ async function handleRequest(args: {
   // Agent management REST endpoints — authenticated with the user's
   // Stalwart bearer token (not an agent token).
   if (req.url?.startsWith('/agents')) {
-    await handleAgentEndpoint({ req, res, tokenStore, expectedToken });
+    await handleAgentEndpoint({
+      req, res, tokenStore,
+      ...(expectedToken !== undefined ? { expectedToken } : {}),
+    });
     return;
   }
 
@@ -265,13 +275,16 @@ async function handleRequest(args: {
   }
 
   // Auth: try token store first (per-agent tokens), fall back to
-  // static bearer (legacy single-token mode).
+  // static bearer (legacy single-token mode). When expectedToken is
+  // unset, the introspection-only path applies — no static fallback.
   const bearer = extractBearer(req.headers.authorization);
   let resolvedAgent: ResolvedIdentity | null = null;
   if (bearer !== null && tokenStore !== undefined) {
-    resolvedAgent = tokenStore.resolve(bearer);
+    resolvedAgent = await tokenStore.resolve(bearer);
   }
-  if (resolvedAgent === null && !verifyBearer(req.headers.authorization, expectedToken)) {
+  const legacyOk = expectedToken !== undefined &&
+    verifyBearer(req.headers.authorization, expectedToken);
+  if (resolvedAgent === null && !legacyOk) {
     res.writeHead(401, {
       'content-type': 'application/json',
       'www-authenticate': 'Bearer realm="iarsma-mcp"',
@@ -318,7 +331,7 @@ async function handleAgentEndpoint(args: {
   readonly req: IncomingMessage;
   readonly res: ServerResponse;
   readonly tokenStore?: TokenStore | undefined;
-  readonly expectedToken: string;
+  readonly expectedToken?: string;
 }): Promise<void> {
   const { req, res, tokenStore } = args;
 

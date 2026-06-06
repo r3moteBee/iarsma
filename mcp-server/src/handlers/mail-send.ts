@@ -18,6 +18,7 @@ import {
   session as jmapClientSession,
 } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolHandler } from '../invocation.js';
+import { resolveBearer } from './_resolve-bearer.js';
 import {
   type SessionGetDeps as JmapDeps,
   loadSessionGetDeps,
@@ -79,7 +80,7 @@ const BODY_PREVIEW_MAX = 256;
 
 export function createMailSendHandler(deps: MailSendDeps): ToolHandler {
   return async (input, ctx) => {
-    const token = ctx?.bearerToken ?? deps.bearerToken;
+    const token = resolveBearer(ctx?.bearerToken, deps.bearerToken);
     const params = parseInput(input);
 
     // Dry-run is local — no JMAP roundtrip. Return a preview that lets

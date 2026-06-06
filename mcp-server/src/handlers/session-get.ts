@@ -1,15 +1,21 @@
 /**
  * Handler for the `session.get` capability.
  *
- * Phase 0 design: the MCP server fetches `/.well-known/jmap` from the
- * configured Stalwart deployment using the agent's bearer token, then
- * narrows the response to the `Session` shape the capability contract
- * promises (mirrors the shell-side flow in `shell/src/runtime/jmap-client.ts`).
+ * The MCP server fetches `/.well-known/jmap` from the configured
+ * Stalwart deployment using the agent's bearer token, then narrows the
+ * response to the `Session` shape the capability contract promises
+ * (mirrors the shell-side flow in `shell/src/runtime/jmap-client.ts`).
  *
- * Auth posture (Phase 0 stdio): the bearer token comes from the
- * `IARSMA_AGENT_TOKEN` env var. Phase 1's HTTP/SSE transport replaces
- * this with the per-request `Authorization: Bearer <token>` header,
- * threaded through the dispatcher via the agent identity.
+ * Auth posture (PR 36 / D-057): the bearer is per-request — it
+ * arrives via `ctx.bearerToken`, which the HTTP transport pulls from
+ * the introspected agent identity. The agent's own Stalwart-issued
+ * OAuth access token is forwarded verbatim to JMAP, so the call runs
+ * with the agent's scopes — never an operator credential.
+ *
+ * The optional `deps.bearerToken` is a legacy stdio-only path: when
+ * the server starts under stdio with `IARSMA_AGENT_TOKEN` set, that
+ * token is used as a fallback. HTTP-transport callers always have
+ * `ctx.bearerToken` set and never hit the fallback.
  *
  * Parse path: shared with the shell via `@iarsma/wasm-bindings/jmap-client`.
  * Both hosts route the JMAP response body through the same WASM component
@@ -19,6 +25,7 @@
 
 import { session as jmapClientSession } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolHandler } from '../invocation.js';
+import { resolveBearer } from './_resolve-bearer.js';
 
 /**
  * Field-aligned with the codegen-emitted Session output schema. Stays in
@@ -45,26 +52,27 @@ export class SessionGetConfigError extends Error {
 export type SessionGetDeps = {
   /** Stalwart base URL — `/.well-known/jmap` is appended. */
   readonly jmapBaseUrl: string;
-  /** Bearer token to authenticate the JMAP fetch. */
-  readonly bearerToken: string;
+  /**
+   * Legacy fallback bearer token. Used only when the request didn't
+   * supply one via `ctx.bearerToken` (e.g. stdio transport in dev).
+   * Under HTTP transport with introspection, this stays undefined.
+   */
+  readonly bearerToken?: string;
   /** Override for tests. Defaults to the global `fetch`. */
   readonly fetch?: typeof fetch;
 };
 
 /**
- * Read the Phase 0 deps from environment variables. Returns `null` when
- * either var is missing — the caller decides whether to refuse to
- * advertise the tool or expose it as `not_implemented`.
+ * Read the deps from environment variables. Returns `null` only when
+ * `IARSMA_JMAP_BASE_URL` is missing — that's the one piece the server
+ * cannot synthesize. `IARSMA_AGENT_TOKEN` is optional: when present
+ * it becomes the stdio fallback bearer; when absent, every request
+ * must supply its own token via the HTTP transport's introspection
+ * (PR 36 / D-057).
  */
 export function loadSessionGetDeps(env: NodeJS.ProcessEnv): SessionGetDeps | null {
   const jmapBaseUrl = env['IARSMA_JMAP_BASE_URL']?.trim();
-  const bearerToken = env['IARSMA_AGENT_TOKEN']?.trim();
-  if (
-    jmapBaseUrl === undefined ||
-    jmapBaseUrl.length === 0 ||
-    bearerToken === undefined ||
-    bearerToken.length === 0
-  ) {
+  if (jmapBaseUrl === undefined || jmapBaseUrl.length === 0) {
     return null;
   }
   // Surface obviously-bad config at startup.
@@ -75,7 +83,13 @@ export function loadSessionGetDeps(env: NodeJS.ProcessEnv): SessionGetDeps | nul
       `IARSMA_JMAP_BASE_URL is not a valid URL: ${JSON.stringify(jmapBaseUrl)}`,
     );
   }
-  return { jmapBaseUrl, bearerToken };
+  const bearerToken = env['IARSMA_AGENT_TOKEN']?.trim();
+  return {
+    jmapBaseUrl,
+    ...(bearerToken !== undefined && bearerToken.length > 0
+      ? { bearerToken }
+      : {}),
+  };
 }
 
 /**
@@ -86,7 +100,7 @@ export function loadSessionGetDeps(env: NodeJS.ProcessEnv): SessionGetDeps | nul
 export function createSessionGetHandler(deps: SessionGetDeps): ToolHandler {
   return async (_input, ctx) => {
     const fetchImpl = deps.fetch ?? fetch;
-    const token = ctx?.bearerToken ?? deps.bearerToken;
+    const token = resolveBearer(ctx?.bearerToken, deps.bearerToken);
     const url = `${deps.jmapBaseUrl.replace(/\/$/, '')}/.well-known/jmap`;
     let response: Response;
     try {

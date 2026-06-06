@@ -511,3 +511,39 @@ In-memory also dodges a class of races: persisted holds would need clock-skew ha
 - Server-side delayed delivery (JMAP `EmailSubmission` `holdUntil`) as an alternative path.
 - Threading `previewHashHex` through the buffer so the dry-run hash binds to the action-log entry on the buffered path.
 - A keyboard shortcut to undo the most recent pending send (Cmd-Z works for *committed* actions via the UndoRegistry; pending-send undo is toast-button only).
+
+## D-057 — Agent tokens introspect via Stalwart; MCP server is stateless multi-tenant proxy
+**Date:** 2026-06-06
+**Decision:** The MCP server validates every agent bearer at request time by POSTing to Stalwart's OIDC introspection endpoint (RFC 7662) and forwards the agent's own bearer verbatim to JMAP. There is **no** shared `IARSMA_AGENT_TOKEN`, no per-deployment `tokens.json` for production deploys, and no operator-managed list of "which secret maps to which agent". The only operator credential is `IARSMA_INTROSPECTION_ADMIN_TOKEN` — a Stalwart admin Bearer the MCP server uses *only* to authorize introspection calls. It is never sent to agents and never used for JMAP.
+
+Concretely:
+
+- Users issue OAuth tokens for their own agents through the webmail's `Settings → Agent tokens` form. Tokens come straight from Stalwart's `client_credentials` token endpoint, so Stalwart owns the lifecycle (issuance, expiry, revocation).
+- Agents present `Authorization: Bearer <stalwart-issued-token>` to the MCP server. The server's `stalwartIntrospectionTokenStore` POSTs the bearer to `/oauth/introspect` (resolved via OIDC discovery) authenticated with the operator's admin Bearer.
+- Introspection returns `{active, client_id, scope, username}`. We surface that as a `ResolvedIdentity` carrying the agent id, its scopes, and `stalwartApiKey: bearer` — the same bearer the agent presented. Every handler call then runs with that bearer as `ctx.bearerToken`.
+- Results are cached in-process for 30 seconds (keyed by the SHA-256 of the bearer). Both `active=true` and `active=false` results are cached so a revoked-token poll doesn't thrash. The TTL is short so revocations propagate within seconds.
+
+**Why:** Before D-057 the MCP server had three things it shouldn't have had:
+
+1. **A shared "system" bearer** (`IARSMA_AGENT_TOKEN`) used for *every* JMAP call regardless of which agent invoked the tool. Agent identity was lost at the network boundary; Stalwart only ever saw one principal acting on the mailbox. That made auditing rely on the MCP server's own log, which has weaker integrity than Stalwart's.
+2. **A token store** (`tokens.json` or `IARSMA_MCP_HTTP_TOKEN`) that the operator had to keep in sync with the webmail's IDB-resident issued tokens. Two sources of truth, one of which (the file) was easy to forget to update when a user revoked a token. The CLI ergonomics also pulled toward putting agent secrets in operator-controlled `.env` files, which is exactly the wrong place for them.
+3. **Single-tenant assumptions** — adding a second mailbox meant a second MCP server deployment or a hand-rolled multiplexer. Stalwart hosts many mailboxes; the MCP server should too, with one process.
+
+Stalwart already does all the auth work this design needs: OIDC issuance, revocation, scopes. The MCP server has no reason to reimplement any of it. Introspection is the standard way for resource servers (us) to ask the auth server (Stalwart) "is this bearer still good, and what scopes does it carry?" — that's exactly the question we're trying to answer per request.
+
+Multi-tenant falls out naturally: different agents present different bearers, each introspects to its own `client_id`, each call goes to JMAP with the agent's own permissions. One MCP process per Stalwart host, no per-user config.
+
+The agent's bearer is the same OAuth access token Stalwart issued — it works for JMAP calls directly. We don't have to mint a separate "JMAP-only" credential or maintain a mapping table; the agent's identity at Stalwart and at the MCP server is the same identity. Audit trails align because both surfaces see the same principal.
+
+**How to apply:**
+- New deploys MUST set `IARSMA_INTROSPECTION_ADMIN_TOKEN`. The legacy `IARSMA_AGENT_TOKEN` env var is now optional and only used in stdio mode for local dev; HTTP-transport deploys should leave it unset.
+- New deploys MUST NOT set `IARSMA_MCP_HTTP_TOKEN`. The shared bearer path remains as a dev-only fallback (so existing local setups keep working) but production wires the introspection store instead.
+- The `fileTokenStore` (`tokens.json`) and `singleTokenStore` (legacy static bearer) stay in-tree for backwards compatibility and local dev, but the docker-compose recipe defaults to introspection. Removing them is a future cleanup once we're confident no one's using the static paths.
+- New MCP handlers should never read a "system" token from `deps`. They take `ctx.bearerToken` from the resolved identity and pass it through. `_resolve-bearer.ts` is the canonical helper; new handlers should use it instead of the `ctx?.bearerToken ?? deps.bearerToken` pattern.
+- Settings UI: the operator setup section is collapsed at the bottom of the connection-docs panel. The user-facing flow (issue token → paste bearer into agent → done) has no `.env` mention. If a future PR adds operator-vs-user disclosure to the panel, keep the asymmetry — most viewers are users, not operators.
+
+**Out of scope (follow-ups):**
+- Removing the legacy `singleTokenStore` and `fileTokenStore` paths from `index.ts` once the introspection deploys have been live long enough to be confident.
+- A persistent introspection-cache tier (e.g., Redis) for MCP servers running behind a load balancer where in-process caching is per-replica.
+- Surfacing introspection failures (e.g., admin token expired) in the webmail's Activity view rather than only in the MCP server logs.
+- Replacing the per-request introspection round-trip with a long-lived JWT once Stalwart supports issuing JWT access tokens with embedded scopes (introspection-free fast path).

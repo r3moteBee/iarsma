@@ -30,15 +30,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const toolsDir = path.resolve(here, '..', '..', '..', 'tools', 'codegen', 'dist', 'tools');
 
 describe('loadHttpTransportConfig', () => {
-  it('returns null when port or token is missing', () => {
+  it('returns null when port is missing', () => {
     expect(loadHttpTransportConfig({})).toBeNull();
-    expect(loadHttpTransportConfig({ IARSMA_MCP_HTTP_PORT: '8765' })).toBeNull();
-    expect(
-      loadHttpTransportConfig({ IARSMA_MCP_HTTP_TOKEN: 'tok' }),
-    ).toBeNull();
+    expect(loadHttpTransportConfig({ IARSMA_MCP_HTTP_TOKEN: 'tok' })).toBeNull();
   });
 
-  it('returns config when both env vars are set', () => {
+  it('returns config with only port set — token is optional under introspection', () => {
+    const c = loadHttpTransportConfig({ IARSMA_MCP_HTTP_PORT: '8765' });
+    expect(c).toEqual({ port: 8765 });
+  });
+
+  it('returns config when port + legacy token are set', () => {
     const c = loadHttpTransportConfig({
       IARSMA_MCP_HTTP_PORT: '8765',
       IARSMA_MCP_HTTP_TOKEN: 'tok',

@@ -811,22 +811,25 @@ function McpConnectionDocs() {
     configuredMcpUrl ?? `http://<MCP-HOST>:${defaultPort}/mcp`;
 
   // The docker-compose recipe at deployment/mcp/ is the supported
-  // path — three commands, no manual env juggling per-host.
-  const composeQuickstart = `# Three commands — fills in .env with your Stalwart URL + token, then up.
+  // path. Operator runs it once per Stalwart host; agent tokens are
+  // never copied into the server's .env (D-057).
+  const composeQuickstart = `# Operator-only — runs once per Stalwart host. Agents do NOT
+# need anything on the server's filesystem; their tokens get
+# validated against Stalwart at request time.
 git clone https://github.com/r3moteBee/iarsma.git
 cd iarsma/deployment/mcp
 cp .env.example .env
-$EDITOR .env   # Set IARSMA_JMAP_BASE_URL + the two token fields
+$EDITOR .env   # Set IARSMA_JMAP_BASE_URL + IARSMA_INTROSPECTION_ADMIN_TOKEN
 docker compose up -d
 docker compose logs -f iarsma-mcp
-# Expect: "Streamable HTTP transport listening on 0.0.0.0:${defaultPort}"`;
+# Expect: "Streamable HTTP transport listening on 0.0.0.0:${defaultPort}"
+# and:    "Token store: stalwart-introspection @ ${jmapBaseUrl}"`;
 
-  const envFileContents = `# deployment/mcp/.env — paste these values; .env.example has the
-# blank template. The Stalwart URL is pre-filled from this webmail's
-# origin.
+  const envFileContents = `# deployment/mcp/.env — operator config only. Agent tokens
+# (issued below) NEVER appear here — they're validated against
+# Stalwart's introspection endpoint at request time.
 IARSMA_JMAP_BASE_URL=${jmapBaseUrl}
-IARSMA_AGENT_TOKEN=<TOKEN-FROM-THE-ISSUE-FORM-BELOW>
-IARSMA_MCP_HTTP_TOKEN=<TOKEN-FROM-THE-ISSUE-FORM-BELOW>
+IARSMA_INTROSPECTION_ADMIN_TOKEN=<your-Stalwart-admin-Bearer>
 IARSMA_MCP_HTTP_PORT=${defaultPort}
 IARSMA_MCP_HTTP_HOST=0.0.0.0`;
 
@@ -875,91 +878,61 @@ console.log(tools.map((t) => t.name));`;
         <h4>How this fits together</h4>
         <p>
           This webmail at <CopyableValue value={jmapBaseUrl} />{' '}
-          issues tokens + audits agent calls. Agents don't connect
-          here — they connect to a separate{' '}
-          <strong>MCP server</strong> process that you (or your
-          operator) run on a host you control. The MCP server talks
-          to this Stalwart instance via JMAP and exposes tools over
-          HTTP.
+          issues tokens, validates agent activity, and shows audit
+          trails. Agents don't connect here — they connect to a
+          separate <strong>MCP server</strong> process that talks to
+          Stalwart on each agent's behalf. The MCP server validates
+          each agent's bearer against Stalwart's introspection
+          endpoint at request time, so there's no shared secret
+          piped through the server: revoking a token in this UI
+          locks the agent out within seconds.
         </p>
         {configuredMcpUrl !== null ? (
           <p>
             This deployment already advertises a running MCP server
             at <CopyableValue value={configuredMcpUrl} /> — skip to{' '}
-            <strong>step 3</strong> if that's the endpoint your
-            agent should hit.
+            <strong>Connect your agent</strong> below.
           </p>
         ) : (
           <p>
             This deployment does not yet advertise a running MCP
             server URL (<code>VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL</code>{' '}
-            is unset). The instructions below get you to one.
+            is unset). The operator section below brings one up.
           </p>
         )}
 
-        <h4>1. Run the MCP server (one command, then it stays up)</h4>
-        <p>
-          Pick a host you control (your pantheon server, a side
-          container next to Stalwart — anywhere your agents can
-          reach). Docker + the Compose plugin are the only
-          prerequisites. The repo ships a ready-to-go recipe under{' '}
-          <code>deployment/mcp/</code> that builds the image, wires
-          the env vars, restarts on reboot, and stays running:
-        </p>
-        <CodeBlock value={composeQuickstart} />
-        <p>
-          Your <code>.env</code> ends up looking like this — the
-          Stalwart URL is pre-filled from where you're reading this
-          page; you only paste the token (from the issue form
-          below) twice:
-        </p>
-        <CodeBlock value={envFileContents} />
-        <p>
-          The server logs{' '}
-          <code>
-            Streamable HTTP transport listening on 0.0.0.0:{defaultPort}
-          </code>{' '}
-          once it's ready.{' '}
-          <code>IARSMA_AGENT_TOKEN</code> is what the server uses to
-          talk to Stalwart on your account's behalf;{' '}
-          <code>IARSMA_MCP_HTTP_TOKEN</code> is what agents present
-          in the <code>Authorization</code> header. Use the same
-          token you issue below for both for now — per-agent
-          introspection (different MCP_HTTP_TOKEN per agent) lands
-          as a separate PR.
-        </p>
-        <p>
-          See <code>deployment/mcp/README.md</code> in the repo for
-          updates, reverse-proxy notes, and troubleshooting.
-        </p>
+        <h4>Connect your agent (this is what most users do)</h4>
+        <ol>
+          <li>
+            <strong>Issue a token</strong> using the form below this
+            panel. Pick scopes carefully — agents only see the tools
+            their token permits, and revoking a token is the only
+            kill switch. The secret is shown once.
+          </li>
+          <li>
+            <strong>Point your agent at the MCP server</strong>:{' '}
+            <CopyableValue value={mcpUrlForAgent} />
+            {configuredMcpUrl === null ? (
+              <>
+                {' '}— replace <code>&lt;MCP-HOST&gt;</code> with the
+                hostname or IP your operator set up.
+              </>
+            ) : null}
+          </li>
+          <li>
+            <strong>Set the Authorization header</strong> to{' '}
+            <code>Bearer &lt;the-secret-from-step-1&gt;</code>.
+            That's it — no <code>.env</code> file on the server, no
+            operator coordination. The MCP server introspects your
+            token against Stalwart and runs each call with your
+            mailbox's permissions.
+          </li>
+        </ol>
 
-        <h4>2. Issue a token</h4>
-        <p>
-          Use the form below this panel. Pick scopes carefully —
-          agents only see the tools their token permits, and
-          revoking a token is the only kill switch. The secret is
-          shown once, so paste it into both your server env (step 1)
-          and your agent config (steps 4–5) immediately.
-        </p>
-
-        <h4>3. The URL your agent connects to</h4>
-        <p>
-          Once the server is running, your MCP client connects to{' '}
-          <CopyableValue value={mcpUrlForAgent} />
-        </p>
-        {configuredMcpUrl === null ? (
-          <p>
-            Replace <code>&lt;MCP-HOST&gt;</code> with the hostname
-            or IP where you ran step 1 — that's the host your agent
-            (pantheon, Claude Desktop, custom script) needs to be
-            able to reach. The path is always <code>/mcp</code>.
-          </p>
-        ) : null}
-
-        <h4>4. Sanity check with curl</h4>
+        <h4>Sanity check with curl</h4>
         <CodeBlock value={curlExample} />
 
-        <h4>5. Or use the official MCP SDK</h4>
+        <h4>Or use the official MCP SDK</h4>
         <p>
           TypeScript example using{' '}
           <code>@modelcontextprotocol/sdk</code>:
@@ -985,6 +958,26 @@ console.log(tools.map((t) => t.name));`;
           <strong>Activity</strong> view with a hash-chain audit
           entry. Each token row below has an <em>Activity</em> link
           that pre-filters Activity by that agent.
+        </p>
+
+        <h4>Operator: bring up the MCP server (one-time)</h4>
+        <p>
+          This is only for the person running the Stalwart host.
+          Users issuing tokens don't need any of this. The MCP
+          server is multi-tenant: <strong>one instance per Stalwart
+          host</strong> serves agents for every mailbox.
+        </p>
+        <CodeBlock value={composeQuickstart} />
+        <p>
+          Your <code>.env</code> needs only the Stalwart URL and one
+          operator credential — an admin Bearer token Stalwart uses
+          to authorize introspection requests. No per-user values
+          go here:
+        </p>
+        <CodeBlock value={envFileContents} />
+        <p>
+          See <code>deployment/mcp/README.md</code> in the repo for
+          updates, reverse-proxy notes, and troubleshooting.
         </p>
       </div>
     </details>
