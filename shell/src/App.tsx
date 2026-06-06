@@ -51,7 +51,9 @@ import { Sidebar } from './components/sidebar.js';
 import { TopBar } from './components/top-bar.js';
 import { ComposeView } from './views/compose-view.js';
 import { ContactsView } from './views/contacts-view.js';
+import { AgentDashboardView } from './views/agent-dashboard-view.js';
 import { AgentSettingsView } from './views/agent-settings-view.js';
+import { useAgentDashboard } from './runtime/use-agent-dashboard.js';
 import { FilesView, type FileTreeNode, type FileContent as FilesViewContent, type CommitHistoryEntry } from './views/files-view.js';
 import { githubClient, type GitHubConfig } from './runtime/github-client.js';
 import { indexedDbGitHubConfigStore, inMemoryGitHubConfigStore, type GitHubStoredConfig } from './runtime/github-config-store.js';
@@ -882,6 +884,14 @@ function SignedInShell({
   });
   const setActivityFilters = useSetAtom(activityFiltersAtom);
 
+  // Agent dashboard (PR 38). Derives aggregate + per-agent metrics
+  // from the same raw chain useActivityLog already polls — no
+  // duplicate fetch loop.
+  const agentDashboard = useAgentDashboard({
+    tokens: agentTokens,
+    entries: activity.allEntries,
+  });
+
   // PR 21 — Activity row's Undo button. Looks up the inverse, runs
   // it through the same invoker (so it's logged + cached + visible
   // in the chain as a normal action), then marks the original undo
@@ -912,6 +922,7 @@ function SignedInShell({
     contacts: 'Contacts',
     files: 'Files',
     approvals: 'Approvals',
+    agents: 'Agents',
     activity: 'Activity',
     settings: 'Settings',
   };
@@ -1155,6 +1166,16 @@ function SignedInShell({
           />
         ) : activeView === 'outbox' ? (
           <OutboxView />
+        ) : activeView === 'agents' ? (
+          <AgentDashboardView
+            aggregate={agentDashboard.aggregate}
+            agents={agentDashboard.agents}
+            onManageTokens={() => setActiveView('settings')}
+            onViewActivity={(agentName) => {
+              setActivityFilters((prev) => ({ ...prev, actor: agentName }));
+              setActiveView('activity');
+            }}
+          />
         ) : activeView === 'activity' ? (
           <ActivityView
             entries={activity.entries}

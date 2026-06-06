@@ -68,6 +68,9 @@ export type UseActivityLogOptions = {
 
 export type UseActivityLogResult = {
   readonly entries: readonly ActivityEntry[];
+  /** Raw, unfiltered, unpaged action-log chain. Surfaces for views
+   *  that derive their own rollups (e.g. AgentDashboardView, PR 38). */
+  readonly allEntries: readonly StoredEntry[];
   readonly isLoading: boolean;
   readonly integrityStatus: 'verified' | 'failed' | 'checking' | 'unchecked';
   readonly integrityError?: string;
@@ -192,6 +195,7 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
 
   return {
     entries: paged,
+    allEntries,
     isLoading,
     integrityStatus,
     ...(integrityError !== undefined ? { integrityError } : {}),

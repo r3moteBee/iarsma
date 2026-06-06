@@ -1,0 +1,180 @@
+/* Agent dashboard — Phase 4 #9 / PR 38.
+ *
+ * Aggregate cards on top, per-agent table below. Mirrors the look
+ * of activity-view.module.css so the two surfaces feel cohesive.
+ */
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  max-width: 80em;
+  padding: var(--space-md) var(--space-lg);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.5em;
+}
+
+.manageButton {
+  padding: 0.4em 0.9em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-1);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.manageButton:hover {
+  border-color: var(--accent);
+}
+
+.lede {
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+/* Aggregate cards */
+
+.aggregateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11em, 1fr));
+  gap: var(--space-md);
+}
+
+.aggregateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.aggregateValue {
+  font-size: 2em;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--fg);
+}
+
+.aggregateLabel {
+  font-size: 0.9em;
+  color: var(--fg-muted);
+}
+
+.aggregateHint {
+  font-size: 0.8em;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* Table */
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.agentTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.agentTable th,
+.agentTable td {
+  padding: 0.6em 0.8em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.agentTable thead th {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.agentTable tbody tr {
+  border-top: 1px solid var(--border);
+}
+
+.agentTable tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--accent) 3%, transparent);
+}
+
+.revokedRow {
+  opacity: 0.55;
+}
+
+.numericCol {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.commitSplit {
+  color: var(--fg-muted);
+  font-size: 0.85em;
+}
+
+.agentName {
+  display: block;
+  font-weight: 600;
+}
+
+.tokenIdHint {
+  display: block;
+  font-size: 0.8em;
+  color: var(--fg-muted);
+  font-family: var(--font-mono, monospace);
+}
+
+.scopeList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em;
+}
+
+.activityLink {
+  background: none;
+  border: none;
+  padding: 0.25em 0.5em;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.activityLink:hover {
+  text-decoration: underline;
+}
+
+/* Empty state */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--fg-muted);
+}

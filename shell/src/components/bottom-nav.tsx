@@ -144,7 +144,7 @@ export function BottomNav({
   ];
 
   const isSecondaryActive =
-    activeView === 'activity' || activeView === 'settings' || activeView === 'outbox';
+    activeView === 'activity' || activeView === 'settings' || activeView === 'outbox' || activeView === 'agents';
 
   return (
     <>
@@ -183,6 +183,15 @@ export function BottomNav({
             ) : null}
           </button>
         ) : null}
+        <button
+          type="button"
+          className={styles.sheetItem}
+          role="menuitem"
+          onClick={() => { onNavigate('agents'); setMoreOpen(false); }}
+        >
+          <span className={styles.navIcon}><ActivityIcon /></span>
+          Agents
+        </button>
         <button
           type="button"
           className={styles.sheetItem}
