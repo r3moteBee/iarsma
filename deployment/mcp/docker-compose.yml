@@ -1,0 +1,57 @@
+# Iarsma MCP server — single-command deployment.
+#
+# Reads config from .env (copy .env.example as a starting point).
+# Brings up just the MCP server; Stalwart runs separately (this
+# compose recipe doesn't touch it — it only needs to be reachable
+# at IARSMA_JMAP_BASE_URL).
+#
+# Usage:
+#   cp .env.example .env
+#   $EDITOR .env        # fill in IARSMA_JMAP_BASE_URL + the tokens
+#   docker compose up -d
+#   docker compose logs -f iarsma-mcp   # watch it start
+
+services:
+  iarsma-mcp:
+    build:
+      # The Dockerfile lives in mcp-server/ but its build context is
+      # the monorepo root (workspace deps). Pointing both up two
+      # levels handles that.
+      context: ../..
+      dockerfile: mcp-server/Dockerfile
+    image: iarsma-mcp:local
+    container_name: iarsma-mcp
+    restart: unless-stopped
+    ports:
+      - "${IARSMA_MCP_HTTP_PORT:-8765}:${IARSMA_MCP_HTTP_PORT:-8765}"
+    environment:
+      # Where the MCP server talks to Stalwart. Required.
+      IARSMA_JMAP_BASE_URL: "${IARSMA_JMAP_BASE_URL}"
+      # JMAP bearer the server uses to authenticate to Stalwart on
+      # the account's behalf. For now: the same token the user
+      # issued via the Iarsma UI's "Agent tokens" form. Required.
+      IARSMA_AGENT_TOKEN: "${IARSMA_AGENT_TOKEN}"
+      # HTTP transport binding + auth.
+      IARSMA_MCP_HTTP_PORT: "${IARSMA_MCP_HTTP_PORT:-8765}"
+      IARSMA_MCP_HTTP_HOST: "${IARSMA_MCP_HTTP_HOST:-0.0.0.0}"
+      # The bearer agents present in their Authorization header.
+      # Required.
+      IARSMA_MCP_HTTP_TOKEN: "${IARSMA_MCP_HTTP_TOKEN}"
+      # Optional: advertise discovery URN values back to MCP clients
+      # via the `urn:iarsma:agent-context` capability. Set when the
+      # MCP URL the agent should use differs from the container's
+      # internal binding (e.g., behind a reverse proxy).
+      IARSMA_WEBMAIL_MCP_URL: "${IARSMA_WEBMAIL_MCP_URL:-}"
+      IARSMA_AGENT_CONTEXT_ACTION_LOG_URL: "${IARSMA_AGENT_CONTEXT_ACTION_LOG_URL:-}"
+      IARSMA_MEMORY_BACKEND_URL: "${IARSMA_MEMORY_BACKEND_URL:-}"
+    # Healthcheck via the same /mcp endpoint; an unauthenticated POST
+    # returns 401 quickly, which is enough to confirm the listener
+    # is alive without needing a valid token in the image config.
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "wget -qO- --header='content-type: application/json' --post-data='{}' http://localhost:${IARSMA_MCP_HTTP_PORT:-8765}/mcp 2>&1 | grep -q . && exit 0 || exit 1"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

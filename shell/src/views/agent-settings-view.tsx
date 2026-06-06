@@ -775,26 +775,63 @@ function TokensSection({
 // ── MCP connection instructions (PR 34) ────────────────────────────
 
 /**
- * Collapsible docs panel that walks the user through:
- *   1. The MCP endpoint URL (from agentContextAtom — populated when
- *      the operator set VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL).
- *   2. The Authorization header shape using a token issued below.
- *   3. A copy-paste curl example.
- *   4. A copy-paste @modelcontextprotocol/sdk client example.
- *   5. A note on scope enforcement — the agent only sees the tools
- *      the token's scope set permits.
+ * Collapsible docs panel that walks the user through deploying the
+ * Iarsma MCP server and pointing an agent at it.
  *
- * Defaults to closed so it doesn't dominate the page for users who
- * already wired their agents up.
+ * Architecture: this webmail issues tokens + audits agent calls. The
+ * MCP server itself is a separate Node.js process the user (or their
+ * operator) runs on a host they control — pantheon box, side
+ * container next to Stalwart, etc. The webmail can't know that
+ * hostname ahead of time, so the deploy snippet uses the current
+ * page's origin for the JMAP base URL (auto-filled) and a labelled
+ * `<MCP-HOST>` placeholder for the host the user picks.
+ *
+ * When the operator HAS set the webmail's VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL
+ * (so the shell knows where the running MCP server is), it's shown
+ * up front and the user can skip to the connect step.
+ *
+ * Defaults to closed so the panel doesn't dominate the page for
+ * users who already have their agents wired up.
  */
 function McpConnectionDocs() {
   const agentContext = useAtomValue(agentContextAtom);
-  const mcpUrl = agentContext?.webmailMcpUrl ?? null;
-  // Placeholder used in the code examples when no URL is configured.
-  const displayUrl = mcpUrl ?? '<your-mcp-url>';
+  const configuredMcpUrl = agentContext?.webmailMcpUrl ?? null;
+  // JMAP base = where this webmail is served. The current page's
+  // origin works because Stalwart serves both JMAP and webmail from
+  // the same host. Fallback for SSR / tests is a placeholder string.
+  const jmapBaseUrl =
+    typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://<your-stalwart-host>';
+  const defaultPort = 8765;
+  // The URL agents actually connect to. If the operator already
+  // wired one up, use it; otherwise build a labelled placeholder
+  // — the user fills in <MCP-HOST> with whatever box ran step 1.
+  const mcpUrlForAgent =
+    configuredMcpUrl ?? `http://<MCP-HOST>:${defaultPort}/mcp`;
+
+  // The docker-compose recipe at deployment/mcp/ is the supported
+  // path — three commands, no manual env juggling per-host.
+  const composeQuickstart = `# Three commands — fills in .env with your Stalwart URL + token, then up.
+git clone https://github.com/r3moteBee/iarsma.git
+cd iarsma/deployment/mcp
+cp .env.example .env
+$EDITOR .env   # Set IARSMA_JMAP_BASE_URL + the two token fields
+docker compose up -d
+docker compose logs -f iarsma-mcp
+# Expect: "Streamable HTTP transport listening on 0.0.0.0:${defaultPort}"`;
+
+  const envFileContents = `# deployment/mcp/.env — paste these values; .env.example has the
+# blank template. The Stalwart URL is pre-filled from this webmail's
+# origin.
+IARSMA_JMAP_BASE_URL=${jmapBaseUrl}
+IARSMA_AGENT_TOKEN=<TOKEN-FROM-THE-ISSUE-FORM-BELOW>
+IARSMA_MCP_HTTP_TOKEN=<TOKEN-FROM-THE-ISSUE-FORM-BELOW>
+IARSMA_MCP_HTTP_PORT=${defaultPort}
+IARSMA_MCP_HTTP_HOST=0.0.0.0`;
 
   const curlExample = `TOKEN="<paste-the-secret-shown-when-you-issued-the-token>"
-MCP="${displayUrl}"
+MCP="${mcpUrlForAgent}"
 
 curl -s -X POST "$MCP" \\
   -H "authorization: Bearer $TOKEN" \\
@@ -811,7 +848,7 @@ curl -s -X POST "$MCP" \\
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const transport = new StreamableHTTPClientTransport(
-  new URL('${displayUrl}'),
+  new URL('${mcpUrlForAgent}'),
   {
     requestInit: {
       headers: {
@@ -835,57 +872,101 @@ console.log(tools.map((t) => t.name));`;
     <details className={styles['mcpDocs']}>
       <summary>How to connect an MCP agent</summary>
       <div className={styles['mcpDocsBody']}>
-        <h4>1. Endpoint</h4>
+        <h4>How this fits together</h4>
         <p>
-          {mcpUrl !== null ? (
-            <>
-              The MCP server speaks{' '}
-              <a
-                href="https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http"
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                Streamable HTTP
-              </a>{' '}
-              at <CopyableValue value={mcpUrl} />
-            </>
-          ) : (
-            <>
-              <span className={styles['mcpUrlMissing']}>
-                The MCP URL for this deployment isn't configured in
-                the shell. Ask the operator to set{' '}
-                <code>VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL</code>, or
-                use the path the operator gave you.
-              </span>
-            </>
-          )}
+          This webmail at <CopyableValue value={jmapBaseUrl} />{' '}
+          issues tokens + audits agent calls. Agents don't connect
+          here — they connect to a separate{' '}
+          <strong>MCP server</strong> process that you (or your
+          operator) run on a host you control. The MCP server talks
+          to this Stalwart instance via JMAP and exposes tools over
+          HTTP.
+        </p>
+        {configuredMcpUrl !== null ? (
+          <p>
+            This deployment already advertises a running MCP server
+            at <CopyableValue value={configuredMcpUrl} /> — skip to{' '}
+            <strong>step 3</strong> if that's the endpoint your
+            agent should hit.
+          </p>
+        ) : (
+          <p>
+            This deployment does not yet advertise a running MCP
+            server URL (<code>VITE_AGENT_CONTEXT_WEBMAIL_MCP_URL</code>{' '}
+            is unset). The instructions below get you to one.
+          </p>
+        )}
+
+        <h4>1. Run the MCP server (one command, then it stays up)</h4>
+        <p>
+          Pick a host you control (your pantheon server, a side
+          container next to Stalwart — anywhere your agents can
+          reach). Docker + the Compose plugin are the only
+          prerequisites. The repo ships a ready-to-go recipe under{' '}
+          <code>deployment/mcp/</code> that builds the image, wires
+          the env vars, restarts on reboot, and stays running:
+        </p>
+        <CodeBlock value={composeQuickstart} />
+        <p>
+          Your <code>.env</code> ends up looking like this — the
+          Stalwart URL is pre-filled from where you're reading this
+          page; you only paste the token (from the issue form
+          below) twice:
+        </p>
+        <CodeBlock value={envFileContents} />
+        <p>
+          The server logs{' '}
+          <code>
+            Streamable HTTP transport listening on 0.0.0.0:{defaultPort}
+          </code>{' '}
+          once it's ready.{' '}
+          <code>IARSMA_AGENT_TOKEN</code> is what the server uses to
+          talk to Stalwart on your account's behalf;{' '}
+          <code>IARSMA_MCP_HTTP_TOKEN</code> is what agents present
+          in the <code>Authorization</code> header. Use the same
+          token you issue below for both for now — per-agent
+          introspection (different MCP_HTTP_TOKEN per agent) lands
+          as a separate PR.
+        </p>
+        <p>
+          See <code>deployment/mcp/README.md</code> in the repo for
+          updates, reverse-proxy notes, and troubleshooting.
         </p>
 
         <h4>2. Issue a token</h4>
         <p>
-          Use the form below. Pick scopes carefully — agents only see
-          the tools their token permits, and revoking a token is the
-          only kill switch. The secret shown after issuance won't
-          appear again, so copy it into the agent's config
-          immediately.
+          Use the form below this panel. Pick scopes carefully —
+          agents only see the tools their token permits, and
+          revoking a token is the only kill switch. The secret is
+          shown once, so paste it into both your server env (step 1)
+          and your agent config (steps 4–5) immediately.
         </p>
 
-        <h4>3. Authenticate</h4>
+        <h4>3. The URL your agent connects to</h4>
         <p>
-          Every MCP request must carry the issued secret as a Bearer
-          token:
+          Once the server is running, your MCP client connects to{' '}
+          <CopyableValue value={mcpUrlForAgent} />
         </p>
-        <CodeBlock value="authorization: Bearer <secret>" />
+        {configuredMcpUrl === null ? (
+          <p>
+            Replace <code>&lt;MCP-HOST&gt;</code> with the hostname
+            or IP where you ran step 1 — that's the host your agent
+            (pantheon, Claude Desktop, custom script) needs to be
+            able to reach. The path is always <code>/mcp</code>.
+          </p>
+        ) : null}
 
-        <h4>4. Try it with curl</h4>
-        <p>One-shot read-only sanity check:</p>
+        <h4>4. Sanity check with curl</h4>
         <CodeBlock value={curlExample} />
 
         <h4>5. Or use the official MCP SDK</h4>
-        <p>TypeScript example using <code>@modelcontextprotocol/sdk</code>:</p>
+        <p>
+          TypeScript example using{' '}
+          <code>@modelcontextprotocol/sdk</code>:
+        </p>
         <CodeBlock value={sdkExample} />
 
-        <h4>6. What the agent can do</h4>
+        <h4>What the agent can do</h4>
         <p>
           Tool names match the scopes you grant. For example,{' '}
           <code>mail:read</code> exposes <code>mailbox.list</code>,{' '}
@@ -893,16 +974,16 @@ console.log(tools.map((t) => t.name));`;
           <code>thread.search</code>; <code>mail:send</code> adds{' '}
           <code>mail.send</code>; <code>mail:modify</code> adds{' '}
           <code>mail.modify</code> (flag/mark-read/move). Destructive
-          tools like <code>mail.send</code> and <code>mail.modify</code>{' '}
-          honor a <em>dry-run</em> mode you should always exercise
-          before committing.
+          tools like <code>mail.send</code> and{' '}
+          <code>mail.modify</code> honor a <em>dry-run</em> mode the
+          agent should exercise before committing.
         </p>
 
-        <h4>7. Activity</h4>
+        <h4>Audit</h4>
         <p>
           Every agent call appears in the{' '}
           <strong>Activity</strong> view with a hash-chain audit
-          entry. Each token row above has an <em>Activity</em> link
+          entry. Each token row below has an <em>Activity</em> link
           that pre-filters Activity by that agent.
         </p>
       </div>

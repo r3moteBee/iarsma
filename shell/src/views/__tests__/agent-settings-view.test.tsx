@@ -447,8 +447,10 @@ describe('AgentSettingsView', () => {
       openTokensTab();
       // Open the details element so the body is visible to the test.
       fireEvent.click(screen.getByText(/how to connect an mcp agent/i));
+      // After the PR 34.1 rewrite the warning copy is "does not yet
+      // advertise a running MCP server URL".
       expect(
-        screen.getByText(/MCP URL for this deployment isn't configured/i),
+        screen.getByText(/does not yet advertise a running MCP server URL/i),
       ).toBeInTheDocument();
     });
 
