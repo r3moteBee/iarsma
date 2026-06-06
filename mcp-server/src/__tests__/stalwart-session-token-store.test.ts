@@ -43,6 +43,22 @@ describe('stalwartSessionTokenStore', () => {
     expect(id!.id.length).toBeGreaterThan(0);
   });
 
+  it('grants every known iarsma scope by default — Stalwart enforces per-call (PR 41)', async () => {
+    const store = stalwartSessionTokenStore({
+      jmapBaseUrl: BASE,
+      fetch: makeFetch(() => ok({ username: 'u', primaryAccounts: {} })),
+    });
+    const id = await store.resolve('any-bearer');
+    expect(id).not.toBeNull();
+    // All five mail scopes our handlers gate on:
+    for (const s of ['mail:read', 'mail:draft', 'mail:send', 'mail:modify', 'mail:delete']) {
+      expect(id!.scopes.has(s)).toBe(true);
+    }
+    // Files scopes too:
+    expect(id!.scopes.has('files:read')).toBe(true);
+    expect(id!.scopes.has('files:write')).toBe(true);
+  });
+
   it('returns null for 401 / 403 responses (revoked / unknown bearer)', async () => {
     const store = stalwartSessionTokenStore({
       jmapBaseUrl: BASE,
