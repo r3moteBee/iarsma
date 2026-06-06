@@ -97,6 +97,21 @@ function ActivityIcon() {
   );
 }
 
+function AgentsIcon() {
+  // Two-figures glyph — distinct from ContactsIcon at a glance. Keeps
+  // the "Agents = robots/automation" mental model implicit by being
+  // a different shape (squarer, more chip-like) than the soft circle
+  // people-silhouettes used for Contacts.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <circle cx="9" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="15" cy="12" r="1.5" fill="currentColor" />
+      <path d="M12 3v3" />
+    </svg>
+  );
+}
+
 function OutboxIcon() {
   // Paper-plane glyph — distinct from the static Mail/envelope icon so
   // "mail waiting to leave" reads at a glance.
@@ -208,6 +223,7 @@ const NAV_ITEMS: readonly NavDef[] = [
   { view: 'contacts', label: 'Contacts', icon: ContactsIcon },
   { view: 'files', label: 'Files', icon: FilesIcon },
   { view: 'approvals', label: 'Approvals', icon: ApprovalsIcon },
+  { view: 'agents', label: 'Agents', icon: AgentsIcon },
   { view: 'activity', label: 'Activity', icon: ActivityIcon },
   { view: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
