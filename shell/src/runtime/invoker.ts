@@ -32,6 +32,7 @@ import {
   fetchContactUpdateCommit,
   fetchEventCreateCommit,
   fetchEventDeleteCommit,
+  commitIdentityUpdate,
   commitVacationResponse,
   fetchEmailIdsInMailbox,
   fetchEmailMailboxMemberships,
@@ -74,6 +75,7 @@ import {
   type MailDraftResult,
   type MailModifyInput,
   type MailModifyResult,
+  type IdentityPatch,
   type MailSendInput,
   type MailSendResult,
   type Session,
@@ -286,6 +288,23 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             session,
           });
           return result as unknown as O;
+        }
+        case 'identity.update': {
+          // PR 33 — update an identity's signature(s). v1 surface
+          // limits patches to textSignature/htmlSignature; the
+          // rest of Identity is operator-controlled.
+          const params = _input as unknown as {
+            identityId: string;
+            patch: IdentityPatch;
+          };
+          const session = await getSession();
+          await commitIdentityUpdate({
+            ...opts,
+            session,
+            identityId: params.identityId,
+            patch: params.patch,
+          });
+          return { ok: true } as unknown as O;
         }
         case 'vacation.get': {
           // PR 32 — VacationResponse/get. Non-destructive read; returns

@@ -429,6 +429,141 @@ describe('AgentSettingsView', () => {
     });
   });
 
+  describe('Signatures section (PR 33)', () => {
+    function openSignaturesTab(): void {
+      fireEvent.click(screen.getByTestId('settings-tab-signatures'));
+    }
+
+    function renderWithInvoker(
+      invoker: { invoke: ReturnType<typeof vi.fn> },
+    ) {
+      return render(
+        <IarsmaProvider value={invoker}>
+          <AgentSettingsView tokens={[]} onIssue={noopIssue} onRevoke={noop} />
+        </IarsmaProvider>,
+      );
+    }
+
+    const IDENTITIES = [
+      {
+        id: 'I-1',
+        name: 'Brent',
+        email: 'brent@example.test',
+        mayDelete: false,
+        textSignature: '— Brent',
+      },
+      {
+        id: 'I-2',
+        name: 'Brent (alt)',
+        email: 'alt@example.test',
+        mayDelete: true,
+      },
+    ];
+
+    it('hydrates the textarea from the first identity\'s textSignature', async () => {
+      const invoke = vi.fn(async (name: string) => {
+        if (name === 'identity.list') {
+          return { identities: IDENTITIES };
+        }
+        return undefined;
+      });
+      renderWithInvoker({ invoke });
+      openSignaturesTab();
+      await waitFor(() => {
+        const ta = screen.getByLabelText(/^signature$/i) as HTMLTextAreaElement;
+        expect(ta.value).toBe('— Brent');
+      });
+    });
+
+    it('switching identity resets the draft to that identity\'s signature', async () => {
+      const invoke = vi.fn(async (name: string) => {
+        if (name === 'identity.list') {
+          return { identities: IDENTITIES };
+        }
+        return undefined;
+      });
+      renderWithInvoker({ invoke });
+      openSignaturesTab();
+      await waitFor(() => {
+        expect(screen.getByLabelText(/^identity$/i)).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByLabelText(/^identity$/i), {
+        target: { value: 'I-2' },
+      });
+      // I-2 has no textSignature → empty draft.
+      const ta = screen.getByLabelText(/^signature$/i) as HTMLTextAreaElement;
+      expect(ta.value).toBe('');
+    });
+
+    it('Save calls identity.update with the trimmed signature', async () => {
+      const calls: Array<{ name: string; input: unknown }> = [];
+      const invoke = vi.fn(async (name: string, input: unknown) => {
+        calls.push({ name, input });
+        if (name === 'identity.list') {
+          return { identities: IDENTITIES };
+        }
+        return { ok: true };
+      });
+      renderWithInvoker({ invoke });
+      openSignaturesTab();
+      const ta = (await waitFor(() =>
+        screen.getByLabelText(/^signature$/i),
+      )) as HTMLTextAreaElement;
+      fireEvent.change(ta, {
+        target: { value: '— Brent, signing off  ' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /save signature/i }));
+      await waitFor(() => {
+        expect(calls.find((c) => c.name === 'identity.update')).toBeDefined();
+      });
+      const updateCall = calls.find((c) => c.name === 'identity.update');
+      expect(updateCall?.input).toEqual({
+        identityId: 'I-1',
+        patch: { textSignature: '— Brent, signing off' },
+      });
+    });
+
+    it('Save sends null when the user clears the signature', async () => {
+      const calls: Array<{ name: string; input: unknown }> = [];
+      const invoke = vi.fn(async (name: string, input: unknown) => {
+        calls.push({ name, input });
+        if (name === 'identity.list') {
+          return { identities: IDENTITIES };
+        }
+        return { ok: true };
+      });
+      renderWithInvoker({ invoke });
+      openSignaturesTab();
+      const ta = (await waitFor(() =>
+        screen.getByLabelText(/^signature$/i),
+      )) as HTMLTextAreaElement;
+      fireEvent.change(ta, { target: { value: '' } });
+      fireEvent.click(screen.getByRole('button', { name: /save signature/i }));
+      await waitFor(() => {
+        expect(calls.find((c) => c.name === 'identity.update')).toBeDefined();
+      });
+      expect(
+        (calls.find((c) => c.name === 'identity.update')?.input as {
+          patch: { textSignature: unknown };
+        }).patch.textSignature,
+      ).toBeNull();
+    });
+
+    it('Save is disabled when the draft matches the stored signature', async () => {
+      const invoke = vi.fn(async (name: string) => {
+        if (name === 'identity.list') return { identities: IDENTITIES };
+        return undefined;
+      });
+      renderWithInvoker({ invoke });
+      openSignaturesTab();
+      await waitFor(() => {
+        expect(screen.getByLabelText(/^signature$/i)).toBeInTheDocument();
+      });
+      // No change made → Save disabled.
+      expect(screen.getByRole('button', { name: /save signature/i })).toBeDisabled();
+    });
+  });
+
   describe('Vacation responder section (PR 32)', () => {
     function openVacationTab(): void {
       fireEvent.click(screen.getByTestId('settings-tab-vacation'));

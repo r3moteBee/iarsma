@@ -1426,6 +1426,112 @@ function parseAddress(raw: unknown): EmailAddress {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Identity/set update (PR 33 — email signatures)
+// ──────────────────────────────────────────────────────────────────────
+
+/** Patchable fields on an Identity. Just signatures for v1 — server
+ *  permissions on name/email/replyTo are gnarlier and Stalwart's
+ *  validation needs more shape before we expose them. */
+export type IdentityPatch = {
+  /** Plain-text signature, or `null` to clear. */
+  readonly textSignature?: string | null;
+  /** HTML signature, or `null` to clear. iarsma's UI is text-only
+   *  for v1; this stays for API completeness. */
+  readonly htmlSignature?: string | null;
+};
+
+export type CommitIdentityUpdateOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly identityId: string;
+  readonly patch: IdentityPatch;
+};
+
+export async function commitIdentityUpdate(
+  opts: CommitIdentityUpdateOptions,
+): Promise<void> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  // JMAP Identity/set update only includes the fields the user
+  // changed — undefined entries in patch are omitted; explicit null
+  // clears the field server-side.
+  const update: Record<string, unknown> = {};
+  if (opts.patch.textSignature !== undefined) {
+    update.textSignature = opts.patch.textSignature;
+  }
+  if (opts.patch.htmlSignature !== undefined) {
+    update.htmlSignature = opts.patch.htmlSignature;
+  }
+  const body = JSON.stringify({
+    using: JMAP_USING_SUBMISSION,
+    methodCalls: [
+      [
+        'Identity/set',
+        {
+          accountId: opts.session.primaryAccountIdMail,
+          update: { [opts.identityId]: update },
+        },
+        '0',
+      ],
+    ],
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Identity/set returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Identity/set: ${describe(e)}`,
+    );
+  }
+  const responses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(responses) || responses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Identity/set: no methodResponses array.',
+    );
+  }
+  const first = responses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) return;
+  const result = first[1] as { notUpdated?: Record<string, unknown> };
+  if (
+    result.notUpdated !== undefined &&
+    result.notUpdated !== null &&
+    typeof result.notUpdated === 'object' &&
+    Object.keys(result.notUpdated).length > 0
+  ) {
+    const reason = JSON.stringify(result.notUpdated);
+    throw makeError(
+      'identity_set_failed',
+      `Identity/set rejected: ${reason}`,
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Email/set + EmailSubmission/set (mail.send commit)
 // ──────────────────────────────────────────────────────────────────────
 

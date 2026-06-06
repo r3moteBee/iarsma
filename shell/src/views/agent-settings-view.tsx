@@ -20,7 +20,7 @@ import { Dialog } from '../components/dialog.js';
 import { Input } from '../components/input.js';
 import { Notice } from '../components/notice.js';
 import { useInvoker } from '../runtime/invoker.js';
-import type { VacationResponse } from '../runtime/jmap-client.js';
+import type { Identity, VacationResponse } from '../runtime/jmap-client.js';
 import {
   DEFAULT_SEND_DELAY_MS,
   MAX_SEND_DELAY_MS,
@@ -76,6 +76,7 @@ type AgentSettingsViewProps = {
 type SectionId =
   | 'appearance'
   | 'sending'
+  | 'signatures'
   | 'vacation'
   | 'tokens'
   | 'files'
@@ -89,6 +90,7 @@ type SectionDef = {
 const SECTIONS: readonly SectionDef[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'sending', label: 'Sending' },
+  { id: 'signatures', label: 'Signatures' },
   { id: 'vacation', label: 'Vacation responder' },
   { id: 'tokens', label: 'Agent tokens' },
   { id: 'files', label: 'Files' },
@@ -132,6 +134,7 @@ export function AgentSettingsView({
       <div className={styles['content']}>
         {section === 'appearance' ? <AppearanceSection /> : null}
         {section === 'sending' ? <SendingSection /> : null}
+        {section === 'signatures' ? <SignaturesSection /> : null}
         {section === 'vacation' ? <VacationSection /> : null}
         {section === 'tokens' ? (
           <TokensSection
@@ -254,6 +257,221 @@ function SendingSection() {
           seconds
         </span>
       </div>
+    </section>
+  );
+}
+
+// ── Signatures section (PR 33) ────────────────────────────────────
+
+function SignaturesSection() {
+  const invoker = useInvoker();
+  const [identities, setIdentities] = useState<readonly Identity[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Load identities on mount. JMAP Identity/get returns every
+  // identity the account is permitted to see; iarsma puts the
+  // signature against the per-identity record so a user with
+  // multiple sending addresses can vary their sign-off.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const result = (await invoker.invoke<unknown, { identities: Identity[] }>(
+          'identity.list',
+          {},
+        )) as { identities: Identity[] };
+        if (cancelled) return;
+        const list = result.identities ?? [];
+        setIdentities(list);
+        const first = list[0];
+        if (first !== undefined) {
+          setSelectedId(first.id);
+          setDraft(first.textSignature ?? '');
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [invoker]);
+
+  // When the user picks a different identity, reset the draft to
+  // that identity's stored signature.
+  const onPickIdentity = (id: string): void => {
+    setSelectedId(id);
+    const match = identities.find((i) => i.id === id);
+    setDraft(match?.textSignature ?? '');
+    setSavedAt(null);
+  };
+
+  const selected = identities.find((i) => i.id === selectedId) ?? null;
+  const isDirty = selected !== null && draft !== (selected.textSignature ?? '');
+
+  const onSave = async (): Promise<void> => {
+    if (selected === null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      // Empty string → explicit null so the server clears the field.
+      const trimmed = draft.trimEnd();
+      await invoker.invoke('identity.update', {
+        identityId: selected.id,
+        patch: { textSignature: trimmed === '' ? null : trimmed },
+      });
+      // Mirror locally so the dirty check stops firing without
+      // waiting for the identity.list cache to refresh.
+      setIdentities((prev) =>
+        prev.map((i) => {
+          if (i.id !== selected.id) return i;
+          // Drop textSignature entirely when cleared so the dirty
+          // check (draft === '' vs textSignature ?? '') is correct.
+          const { textSignature: _omit, ...rest } = i;
+          return trimmed === ''
+            ? rest
+            : { ...rest, textSignature: trimmed };
+        }),
+      );
+      setSavedAt(Date.now());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Clear the "Saved" status after 3s.
+  useEffect(() => {
+    if (savedAt === null) return;
+    const handle = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(handle);
+  }, [savedAt]);
+
+  return (
+    <section aria-labelledby="signatures-heading">
+      <h3 id="signatures-heading" className={styles['sectionHeading']}>
+        Signatures
+      </h3>
+      <p className={styles['sectionDescription']}>
+        Per-identity sign-off text. New messages composed under an
+        identity auto-prepend the trimmed signature; existing drafts
+        and replies are left as-is so saved content is never
+        clobbered.
+      </p>
+      {loading ? <p className={styles['sectionDescription']}>Loading…</p> : null}
+      {!loading && identities.length === 0 ? (
+        <Notice variant="error">
+          No identities configured on this account. Ask the operator
+          to add one before setting a signature.
+        </Notice>
+      ) : null}
+      {!loading && identities.length > 0 ? (
+        <>
+          {identities.length > 1 ? (
+            <div className={styles['appearanceRow']}>
+              <label
+                className={styles['appearanceLabel']}
+                htmlFor="signature-identity"
+              >
+                Identity
+              </label>
+              <select
+                id="signature-identity"
+                value={selectedId ?? ''}
+                onChange={(e) => onPickIdentity(e.target.value)}
+                style={{
+                  font: 'inherit',
+                  fontSize: 'var(--text-md)',
+                  padding: '6px 10px',
+                  background: 'var(--surface-2)',
+                  color: 'var(--text-1)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                }}
+              >
+                {identities.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name !== '' ? `${i.name} <${i.email}>` : i.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <p className={styles['sectionDescription']}>
+              For <strong>{selected?.email}</strong>
+            </p>
+          )}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              marginBottom: 'var(--space-md)',
+            }}
+          >
+            <label
+              htmlFor="signature-body"
+              className={styles['appearanceLabel']}
+              style={{ width: 'auto' }}
+            >
+              Signature
+            </label>
+            <textarea
+              id="signature-body"
+              value={draft}
+              placeholder={`-- \nJane Doe\nVP of Things\nexample.com`}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={8}
+              style={{
+                width: '100%',
+                font: 'inherit',
+                fontSize: 'var(--text-md)',
+                padding: '8px 10px',
+                background: 'var(--surface-2)',
+                color: 'var(--text-1)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+          {error !== null ? <Notice variant="error">{error}</Notice> : null}
+          {savedAt !== null ? <Notice variant="success">Saved.</Notice> : null}
+          <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+            <Button
+              variant="primary"
+              onClick={() => {
+                void onSave();
+              }}
+              disabled={saving || !isDirty}
+            >
+              {saving ? 'Saving…' : 'Save signature'}
+            </Button>
+            {isDirty ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setDraft(selected?.textSignature ?? '');
+                  setSavedAt(null);
+                }}
+                disabled={saving}
+              >
+                Revert
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
