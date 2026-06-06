@@ -31,6 +31,7 @@ import {
   type Invoker,
 } from './runtime/index.js';
 import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
+import { announceUnreadDelta, updateTabTitle } from './runtime/new-mail-notify.js';
 import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { handleCallback, signOut } from './runtime/oauth.js';
@@ -917,6 +918,27 @@ function SignedInShell({
 
   const outboxCount = useOutboxCount();
 
+  // Phase 3 #9 — surface unread Inbox count as a sidebar badge,
+  // document.title prefix, and a polite live-region announce when
+  // the count goes up (only "up" — reading a message shouldn't
+  // re-announce). Push (PR 29) invalidates the mailbox.list cache
+  // on every Email/Mailbox state change, so this reacts in real
+  // time without an explicit subscription here.
+  const inboxUnreadCount = useMemo(() => {
+    if (sidebarMailboxes === undefined) return 0;
+    const inbox = sidebarMailboxes.find((m) => m.role === 'inbox');
+    return inbox?.unreadCount ?? 0;
+  }, [sidebarMailboxes]);
+  const prevInboxUnreadRef = useRef<number | null>(null);
+  useEffect(() => {
+    updateTabTitle(inboxUnreadCount);
+    const prev = prevInboxUnreadRef.current;
+    if (prev !== null && inboxUnreadCount > prev) {
+      announceUnreadDelta(inboxUnreadCount - prev);
+    }
+    prevInboxUnreadRef.current = inboxUnreadCount;
+  }, [inboxUnreadCount]);
+
   return (
     <main
       className={layoutStyles.app}
@@ -936,11 +958,13 @@ function SignedInShell({
           isOpen={sidebarOpen}
           onClose={closeSidebar}
           outboxCount={outboxCount}
+          inboxUnreadCount={inboxUnreadCount}
           {...(sidebarMailboxes !== undefined ? { mailboxes: sidebarMailboxes } : {})}
           onMailboxSelect={setSelectedMailboxId}
           {...(selectedMailboxId !== null ? { selectedMailboxId } : {})}
         />
       )}
+
 
       {/* Tablet: Top bar with hamburger */}
       {isTablet && (
@@ -1196,6 +1220,7 @@ function SignedInShell({
           activeView={activeView}
           onNavigate={setActiveView}
           outboxCount={outboxCount}
+          inboxUnreadCount={inboxUnreadCount}
           onSignOut={onSignOut}
         />
       )}
