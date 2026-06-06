@@ -8,10 +8,10 @@ const DISCOVERY_BODY = {
   introspection_endpoint: INTROSPECT_URL,
 };
 
-function makeFetch(
-  routes: ReadonlyMap<string, (init: RequestInit | undefined) => Response | Promise<Response>>,
-): typeof fetch {
-  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+type Route = (init: RequestInit | undefined) => Response | Promise<Response>;
+
+function makeFetch(routes: ReadonlyMap<string, Route>): typeof fetch {
+  return vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const handler = routes.get(url);
     if (handler === undefined) {
@@ -30,7 +30,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe('stalwartIntrospectionTokenStore', () => {
   it('resolves an active token to a ResolvedIdentity with scopes', async () => {
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, () => jsonResponse({
         active: true,
@@ -55,7 +55,7 @@ describe('stalwartIntrospectionTokenStore', () => {
   });
 
   it('returns null for an inactive token', async () => {
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, () => jsonResponse({ active: false })],
     ]));
@@ -69,7 +69,7 @@ describe('stalwartIntrospectionTokenStore', () => {
 
   it('multi-tenant: different bearers introspect to different principals', async () => {
     let calls = 0;
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, async (init) => {
         calls++;
@@ -117,7 +117,7 @@ describe('stalwartIntrospectionTokenStore', () => {
 
   it('caches active introspections inside the TTL window', async () => {
     let introspectCalls = 0;
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, () => {
         introspectCalls++;
@@ -148,7 +148,7 @@ describe('stalwartIntrospectionTokenStore', () => {
 
   it('caches inactive introspections so revoked tokens do not thrash the network', async () => {
     let introspectCalls = 0;
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, () => {
         introspectCalls++;
@@ -167,7 +167,7 @@ describe('stalwartIntrospectionTokenStore', () => {
 
   it('reload() clears the cache so subsequent resolves re-introspect', async () => {
     let introspectCalls = 0;
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, () => {
         introspectCalls++;
@@ -190,7 +190,7 @@ describe('stalwartIntrospectionTokenStore', () => {
   });
 
   it('returns null when introspection HTTP errors (fails closed)', async () => {
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, () => new Response('boom', { status: 500 })],
     ]));
@@ -203,7 +203,7 @@ describe('stalwartIntrospectionTokenStore', () => {
   });
 
   it('throws on a discovery response missing introspection_endpoint', async () => {
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse({ issuer: ISSUER })],
       [INTROSPECT_URL, () => jsonResponse({ active: true, client_id: 'x' })],
     ]));
@@ -218,7 +218,7 @@ describe('stalwartIntrospectionTokenStore', () => {
 
   it('sends the admin token in the introspection request', async () => {
     let observedAuth: string | undefined;
-    const fetchFn = makeFetch(new Map([
+    const fetchFn = makeFetch(new Map<string, Route>([
       [`${ISSUER}/.well-known/openid-configuration`, () => jsonResponse(DISCOVERY_BODY)],
       [INTROSPECT_URL, (init) => {
         const headers = (init?.headers ?? {}) as Record<string, string>;
