@@ -12,13 +12,15 @@
  */
 
 import { useAtom } from 'jotai';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AccentPicker } from '../components/accent-picker.js';
 import { Button } from '../components/button.js';
 import { DensitySelector } from '../components/density-selector.js';
 import { Dialog } from '../components/dialog.js';
 import { Input } from '../components/input.js';
 import { Notice } from '../components/notice.js';
+import { useInvoker } from '../runtime/invoker.js';
+import type { VacationResponse } from '../runtime/jmap-client.js';
 import {
   DEFAULT_SEND_DELAY_MS,
   MAX_SEND_DELAY_MS,
@@ -71,7 +73,13 @@ type AgentSettingsViewProps = {
   readonly onSignOut?: () => void;
 };
 
-type SectionId = 'appearance' | 'sending' | 'tokens' | 'files' | 'account';
+type SectionId =
+  | 'appearance'
+  | 'sending'
+  | 'vacation'
+  | 'tokens'
+  | 'files'
+  | 'account';
 
 type SectionDef = {
   readonly id: SectionId;
@@ -81,6 +89,7 @@ type SectionDef = {
 const SECTIONS: readonly SectionDef[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'sending', label: 'Sending' },
+  { id: 'vacation', label: 'Vacation responder' },
   { id: 'tokens', label: 'Agent tokens' },
   { id: 'files', label: 'Files' },
   { id: 'account', label: 'Account' },
@@ -123,6 +132,7 @@ export function AgentSettingsView({
       <div className={styles['content']}>
         {section === 'appearance' ? <AppearanceSection /> : null}
         {section === 'sending' ? <SendingSection /> : null}
+        {section === 'vacation' ? <VacationSection /> : null}
         {section === 'tokens' ? (
           <TokensSection
             tokens={tokens}
@@ -246,6 +256,262 @@ function SendingSection() {
       </div>
     </section>
   );
+}
+
+// ── Vacation responder section (PR 32) ────────────────────────────
+
+function VacationSection() {
+  const invoker = useInvoker();
+  const [isEnabled, setIsEnabled] = useState(false);
+  const [subject, setSubject] = useState('');
+  const [textBody, setTextBody] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Hydrate from the server on mount. If the account has never
+  // configured a vacation responder, the invoker returns the
+  // singleton with isEnabled:false and we render the empty form.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const v = (await invoker.invoke<unknown, VacationResponse>(
+          'vacation.get',
+          {},
+        )) as VacationResponse;
+        if (cancelled) return;
+        setIsEnabled(v.isEnabled);
+        setSubject(v.subject ?? '');
+        setTextBody(v.textBody ?? '');
+        // JMAP returns ISO 8601 datetimes; the <input type="date">
+        // wants YYYY-MM-DD. Strip the time component.
+        setFromDate(toDateInputValue(v.fromDate));
+        setToDate(toDateInputValue(v.toDate));
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [invoker]);
+
+  const onSave = async (): Promise<void> => {
+    setSaving(true);
+    setError(null);
+    try {
+      // Build a payload only including the fields the user actually
+      // filled in — empty strings → server clears the field.
+      const trimmedSubject = subject.trim();
+      const trimmedBody = textBody.trim();
+      await invoker.invoke('vacation.set', {
+        isEnabled,
+        ...(trimmedSubject !== '' ? { subject: trimmedSubject } : {}),
+        ...(trimmedBody !== '' ? { textBody: trimmedBody } : {}),
+        // Promote YYYY-MM-DD to YYYY-MM-DDT00:00:00Z so JMAP accepts it.
+        ...(fromDate !== '' ? { fromDate: `${fromDate}T00:00:00Z` } : {}),
+        ...(toDate !== '' ? { toDate: `${toDate}T23:59:59Z` } : {}),
+      });
+      setSavedAt(Date.now());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Clear the "Saved" status after 3s so the surface doesn't lie
+  // about state if the user comes back later.
+  useEffect(() => {
+    if (savedAt === null) return;
+    const handle = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(handle);
+  }, [savedAt]);
+
+  const canSave =
+    !saving && !loading && (!isEnabled || subject.trim() !== '');
+
+  return (
+    <section aria-labelledby="vacation-heading">
+      <h3 id="vacation-heading" className={styles['sectionHeading']}>
+        Vacation responder
+      </h3>
+      <p className={styles['sectionDescription']}>
+        When enabled, the server auto-replies to incoming mail with the
+        subject and body below. Optional dates let you schedule the
+        responder in advance — leave blank to start now / never
+        auto-expire.
+      </p>
+      {loading ? <p className={styles['sectionDescription']}>Loading…</p> : null}
+      {!loading ? (
+        <>
+          <div className={styles['appearanceRow']}>
+            <span className={styles['appearanceLabel']}>Status</span>
+            <label
+              style={{
+                display: 'inline-flex',
+                gap: 8,
+                alignItems: 'center',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={isEnabled}
+                onChange={(e) => setIsEnabled(e.target.checked)}
+                aria-label="Enable vacation responder"
+              />
+              <span>
+                {isEnabled
+                  ? 'On — incoming mail will receive an auto-reply'
+                  : 'Off'}
+              </span>
+            </label>
+          </div>
+          <div className={styles['appearanceRow']}>
+            <label
+              className={styles['appearanceLabel']}
+              htmlFor="vacation-subject"
+            >
+              Subject
+            </label>
+            <Input
+              id="vacation-subject"
+              type="text"
+              value={subject}
+              placeholder="Out of office"
+              onChange={setSubject}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              marginBottom: 'var(--space-md)',
+            }}
+          >
+            <label
+              htmlFor="vacation-body"
+              className={styles['appearanceLabel']}
+              style={{ width: 'auto' }}
+            >
+              Message
+            </label>
+            <textarea
+              id="vacation-body"
+              value={textBody}
+              placeholder="I'll be back next week."
+              onChange={(e) => setTextBody(e.target.value)}
+              rows={6}
+              style={{
+                width: '100%',
+                font: 'inherit',
+                fontSize: 'var(--text-md)',
+                padding: '8px 10px',
+                background: 'var(--surface-2)',
+                color: 'var(--text-1)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-sm)',
+                resize: 'vertical',
+              }}
+            />
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-md)',
+              marginBottom: 'var(--space-md)',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label
+                htmlFor="vacation-from"
+                className={styles['appearanceLabel']}
+                style={{ width: 'auto' }}
+              >
+                Start date (optional)
+              </label>
+              <input
+                id="vacation-from"
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                style={{
+                  font: 'inherit',
+                  fontSize: 'var(--text-md)',
+                  padding: '6px 10px',
+                  background: 'var(--surface-2)',
+                  color: 'var(--text-1)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label
+                htmlFor="vacation-to"
+                className={styles['appearanceLabel']}
+                style={{ width: 'auto' }}
+              >
+                End date (optional)
+              </label>
+              <input
+                id="vacation-to"
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                style={{
+                  font: 'inherit',
+                  fontSize: 'var(--text-md)',
+                  padding: '6px 10px',
+                  background: 'var(--surface-2)',
+                  color: 'var(--text-1)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-sm)',
+                }}
+              />
+            </div>
+          </div>
+          {error !== null ? <Notice variant="error">{error}</Notice> : null}
+          {savedAt !== null ? (
+            <Notice variant="success">Saved.</Notice>
+          ) : null}
+          <div>
+            <Button
+              variant="primary"
+              onClick={() => {
+                void onSave();
+              }}
+              disabled={!canSave}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** Convert a JMAP UTCDate (ISO 8601 with offset or Z) into the
+ *  `YYYY-MM-DD` shape that <input type="date"> wants. Returns an
+ *  empty string when the input is missing or unparseable. */
+function toDateInputValue(iso: string | undefined): string {
+  if (iso === undefined) return '';
+  // ISO format starts with YYYY-MM-DD; slice off the time.
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(iso);
+  return m === null ? '' : m[1]!;
 }
 
 // ── Tokens section ─────────────────────────────────────────────────

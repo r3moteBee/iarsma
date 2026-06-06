@@ -3709,6 +3709,219 @@ export async function fetchContactDeleteCommit(
   return parseContactDeleteResponse(text);
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// VacationResponse/get + VacationResponse/set (PR 32 — out-of-office)
+// ──────────────────────────────────────────────────────────────────────
+//
+// RFC 8621 §8. The VacationResponse object is a per-account singleton
+// (id always 'singleton'). Toggling isEnabled+subject+textBody is the
+// minimum useful surface; the optional from/to dates let the user
+// schedule the responder in advance.
+
+export type VacationResponse = {
+  readonly id: string;
+  readonly isEnabled: boolean;
+  readonly fromDate?: string;
+  readonly toDate?: string;
+  readonly subject?: string;
+  readonly textBody?: string;
+  readonly htmlBody?: string;
+};
+
+/** Patchable subset of VacationResponse — the fields a user can set
+ *  from the UI. The `id` is always 'singleton' so it doesn't appear
+ *  here. */
+export type VacationResponseInput = {
+  readonly isEnabled: boolean;
+  readonly fromDate?: string;
+  readonly toDate?: string;
+  readonly subject?: string;
+  readonly textBody?: string;
+};
+
+export type FetchVacationResponseOptions = JmapClientOptions & {
+  readonly session: Session;
+};
+
+export type CommitVacationResponseOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly input: VacationResponseInput;
+};
+
+const JMAP_USING_VACATION = [
+  'urn:ietf:params:jmap:core',
+  'urn:ietf:params:jmap:vacationresponse',
+];
+
+export async function fetchVacationResponse(
+  opts: FetchVacationResponseOptions,
+): Promise<VacationResponse | null> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = JSON.stringify({
+    using: JMAP_USING_VACATION,
+    methodCalls: [
+      [
+        'VacationResponse/get',
+        {
+          accountId: opts.session.primaryAccountIdMail,
+          ids: ['singleton'],
+        },
+        '0',
+      ],
+    ],
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP VacationResponse/get returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse VacationResponse/get: ${describe(e)}`,
+    );
+  }
+  const responses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(responses) || responses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'VacationResponse/get: no methodResponses array.',
+    );
+  }
+  const first = responses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) {
+    throw makeError(
+      'jmap_parse_error',
+      'VacationResponse/get: malformed methodResponse entry.',
+    );
+  }
+  const result = first[1] as { list?: unknown };
+  if (!Array.isArray(result.list) || result.list.length === 0) return null;
+  const item = result.list[0] as Record<string, unknown>;
+  return {
+    id: typeof item.id === 'string' ? item.id : 'singleton',
+    isEnabled: item.isEnabled === true,
+    ...(typeof item.fromDate === 'string' ? { fromDate: item.fromDate } : {}),
+    ...(typeof item.toDate === 'string' ? { toDate: item.toDate } : {}),
+    ...(typeof item.subject === 'string' ? { subject: item.subject } : {}),
+    ...(typeof item.textBody === 'string' ? { textBody: item.textBody } : {}),
+    ...(typeof item.htmlBody === 'string' ? { htmlBody: item.htmlBody } : {}),
+  };
+}
+
+export async function commitVacationResponse(
+  opts: CommitVacationResponseOptions,
+): Promise<void> {
+  const token = opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  // JMAP VacationResponse/set update — payload is the patch fields.
+  // Fields the user cleared are sent as null so the server clears
+  // them; populated fields overwrite.
+  const update: Record<string, unknown> = {
+    isEnabled: opts.input.isEnabled,
+    subject: opts.input.subject ?? null,
+    textBody: opts.input.textBody ?? null,
+    fromDate: opts.input.fromDate ?? null,
+    toDate: opts.input.toDate ?? null,
+    // Always clear the HTML body — iarsma's UI is text-only for v1.
+    // Future rich-text editor can populate this alongside textBody.
+    htmlBody: null,
+  };
+  const body = JSON.stringify({
+    using: JMAP_USING_VACATION,
+    methodCalls: [
+      [
+        'VacationResponse/set',
+        {
+          accountId: opts.session.primaryAccountIdMail,
+          update: { singleton: update },
+        },
+        '0',
+      ],
+    ],
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP VacationResponse/set returned ${response.status} ${response.statusText}`,
+    );
+  }
+  // Parse to surface notUpdated entries — they signal a server-side
+  // rejection (invalid date, server-disabled feature, etc.).
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse VacationResponse/set: ${describe(e)}`,
+    );
+  }
+  const responses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(responses) || responses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'VacationResponse/set: no methodResponses array.',
+    );
+  }
+  const first = responses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) return;
+  const result = first[1] as { notUpdated?: Record<string, unknown> };
+  if (
+    result.notUpdated !== undefined &&
+    result.notUpdated !== null &&
+    typeof result.notUpdated === 'object' &&
+    Object.keys(result.notUpdated).length > 0
+  ) {
+    const reason = JSON.stringify(result.notUpdated);
+    throw makeError(
+      'vacation_set_failed',
+      `VacationResponse/set rejected: ${reason}`,
+    );
+  }
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }

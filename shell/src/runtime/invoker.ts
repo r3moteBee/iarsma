@@ -32,8 +32,10 @@ import {
   fetchContactUpdateCommit,
   fetchEventCreateCommit,
   fetchEventDeleteCommit,
+  commitVacationResponse,
   fetchEmailIdsInMailbox,
   fetchEmailMailboxMemberships,
+  fetchVacationResponse,
   fetchEventGet,
   fetchEventList,
   fetchEventUpdateCommit,
@@ -75,6 +77,7 @@ import {
   type MailSendInput,
   type MailSendResult,
   type Session,
+  type VacationResponseInput,
   type ThreadGet,
   type ThreadList,
 } from './jmap-client.js';
@@ -283,6 +286,23 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             session,
           });
           return result as unknown as O;
+        }
+        case 'vacation.get': {
+          // PR 32 — VacationResponse/get. Non-destructive read; returns
+          // null when the account has never been configured.
+          const session = await getSession();
+          const result = await fetchVacationResponse({ ...opts, session });
+          return (result ?? { id: 'singleton', isEnabled: false }) as unknown as O;
+        }
+        case 'vacation.set': {
+          // PR 32 — VacationResponse/set update of the singleton.
+          const session = await getSession();
+          await commitVacationResponse({
+            ...opts,
+            session,
+            input: _input as unknown as VacationResponseInput,
+          });
+          return { ok: true } as unknown as O;
         }
         case 'mail.draft': {
           // Phase 2 work item 2. Destructive contract — dry-run returns
