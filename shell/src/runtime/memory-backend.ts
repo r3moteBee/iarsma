@@ -71,7 +71,7 @@ export type MemoryBackendOptions = {
    *  `null` (call fails with `unauthorized`). The webmail does not
    *  store OB1 credentials in IDB; the operator wires a per-session
    *  token through here. */
-  readonly getAuthToken: () => string | null;
+  readonly getAuthToken: () => string | null | Promise<string | null>;
   /** Override for tests. */
   readonly fetch?: typeof fetch;
 };
@@ -91,7 +91,7 @@ export function openbrainMemoryBackend(
     name: string,
     args: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
-    const token = opts.getAuthToken();
+    const token = await opts.getAuthToken();
     if (token === null) {
       throw makeError('unauthorized', 'No auth token available for OB1.');
     }

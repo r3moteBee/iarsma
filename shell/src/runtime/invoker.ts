@@ -147,7 +147,7 @@ export type McpInvokerOptions = {
   /** Base URL of the MCP server, e.g. 'https://sw-mail.example.net/mcp'. */
   readonly baseUrl: string;
   /** Returns the current Bearer token. Called on each invocation. */
-  readonly getAuthToken: () => string | null;
+  readonly getAuthToken: () => string | null | Promise<string | null>;
 };
 
 export function mcpInvoker(opts: McpInvokerOptions): Invoker {
@@ -157,7 +157,7 @@ export function mcpInvoker(opts: McpInvokerOptions): Invoker {
       input: I,
       options: InvocationOptions = {},
     ): Promise<O | DryRunPreview<O>> {
-      const token = opts.getAuthToken();
+      const token = await opts.getAuthToken();
       if (token === null) {
         throw makeToolError('unauthorized', 'No auth token available.');
       }

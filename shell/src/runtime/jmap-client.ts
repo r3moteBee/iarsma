@@ -55,7 +55,7 @@ export type JmapClientOptions = {
   /** Base URL of the JMAP server, e.g. 'https://sw-mail.example.net'. */
   readonly baseUrl: string;
   /** Returns the current Bearer token. Called on each request. */
-  readonly getAuthToken: () => string | null;
+  readonly getAuthToken: () => string | null | Promise<string | null>;
   /** Override for tests. Defaults to the global `fetch`. */
   readonly fetch?: typeof fetch;
 };
@@ -68,7 +68,7 @@ export type JmapClientOptions = {
  * so callers can branch on `malformed-json` vs `missing-field` etc.
  */
 export async function fetchSession(opts: JmapClientOptions): Promise<Session> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -133,7 +133,7 @@ const JMAP_USING_MAIL = [
 export async function fetchMailboxList(
   opts: FetchMailboxListOptions,
 ): Promise<Mailbox[]> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -240,7 +240,7 @@ export async function fetchEmailMailboxMemberships(
     readonly emailIds: readonly string[];
   },
 ): Promise<ReadonlyMap<string, readonly string[]>> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -346,7 +346,7 @@ export async function fetchEmailIdsInMailbox(
     readonly maxIds?: number;
   },
 ): Promise<readonly string[]> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -490,7 +490,7 @@ const EMAIL_LIST_PROPERTIES = [
 export async function fetchThreadList(
   opts: FetchThreadListOptions,
 ): Promise<ThreadList> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -657,7 +657,7 @@ export function buildEmailSearchRequest(opts: {
 export async function fetchThreadSearch(
   opts: FetchThreadSearchOptions,
 ): Promise<ThreadList> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -791,7 +791,7 @@ const EMAIL_FULL_PROPERTIES = [
 export async function fetchThreadGet(
   opts: FetchThreadGetOptions,
 ): Promise<ThreadGet> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -1033,7 +1033,7 @@ export function buildMailDraftRequest(opts: {
 export async function fetchMailDraftCommit(
   opts: FetchMailDraftOptions,
 ): Promise<MailDraftResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -1187,7 +1187,7 @@ function buildUploadUrl(session: Session): string {
 export async function fetchAttachmentUpload(
   opts: FetchAttachmentUploadOptions,
 ): Promise<AttachmentUpload> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -1308,7 +1308,7 @@ export function buildIdentityListRequest(opts: {
 export async function fetchIdentityList(
   opts: FetchIdentityListOptions,
 ): Promise<IdentityList> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -1449,7 +1449,7 @@ export type CommitIdentityUpdateOptions = JmapClientOptions & {
 export async function commitIdentityUpdate(
   opts: CommitIdentityUpdateOptions,
 ): Promise<void> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -1668,7 +1668,7 @@ export function buildMailSendRequest(opts: {
 export async function fetchMailSendCommit(
   opts: FetchMailSendOptions,
 ): Promise<MailSendResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -1956,7 +1956,7 @@ export function parseMailModifyResponse(body: string): MailModifyResult {
 export async function fetchMailModifyCommit(
   opts: FetchMailModifyOptions,
 ): Promise<MailModifyResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -2078,7 +2078,7 @@ export function parseMailDeleteResponse(body: string): MailDeleteResult {
 export async function fetchMailDeleteCommit(
   opts: FetchMailDeleteOptions,
 ): Promise<MailDeleteResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -2155,7 +2155,7 @@ export function buildCalendarListRequest(opts: {
 export async function fetchCalendarList(
   opts: FetchCalendarListOptions,
 ): Promise<Calendar[]> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -2349,7 +2349,7 @@ export function buildEventListRequest(opts: {
 export async function fetchEventList(
   opts: FetchEventListOptions,
 ): Promise<EventList> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -2466,7 +2466,7 @@ export function buildEventGetRequest(opts: {
 export async function fetchEventGet(
   opts: FetchEventGetOptions,
 ): Promise<CalendarEvent> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -2724,7 +2724,7 @@ export function buildContactGetRequest(opts: {
 export async function fetchContactList(
   opts: FetchContactListOptions,
 ): Promise<ContactList> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -2803,7 +2803,7 @@ export function parseContactListResponse(body: string): ContactList {
 export async function fetchContactGet(
   opts: FetchContactGetOptions,
 ): Promise<Contact> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3275,7 +3275,7 @@ export function parseEventDeleteResponse(body: string): EventDeleteResult {
 export async function fetchEventCreateCommit(
   opts: FetchEventCreateOptions,
 ): Promise<EventCreateResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3313,7 +3313,7 @@ export async function fetchEventCreateCommit(
 export async function fetchEventUpdateCommit(
   opts: FetchEventUpdateOptions,
 ): Promise<EventUpdateResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3351,7 +3351,7 @@ export async function fetchEventUpdateCommit(
 export async function fetchEventDeleteCommit(
   opts: FetchEventDeleteOptions,
 ): Promise<EventDeleteResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3707,7 +3707,7 @@ export function parseContactDeleteResponse(body: string): ContactDeleteResult {
 export async function fetchContactCreateCommit(
   opts: FetchContactCreateOptions,
 ): Promise<ContactCreateResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3745,7 +3745,7 @@ export async function fetchContactCreateCommit(
 export async function fetchContactUpdateCommit(
   opts: FetchContactUpdateOptions,
 ): Promise<ContactUpdateResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3783,7 +3783,7 @@ export async function fetchContactUpdateCommit(
 export async function fetchContactDeleteCommit(
   opts: FetchContactDeleteOptions,
 ): Promise<ContactDeleteResult> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3862,7 +3862,7 @@ const JMAP_USING_VACATION = [
 export async function fetchVacationResponse(
   opts: FetchVacationResponseOptions,
 ): Promise<VacationResponse | null> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
@@ -3941,7 +3941,7 @@ export async function fetchVacationResponse(
 export async function commitVacationResponse(
   opts: CommitVacationResponseOptions,
 ): Promise<void> {
-  const token = opts.getAuthToken();
+  const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
