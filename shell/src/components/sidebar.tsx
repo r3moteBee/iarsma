@@ -393,42 +393,59 @@ export function Sidebar({
               Sign out
             </button>
           </div>
-          <div className={styles.appearance} role="group" aria-label="Appearance">
-            <div className={styles.themeRow} role="radiogroup" aria-label="Theme preference">
-              <button
-                type="button"
-                className={`${styles.themeButton} ${theme === 'light' ? styles.themeButtonActive : ''}`}
-                onClick={() => cycleTheme('light')}
-                aria-label="Light theme"
-                aria-checked={theme === 'light'}
-                role="radio"
-              >
-                <SunIcon />
-              </button>
-              <button
-                type="button"
-                className={`${styles.themeButton} ${theme === 'dark' ? styles.themeButtonActive : ''}`}
-                onClick={() => cycleTheme('dark')}
-                aria-label="Dark theme"
-                aria-checked={theme === 'dark'}
-                role="radio"
-              >
-                <MoonIcon />
-              </button>
-              <button
-                type="button"
-                className={`${styles.themeButton} ${theme === 'system' ? styles.themeButtonActive : ''}`}
-                onClick={() => cycleTheme('system')}
-                aria-label="System theme"
-                aria-checked={theme === 'system'}
-                role="radio"
-              >
-                <MonitorIcon />
-              </button>
-              <AccentPicker />
+          {/* PR 49 / CoWork #16 — collapsed by default. The same
+              controls live in Settings → Appearance; keeping them
+              expanded permanently was wasted vertical space. */}
+          <details className={styles.appearance}>
+            <summary
+              style={{
+                cursor: 'pointer',
+                listStyle: 'none',
+                fontSize: 'var(--text-sm)',
+                color: 'var(--text-2)',
+                padding: 'var(--space-xs) 0',
+              }}
+              aria-label="Toggle appearance controls"
+            >
+              Appearance
+            </summary>
+            <div role="group" aria-label="Appearance" style={{ marginTop: 'var(--space-xs)' }}>
+              <div className={styles.themeRow} role="radiogroup" aria-label="Theme preference">
+                <button
+                  type="button"
+                  className={`${styles.themeButton} ${theme === 'light' ? styles.themeButtonActive : ''}`}
+                  onClick={() => cycleTheme('light')}
+                  aria-label="Light theme"
+                  aria-checked={theme === 'light'}
+                  role="radio"
+                >
+                  <SunIcon />
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.themeButton} ${theme === 'dark' ? styles.themeButtonActive : ''}`}
+                  onClick={() => cycleTheme('dark')}
+                  aria-label="Dark theme"
+                  aria-checked={theme === 'dark'}
+                  role="radio"
+                >
+                  <MoonIcon />
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.themeButton} ${theme === 'system' ? styles.themeButtonActive : ''}`}
+                  onClick={() => cycleTheme('system')}
+                  aria-label="System theme"
+                  aria-checked={theme === 'system'}
+                  role="radio"
+                >
+                  <MonitorIcon />
+                </button>
+                <AccentPicker />
+              </div>
+              <DensitySelector />
             </div>
-            <DensitySelector />
-          </div>
+          </details>
         </div>
       </aside>
     </>

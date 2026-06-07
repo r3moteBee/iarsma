@@ -186,7 +186,15 @@ export function ApprovalsView({
       </nav>
 
       {approvals.length === 0 ? (
-        <p className={styles['empty']}>No approval history yet.</p>
+        <div className={styles['empty']}>
+          <p>No approval history yet.</p>
+          <p style={{ marginTop: '0.75em', color: 'var(--fg-muted)' }}>
+            Some agent actions require human approval before they run —
+            mostly destructive ones like sending mail or writing files.
+            When that happens you'll see the proposed action here with
+            <strong> Approve</strong> / <strong>Deny</strong> buttons.
+          </p>
+        </div>
       ) : filtered.length === 0 ? (
         <p className={styles['empty']}>
           No pending approvals. Agents that require approval will appear here.
