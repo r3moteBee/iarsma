@@ -1,14 +1,21 @@
 /**
- * Handler for the `mail.delete` capability (Phase 3a).
+ * Handler for the `mail.delete` capability.
  *
- * Destructive contract exposed over MCP. The dispatcher passes
- * `ctx.dryRun` based on the call envelope; we branch:
+ * D-055: `mail.delete` is **soft-delete** (move-to-Trash), not
+ * permanent destroy. Mirrors the shell-side path in
+ * `shell/src/runtime/invoker.ts`. `mail.purge` remains the destroy
+ * path and is intentionally NOT wired into the MCP server.
  *
  *   - `dryRun: true`  → fetch session → Email/get for the emailIds
  *                       to get subject + from for preview → return
  *                       `{affectedCount, emails: [{id, subject, from}]}`.
- *   - `dryRun: false` → fetch session → POST `Email/set` with
- *                       `destroy: emailIds` → return `{deletedCount}`.
+ *   - `dryRun: false` → resolve Trash mailbox + each email's current
+ *                       `mailboxIds` (one round-trip), then issue
+ *                       `Email/set update` swapping every source
+ *                       mailbox for Trash (second round-trip).
+ *                       Returns `{deletedCount}` — the count of
+ *                       emails the user no longer sees in their
+ *                       original mailbox(es).
  */
 
 import {
@@ -80,7 +87,7 @@ export function createMailDeleteHandler(deps: MailDeleteDeps): ToolHandler {
       return fetchPreview(fetchImpl, token, session, params);
     }
 
-    return commitDestroy(fetchImpl, token, session, params);
+    return commitSoftDelete(fetchImpl, token, session, params);
   };
 }
 
@@ -175,54 +182,153 @@ function formatFrom(
   return email;
 }
 
-// -- Commit: Email/set destroy -----------------------------------------------
+// -- Commit: soft-delete (Mailbox/query trash + Email/get memberships + Email/set update) ----
 
-async function commitDestroy(
+async function commitSoftDelete(
   fetchImpl: typeof fetch,
   bearerToken: string,
   session: { apiUrl: string; primaryAccountIdMail: string },
   params: MailDeleteInput,
 ): Promise<MailDeleteResult> {
-  const body = JSON.stringify({
+  // Round 1: resolve Trash + current memberships in one POST.
+  const trashAndMembershipsBody = JSON.stringify({
     using: JMAP_USING_MAIL,
     methodCalls: [
       [
-        'Email/set',
+        'Mailbox/query',
         {
           accountId: session.primaryAccountIdMail,
-          destroy: params.emailIds,
+          filter: { role: 'trash' },
         },
         '0',
       ],
+      [
+        'Email/get',
+        {
+          accountId: session.primaryAccountIdMail,
+          ids: params.emailIds,
+          properties: ['mailboxIds'],
+        },
+        '1',
+      ],
     ],
   });
-  const response = await tryFetch(fetchImpl, session.apiUrl, {
+  const r1 = await tryFetch(fetchImpl, session.apiUrl, {
     method: 'POST',
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
       authorization: `Bearer ${bearerToken}`,
     },
-    body,
+    body: trashAndMembershipsBody,
   });
-  requireOk(response, 'JMAP Email/set (mail.delete)');
-  return parseEmailSetDestroyResponse(await response.text());
+  requireOk(r1, 'JMAP Mailbox/query + Email/get (mail.delete soft delete)');
+  const { trashId, memberships } = parseTrashAndMemberships(await r1.text());
+
+  // Round 2: Email/set update — each email gets the same patch
+  // (`{trashId: true, ...sources: false}`) keyed by emailId.
+  const patch = buildSoftDeletePatch(trashId, memberships);
+  const update: Record<string, Record<string, Record<string, boolean>>> = {};
+  for (const id of params.emailIds) {
+    update[id] = { mailboxIds: patch };
+  }
+  const updateBody = JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Email/set',
+        { accountId: session.primaryAccountIdMail, update },
+        '0',
+      ],
+    ],
+  });
+  const r2 = await tryFetch(fetchImpl, session.apiUrl, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      authorization: `Bearer ${bearerToken}`,
+    },
+    body: updateBody,
+  });
+  requireOk(r2, 'JMAP Email/set update (mail.delete soft delete)');
+  return parseEmailSetUpdateResponse(await r2.text());
 }
 
-function parseEmailSetDestroyResponse(body: string): MailDeleteResult {
+function parseTrashAndMemberships(body: string): {
+  trashId: string;
+  memberships: ReadonlyMap<string, readonly string[]>;
+} {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
   } catch (e) {
-    throw new Error(
-      `Email/set response could not be parsed: ${describe(e)}`,
+    throw new Error(`mail.delete round-1 response could not be parsed: ${describe(e)}`);
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw new Error('mail.delete round-1 response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length < 2) {
+    throw new Error('mail.delete round-1 response missing methodResponses.');
+  }
+
+  // Mailbox/query → trashId
+  const mq = methodResponses.find(
+    (mr) => Array.isArray(mr) && mr[0] === 'Mailbox/query',
+  );
+  const trashIds = (mq?.[1] as { ids?: ReadonlyArray<string> } | undefined)?.ids ?? [];
+  if (trashIds.length === 0) {
+    const err = new Error(
+      'mail.delete (soft delete) requires a mailbox with role: trash; the account has none.',
     );
+    (err as Error & { code?: string }).code = 'no_trash_mailbox';
+    throw err;
+  }
+  const trashId = trashIds[0]!;
+
+  // Email/get → memberships
+  const eg = methodResponses.find(
+    (mr) => Array.isArray(mr) && mr[0] === 'Email/get',
+  );
+  const list =
+    (eg?.[1] as { list?: ReadonlyArray<{ id?: string; mailboxIds?: Record<string, boolean> }> } | undefined)
+      ?.list ?? [];
+  const memberships = new Map<string, readonly string[]>();
+  for (const entry of list) {
+    if (typeof entry.id !== 'string') continue;
+    const ids = Object.entries(entry.mailboxIds ?? {})
+      .filter(([, v]) => v === true)
+      .map(([k]) => k);
+    memberships.set(entry.id, ids);
+  }
+  return { trashId, memberships };
+}
+
+function buildSoftDeletePatch(
+  trashId: string,
+  memberships: ReadonlyMap<string, readonly string[]>,
+): Record<string, boolean> {
+  const patch: Record<string, boolean> = { [trashId]: true };
+  for (const ids of memberships.values()) {
+    for (const id of ids) {
+      if (id !== trashId) patch[id] = false;
+    }
+  }
+  return patch;
+}
+
+function parseEmailSetUpdateResponse(body: string): MailDeleteResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw new Error(`Email/set response could not be parsed: ${describe(e)}`);
   }
   if (parsed === null || typeof parsed !== 'object') {
     throw new Error('Email/set response is not an object.');
   }
-  const methodResponses = (parsed as { methodResponses?: unknown })
-    .methodResponses;
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
   if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
     throw new Error('Email/set response missing methodResponses.');
   }
@@ -231,25 +337,27 @@ function parseEmailSetDestroyResponse(body: string): MailDeleteResult {
     throw new Error('Email/set first methodResponse is not Email/set.');
   }
   const result = first[1] as {
-    destroyed?: ReadonlyArray<string>;
-    notDestroyed?: Record<string, { type?: string }>;
+    updated?: Record<string, unknown>;
+    notUpdated?: Record<string, { type?: string }>;
   };
 
-  // If any emails were not destroyed, surface as an error.
   if (
-    result.notDestroyed !== undefined &&
-    Object.keys(result.notDestroyed).length > 0
+    result.notUpdated !== undefined &&
+    Object.keys(result.notUpdated).length > 0
   ) {
-    const details = Object.entries(result.notDestroyed)
+    const details = Object.entries(result.notUpdated)
       .map(([id, err]) => `${id}: ${err.type ?? 'unknown'}`)
       .join(', ');
-    const err = new Error(`notDestroyed: ${details}`);
+    const err = new Error(`notUpdated: ${details}`);
     (err as Error & { code?: string }).code = 'jmap_set_error';
     throw err;
   }
 
-  const destroyed = result.destroyed ?? [];
-  return { deletedCount: destroyed.length };
+  const updatedCount = Object.keys(result.updated ?? {}).length;
+  // The output shape stays `deletedCount` (D-055): from the caller's
+  // perspective the email IS gone from its previous mailbox view. The
+  // restore-from-Trash path is a separate, deliberate action.
+  return { deletedCount: updatedCount };
 }
 
 // -- Input validation --------------------------------------------------------
