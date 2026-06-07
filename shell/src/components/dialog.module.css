@@ -9,10 +9,20 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   /* PR 48 / CoWork #5 — cap height so a long reply (with a tall
-   * quoted block) doesn't push the action bar past the viewport.
-   * The flex column layout keeps the header pinned to the top and
-   * the footer pinned to the bottom; the body absorbs the scroll. */
+   * quoted block) doesn't push the action bar past the viewport. */
   max-height: 90dvh;
+}
+
+/*
+ * PR 55 / CoWork follow-up — gate the flex column layout to [open] so
+ * a closed <dialog> stays hidden via the UA `dialog:not([open]) {
+ * display: none }` rule. PR 48 set `display: flex` unconditionally,
+ * which overrode the UA rule and left closed dialogs visible inside
+ * their DOM parent (the list pane) with the UA's `position: absolute`
+ * default — making `showModal()`'s top-layer rendering moot once the
+ * cascade had already decided where to paint the element.
+ */
+.dialog[open] {
   display: flex;
   flex-direction: column;
 }

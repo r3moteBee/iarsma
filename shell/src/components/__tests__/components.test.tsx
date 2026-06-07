@@ -298,4 +298,48 @@ describe('Dialog', () => {
     fireEvent(dialog, new Event('cancel'));
     expect(handler).toHaveBeenCalledOnce();
   });
+
+  // PR 55 regression — showModal() (NOT show()) is what gives a
+  // native <dialog> its top-layer rendering, backdrop, and focus
+  // trap. CoWork caught a v0.10.17 bug where a closed <dialog> was
+  // rendered visibly inside its parent pane because author CSS had
+  // `display: flex` unconditionally, defeating the UA's
+  // `dialog:not([open]) { display: none }` rule. The fix moved
+  // `display: flex` under `.dialog[open]`. This test guards the
+  // wiring half — that the effect always calls showModal on a
+  // false→true open transition.
+  it('calls showModal (not show) when open transitions from false to true', () => {
+    const showModalSpy = vi.fn(function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    });
+    HTMLDialogElement.prototype.showModal = showModalSpy;
+    const { rerender } = render(
+      <Dialog open={false} onClose={() => {}} title="Confirm">
+        Body
+      </Dialog>,
+    );
+    expect(showModalSpy).not.toHaveBeenCalled();
+    rerender(
+      <Dialog open onClose={() => {}} title="Confirm">
+        Body
+      </Dialog>,
+    );
+    expect(showModalSpy).toHaveBeenCalledOnce();
+  });
+
+  it('a showModal that throws is logged and does not crash the tree', () => {
+    HTMLDialogElement.prototype.showModal = vi.fn(() => {
+      throw new DOMException('test', 'InvalidStateError');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() =>
+      render(
+        <Dialog open onClose={() => {}} title="Confirm">
+          Body
+        </Dialog>,
+      ),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
