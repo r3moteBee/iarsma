@@ -2261,6 +2261,12 @@ export type CalendarEvent = {
     email: string;
     kind?: string;
     participationStatus?: string;
+    /** RFC 8984 §4.4.1 — roles map; common keys are
+     *  `owner`, `attendee`, `chair`, `optional`. */
+    roles?: Readonly<Record<string, boolean>>;
+    /** RFC 8984 §4.4.1 — when true, the organizer asked this
+     *  participant to RSVP. Surfaces in the UI for invite tracking. */
+    expectReply?: boolean;
   }>>;
   readonly locations?: Readonly<Record<string, { name?: string }>>;
 };
@@ -2579,26 +2585,68 @@ function parseCalendarEvent(raw: unknown, index: number): CalendarEvent {
   };
 }
 
+type ParsedParticipant = {
+  name?: string;
+  email: string;
+  kind?: string;
+  participationStatus?: string;
+  roles?: Record<string, boolean>;
+  expectReply?: boolean;
+};
+
 function parseParticipants(
   raw: Record<string, unknown>,
-): Record<string, { name?: string; email: string; kind?: string; participationStatus?: string }> {
-  const result: Record<string, { name?: string; email: string; kind?: string; participationStatus?: string }> = {};
+): Record<string, ParsedParticipant> {
+  const result: Record<string, ParsedParticipant> = {};
   for (const [key, value] of Object.entries(raw)) {
     if (value !== null && typeof value === 'object') {
       const p = value as Record<string, unknown>;
-      if (typeof p.email === 'string') {
+      // PR 54 — accept JSCalendar shape (`email`) or older iTIP fallback
+      // (`sendTo.imip` of form `mailto:foo@bar`). Stalwart emits the
+      // former on CalendarEvent/get; we tolerate both so REPLY parsing
+      // (PR 55) doesn't need a second code path.
+      const email =
+        typeof p.email === 'string'
+          ? p.email
+          : extractImipEmail(p.sendTo);
+      if (email !== undefined) {
+        const roles = parseRoles(p.roles);
         result[key] = {
           ...(typeof p.name === 'string' ? { name: p.name } : {}),
-          email: p.email,
+          email,
           ...(typeof p.kind === 'string' ? { kind: p.kind } : {}),
           ...(typeof p.participationStatus === 'string'
             ? { participationStatus: p.participationStatus }
+            : {}),
+          ...(roles !== undefined ? { roles } : {}),
+          ...(typeof p.expectReply === 'boolean'
+            ? { expectReply: p.expectReply }
             : {}),
         };
       }
     }
   }
   return result;
+}
+
+function parseRoles(raw: unknown): Record<string, boolean> | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined;
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v === true) out[k] = true;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function extractImipEmail(sendTo: unknown): string | undefined {
+  if (sendTo === null || typeof sendTo !== 'object') return undefined;
+  const imip = (sendTo as Record<string, unknown>).imip;
+  if (typeof imip !== 'string') return undefined;
+  // `mailto:foo@bar` per RFC 8984 §4.4.1.
+  const prefix = 'mailto:';
+  return imip.toLowerCase().startsWith(prefix)
+    ? imip.slice(prefix.length)
+    : undefined;
 }
 
 function parseLocations(
@@ -2979,6 +3027,32 @@ function parseContact(raw: unknown, index: number): Contact {
 // CalendarEvent/set — event.create / event.update / event.delete
 // ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Attendee / organizer entry the caller supplies on event create/update
+ * (PR 54 / CoWork #7). We serialize these into RFC 8984 JSCalendar
+ * Participant objects, including `sendTo.imip` so Stalwart's
+ * server-side scheduling fires iTIP REQUEST when participants are
+ * present and the user is the organizer.
+ *
+ * Role keys map directly to JSCalendar §4.4.1: `owner`, `chair`,
+ * `attendee`, `optional`. The organizer must include `owner` (and
+ * typically `chair`); attendees must include `attendee` (optionally
+ * `optional`). `participationStatus` defaults to `needs-action` for
+ * attendees and `accepted` for the organizer.
+ */
+export type EventParticipantInput = {
+  readonly email: string;
+  readonly name?: string;
+  readonly roles: Readonly<Record<string, boolean>>;
+  readonly participationStatus?:
+    | 'needs-action'
+    | 'accepted'
+    | 'declined'
+    | 'tentative'
+    | 'delegated';
+  readonly expectReply?: boolean;
+};
+
 export type EventCreateInput = {
   readonly calendarId: string;
   readonly title: string;
@@ -2987,6 +3061,10 @@ export type EventCreateInput = {
   readonly timeZone?: string;
   readonly description?: string;
   readonly location?: string;
+  /** PR 54 — when present, serialized as JSCalendar participants on
+   *  CalendarEvent/set. Stalwart's server-side scheduling sends iTIP
+   *  REQUEST for entries whose `sendTo.imip` resolves. */
+  readonly participants?: readonly EventParticipantInput[];
 };
 
 export type EventCreateResult = { readonly eventId: string };
@@ -2998,6 +3076,10 @@ export type EventUpdateInput = {
   readonly duration?: string;
   readonly description?: string;
   readonly location?: string;
+  /** PR 54 — replace the event's participants list. When omitted, the
+   *  field is not touched in the patch (JSON-merge-patch semantics).
+   *  An explicit empty array clears attendees. */
+  readonly participants?: readonly EventParticipantInput[];
 };
 
 export type EventUpdateResult = { readonly updated: boolean };
@@ -3046,6 +3128,9 @@ export function buildEventCreateRequest(opts: {
   if (params.location !== undefined) {
     event.locations = { loc0: { name: params.location } };
   }
+  if (params.participants !== undefined && params.participants.length > 0) {
+    event.participants = participantsToJSCalendar(params.participants);
+  }
   return JSON.stringify({
     using: JMAP_USING_CALENDARS,
     methodCalls: [
@@ -3086,6 +3171,12 @@ export function buildEventUpdateRequest(opts: {
   if (params.location !== undefined) {
     patch.locations = { loc0: { name: params.location } };
   }
+  if (params.participants !== undefined) {
+    patch.participants =
+      params.participants.length === 0
+        ? null  // Explicit null clears the field (JMAP path-patch).
+        : participantsToJSCalendar(params.participants);
+  }
   return JSON.stringify({
     using: JMAP_USING_CALENDARS,
     methodCalls: [
@@ -3099,6 +3190,39 @@ export function buildEventUpdateRequest(opts: {
       ],
     ],
   });
+}
+
+/**
+ * Serialize the caller's flat participant list to the JSCalendar
+ * `participants` map shape Stalwart expects (RFC 8984 §4.4.1).
+ *
+ * Each participant gets a stable id based on insertion order so the
+ * caller's array maps deterministically to the wire shape; this also
+ * gives REPLY-ingest (PR 55) a stable handle to update PARTSTAT against.
+ *
+ * `sendTo.imip = mailto:<email>` is the magic that signals the server
+ * (Stalwart's scheduling stack) to fire iTIP REQUEST on commit.
+ */
+function participantsToJSCalendar(
+  participants: readonly EventParticipantInput[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  participants.forEach((p, i) => {
+    const isOrganizer = p.roles.owner === true;
+    const obj: Record<string, unknown> = {
+      '@type': 'Participant',
+      email: p.email,
+      sendTo: { imip: `mailto:${p.email}` },
+      kind: 'individual',
+      roles: { ...p.roles },
+      participationStatus:
+        p.participationStatus ?? (isOrganizer ? 'accepted' : 'needs-action'),
+      expectReply: p.expectReply ?? !isOrganizer,
+    };
+    if (p.name !== undefined && p.name !== '') obj.name = p.name;
+    out[`p${i}`] = obj;
+  });
+  return out;
 }
 
 /**

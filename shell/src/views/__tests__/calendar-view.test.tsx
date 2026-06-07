@@ -963,4 +963,150 @@ describe('CalendarView', () => {
       expect(titleInput.value).toBe('Team Standup');
     });
   });
+
+  // PR 54 / CoWork #7 — attendees editor + participants display.
+  describe('attendees editor (PR 54)', () => {
+    it('add → chip appears; remove → chip disappears', () => {
+      const onSaveEvent = vi.fn().mockResolvedValue(undefined);
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={onSaveEvent}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+      const input = screen.getByLabelText(/attendees/i) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: 'alice@example.invalid' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      const chips = screen.getByRole('list', { name: /invited attendees/i });
+      expect(chips.textContent).toContain('alice@example.invalid');
+
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Remove alice@example.invalid' }),
+      );
+      expect(
+        screen.queryByRole('list', { name: /invited attendees/i }),
+      ).toBeNull();
+    });
+
+    it('rejects an invalid email — chip is not created', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+      const input = screen.getByLabelText(/attendees/i) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: 'not-an-email' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      // The chip list never materializes; an alert announces the error.
+      expect(
+        screen.queryByRole('list', { name: /invited attendees/i }),
+      ).toBeNull();
+      expect(screen.getByRole('alert').textContent).toMatch(/email/i);
+    });
+
+    it('toggle required ↔ optional on a chip', () => {
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={async () => {}}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+      const input = screen.getByLabelText(/attendees/i);
+      fireEvent.change(input, { target: { value: 'bob@example.invalid' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      const toggle = screen.getByRole('button', { name: 'required' });
+      fireEvent.click(toggle);
+      expect(screen.getByRole('button', { name: 'optional' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+    });
+
+    it('save dispatches attendees in the EventFormData payload', async () => {
+      const onSaveEvent = vi.fn().mockResolvedValue(undefined);
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onSaveEvent={onSaveEvent}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+      fireEvent.change(screen.getByLabelText(/title/i), {
+        target: { value: 'Planning' },
+      });
+      fireEvent.change(screen.getByLabelText(/attendees/i), {
+        target: { value: 'alice@example.invalid' },
+      });
+      fireEvent.keyDown(screen.getByLabelText(/attendees/i), { key: 'Enter' });
+      fireEvent.click(screen.getByRole('button', { name: /save/i }));
+      await waitFor(() => expect(onSaveEvent).toHaveBeenCalledTimes(1));
+      const arg = onSaveEvent.mock.calls[0]![0] as { attendees?: unknown[] };
+      expect(arg.attendees).toEqual([{ email: 'alice@example.invalid' }]);
+    });
+  });
+
+  describe('participants display in event detail (PR 54)', () => {
+    it('renders attendee names + PARTSTAT badge', () => {
+      const evt: CalendarViewEvent = {
+        id: 'evt-9',
+        title: 'Planning',
+        start: '2026-05-15T10:00',
+        duration: 'PT1H',
+        participants: [
+          {
+            email: 'brent@r3motely.com',
+            name: 'Brent',
+            roles: { owner: true, chair: true },
+            participationStatus: 'accepted',
+          },
+          {
+            email: 'alice@example.invalid',
+            roles: { attendee: true },
+            participationStatus: 'tentative',
+          },
+          {
+            email: 'bob@example.invalid',
+            roles: { attendee: true, optional: true },
+          },
+        ],
+      };
+      render(
+        <CalendarView
+          events={[evt]}
+          view="day"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          onUpdateEvent={async () => {}}
+        />,
+      );
+      fireEvent.click(screen.getByText('Planning'));
+      expect(screen.getByText('Brent <brent@r3motely.com>')).toBeInTheDocument();
+      expect(screen.getByText('Accepted')).toBeInTheDocument();
+      expect(screen.getByText('Tentative')).toBeInTheDocument();
+      expect(screen.getByText('Awaiting reply')).toBeInTheDocument();
+      expect(screen.getByText('organizer')).toBeInTheDocument();
+      expect(screen.getByText('optional')).toBeInTheDocument();
+    });
+  });
 });

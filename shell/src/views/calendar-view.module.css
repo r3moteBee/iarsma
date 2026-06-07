@@ -750,3 +750,135 @@
     min-height: 4em;
   }
 }
+
+/* PR 54 / CoWork #7 — attendee editor + detail view rendering. */
+
+.attendeeList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-sm) 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.attendeeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 4px 8px;
+  background-color: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  font-size: var(--text-sm);
+}
+
+.attendeeEmail {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+}
+
+.attendeeOptionalBtn,
+.attendeeRemoveBtn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.attendeeOptionalBtn:hover,
+.attendeeRemoveBtn:hover {
+  background-color: var(--surface-1);
+  color: var(--text-1);
+}
+
+.attendeeOptionalBtn[aria-pressed="true"] {
+  background-color: color-mix(in srgb, #ff6b35 18%, transparent);
+  color: var(--text-1);
+}
+
+.attendeeRemoveBtn {
+  font-size: 16px;
+  font-weight: bold;
+  padding: 0 6px;
+}
+
+.attendeeInputRow {
+  display: flex;
+}
+
+.attendeeError {
+  color: var(--danger, #d33);
+  font-size: var(--text-sm);
+  margin: var(--space-xs) 0 0 0;
+}
+
+/* Detail view participant rows + PARTSTAT badges. */
+
+.participantList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.participantRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.participantName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.participantOptional,
+.participantOrganizer {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.partstatBadge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+
+.partstatAccepted {
+  background-color: color-mix(in srgb, #2da44e 18%, transparent);
+  color: #1a7f37;
+}
+
+.partstatDeclined {
+  background-color: color-mix(in srgb, #cf222e 18%, transparent);
+  color: #a40e26;
+}
+
+.partstatTentative {
+  background-color: color-mix(in srgb, #d29922 22%, transparent);
+  color: #8a5b00;
+}
+
+.partstatPending {
+  background-color: var(--surface-2);
+  color: var(--text-2);
+}

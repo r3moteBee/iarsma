@@ -119,6 +119,75 @@ describe('buildEventCreateRequest', () => {
     expect(c0.timeZone).toBeUndefined();
     expect(c0.description).toBeUndefined();
     expect(c0.locations).toBeUndefined();
+    expect(c0.participants).toBeUndefined();
+  });
+
+  // PR 54 / CoWork #7 — JSCalendar participants serialization.
+  it('serializes participants with sendTo.imip so Stalwart fires iTIP REQUEST', () => {
+    const body = buildEventCreateRequest({
+      accountId: 'c',
+      params: {
+        calendarId: 'cal-1',
+        title: 'Planning',
+        start: '2026-06-01T15:00:00',
+        participants: [
+          {
+            email: 'brent@r3motely.com',
+            name: 'Brent',
+            roles: { owner: true, chair: true },
+            participationStatus: 'accepted',
+            expectReply: false,
+          },
+          {
+            email: 'alice@example.invalid',
+            roles: { attendee: true },
+          },
+          {
+            email: 'bob@example.invalid',
+            name: 'Bob',
+            roles: { attendee: true, optional: true },
+          },
+        ],
+      },
+    });
+    const parsed = JSON.parse(body) as {
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    const create = parsed.methodCalls[0]![1]!.create as Record<string, Record<string, unknown>>;
+    const participants = create['c0']!.participants as Record<string, Record<string, unknown>>;
+    const p0 = participants['p0']!;
+    expect(p0['@type']).toBe('Participant');
+    expect(p0.email).toBe('brent@r3motely.com');
+    expect(p0.sendTo).toEqual({ imip: 'mailto:brent@r3motely.com' });
+    expect(p0.roles).toEqual({ owner: true, chair: true });
+    expect(p0.participationStatus).toBe('accepted');
+    expect(p0.expectReply).toBe(false);
+
+    const p1 = participants['p1']!;
+    expect(p1.email).toBe('alice@example.invalid');
+    expect(p1.sendTo).toEqual({ imip: 'mailto:alice@example.invalid' });
+    expect(p1.roles).toEqual({ attendee: true });
+    // Defaults applied — needs-action + expectReply=true for non-owners
+    expect(p1.participationStatus).toBe('needs-action');
+    expect(p1.expectReply).toBe(true);
+
+    const p2 = participants['p2']!;
+    expect(p2.roles).toEqual({ attendee: true, optional: true });
+    expect(p2.name).toBe('Bob');
+  });
+
+  it('omits the participants field on create when the input is empty', () => {
+    const body = buildEventCreateRequest({
+      accountId: 'c',
+      params: {
+        calendarId: 'cal-1',
+        title: 'Solo block',
+        start: '2026-06-01T15:00:00',
+        participants: [],
+      },
+    });
+    const create = JSON.parse(body).methodCalls[0][1].create.c0;
+    expect(create.participants).toBeUndefined();
   });
 });
 
@@ -303,6 +372,56 @@ describe('buildEventUpdateRequest', () => {
     expect(patch.duration).toBeUndefined();
     expect(patch.description).toBeUndefined();
     expect(patch.locations).toBeUndefined();
+    expect(patch.participants).toBeUndefined();
+  });
+
+  // PR 54 — participants update.
+  it('serializes a participants list on update (replace semantics)', () => {
+    const body = buildEventUpdateRequest({
+      accountId: 'c',
+      params: {
+        eventId: 'evt-123',
+        participants: [
+          {
+            email: 'brent@r3motely.com',
+            roles: { owner: true, chair: true },
+          },
+          {
+            email: 'alice@example.invalid',
+            roles: { attendee: true },
+          },
+        ],
+      },
+    });
+    const patch = JSON.parse(body).methodCalls[0][1].update['evt-123'];
+    expect(patch.participants).toEqual({
+      p0: expect.objectContaining({
+        email: 'brent@r3motely.com',
+        sendTo: { imip: 'mailto:brent@r3motely.com' },
+        roles: { owner: true, chair: true },
+        participationStatus: 'accepted',
+        expectReply: false,
+      }),
+      p1: expect.objectContaining({
+        email: 'alice@example.invalid',
+        roles: { attendee: true },
+        participationStatus: 'needs-action',
+        expectReply: true,
+      }),
+    });
+  });
+
+  it('clears participants via null when an explicit empty array is passed on update', () => {
+    const body = buildEventUpdateRequest({
+      accountId: 'c',
+      params: {
+        eventId: 'evt-123',
+        participants: [],
+      },
+    });
+    const patch = JSON.parse(body).methodCalls[0][1].update['evt-123'];
+    // JMAP path-patch — null clears the field on the server.
+    expect(patch.participants).toBeNull();
   });
 });
 

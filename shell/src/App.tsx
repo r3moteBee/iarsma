@@ -68,7 +68,7 @@ import {
   type ApprovalRequest,
   type ApprovalStore,
 } from './runtime/approval-store.js';
-import { CalendarView } from './views/calendar-view.js';
+import { CalendarView, buildEventParticipants } from './views/calendar-view.js';
 import { CommandPalette, type CommandItem } from './components/command-palette.js';
 import { SendToast } from './components/send-toast.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
@@ -474,6 +474,25 @@ function SignedInShell({
   );
   const [crudRefresh, setCrudRefresh] = useState(0);
 
+  // PR 54 — organizer identity for new/edited calendar events.
+  // Derived from the auth-cached email; the calendar view passes this
+  // through `buildEventParticipants` when the user has attendees on
+  // the event so Stalwart's scheduling stack knows who's sending the
+  // iTIP REQUEST. When tokens.email isn't set yet (first paint), we
+  // skip the organizer entry — the user has to wait for auth before
+  // they can invite anyone.
+  const organizerIdentity = useMemo(
+    () => {
+      const email = tokens?.email;
+      if (email === undefined) return undefined;
+      const name = session.data?.username;
+      return name !== undefined
+        ? { email, name }
+        : { email };
+    },
+    [tokens?.email, session.data?.username],
+  );
+
   // PR 29 — JMAP push (RFC 8620 §7) replaces the manual-refresh model.
   // Opens an EventSource to the server's eventSourceUrl; on any
   // StateChange, bumps pushGenerationAtom which useReadHook folds into
@@ -573,24 +592,27 @@ function SignedInShell({
 
         const monthStart = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
         const monthEnd = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 2, 1);
-        const events = await invoker.invoke<unknown, { events: ReadonlyArray<{
+        type EventListItem = {
           id: string;
           title: string;
           start: string;
           duration?: string;
+          description?: string;
           calendarIds?: Readonly<Record<string, boolean>>;
-        }> }>('event.list', {
+          participants?: Readonly<Record<string, {
+            email: string;
+            name?: string;
+            roles?: Readonly<Record<string, boolean>>;
+            participationStatus?: string;
+            expectReply?: boolean;
+          }>>;
+        };
+        const events = await invoker.invoke<unknown, { events: ReadonlyArray<EventListItem> }>('event.list', {
           after: monthStart.toISOString(),
           before: monthEnd.toISOString(),
         });
         if (!cancelled) {
-          const e = events as { events: ReadonlyArray<{
-            id: string;
-            title: string;
-            start: string;
-            duration?: string;
-            calendarIds?: Readonly<Record<string, boolean>>;
-          }> };
+          const e = events as { events: ReadonlyArray<EventListItem> };
           // Map JMAP's calendarIds:{cal-1:true} → flat calendarId for the
           // view. Pick the first true entry; multi-calendar membership is
           // a rare case we can revisit when it matters.
@@ -604,13 +626,36 @@ function SignedInShell({
               ? Object.keys(ids).find((k) => ids[k] === true)
               : undefined;
             const color = calId !== undefined ? colorByCalId.get(calId) : undefined;
+            // PR 54 — flatten the JSCalendar participants map into the
+            // array the view consumes. Order isn't load-bearing but
+            // alphabetic-by-email keeps badge rendering stable across
+            // refreshes.
+            const participants = evt.participants !== undefined
+              ? Object.values(evt.participants)
+                  .map((p) => ({
+                    email: p.email,
+                    ...(p.name !== undefined ? { name: p.name } : {}),
+                    ...(p.roles !== undefined ? { roles: p.roles } : {}),
+                    ...(p.participationStatus !== undefined
+                      ? { participationStatus: p.participationStatus }
+                      : {}),
+                    ...(p.expectReply !== undefined
+                      ? { expectReply: p.expectReply }
+                      : {}),
+                  }))
+                  .sort((a, b) => a.email.localeCompare(b.email))
+              : undefined;
             return {
               id: evt.id,
               title: evt.title,
               start: evt.start,
               ...(evt.duration !== undefined ? { duration: evt.duration } : {}),
+              ...(evt.description !== undefined ? { description: evt.description } : {}),
               ...(calId !== undefined ? { calendarId: calId } : {}),
               ...(color !== undefined ? { calendarColor: color } : {}),
+              ...(participants !== undefined && participants.length > 0
+                ? { participants }
+                : {}),
             };
           });
           setCalendarEvents(mapped);
@@ -1143,6 +1188,10 @@ function SignedInShell({
                 throw new Error('No calendar available to create event in.');
               }
               const startIso = `${data.date}T${data.startTime}:00`;
+              const participants = buildEventParticipants(
+                data.attendees,
+                organizerIdentity,
+              );
               await invoker.invoke('event.create', {
                 calendarId: defaultCalendar.id,
                 title: data.title,
@@ -1150,11 +1199,16 @@ function SignedInShell({
                 duration: data.duration,
                 ...(data.description !== undefined ? { description: data.description } : {}),
                 ...(data.location !== undefined ? { location: data.location } : {}),
+                ...(participants !== undefined ? { participants } : {}),
               });
               setCrudRefresh((n) => n + 1);
             }}
             onUpdateEvent={async (id, data) => {
               const startIso = `${data.date}T${data.startTime}:00`;
+              const participants = buildEventParticipants(
+                data.attendees,
+                organizerIdentity,
+              );
               await invoker.invoke('event.update', {
                 eventId: id,
                 title: data.title,
@@ -1162,6 +1216,10 @@ function SignedInShell({
                 duration: data.duration,
                 ...(data.description !== undefined ? { description: data.description } : {}),
                 ...(data.location !== undefined ? { location: data.location } : {}),
+                // Always send participants on update (even empty array)
+                // so the user removing the last attendee actually
+                // clears the field server-side.
+                ...(participants !== undefined ? { participants } : {}),
               });
               setCrudRefresh((n) => n + 1);
             }}
