@@ -1286,6 +1286,7 @@ function SignedInShell({
             onExpandDir={handleFilesExpandDir}
             onSave={handleFilesSave}
             onDisconnect={handleFilesDisconnect}
+            onOpenSettings={() => setActiveView('settings')}
           />
         ) : activeView === 'settings' ? (
           <AgentSettingsView

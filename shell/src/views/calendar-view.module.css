@@ -93,8 +93,11 @@
 /* ── Visibility rail (§8.4) ─────────────────────────────────── */
 
 .rail {
+  /* PR 49 / CoWork #14 — 180px was too narrow for "Stalwart Calendar"
+   * to fit; the name truncated with "…" despite ample sidebar room.
+   * Widen to 220px so common calendar names render in full. */
   flex: 0 0 auto;
-  width: 180px;
+  width: 220px;
   padding: var(--space-sm) 0;
 }
 
