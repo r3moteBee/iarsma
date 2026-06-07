@@ -191,7 +191,11 @@ describe('AgentDashboardView', () => {
         onRevoke={noopRevoke}
       />,
     );
-    expect(screen.getByText(/expired/i)).toBeInTheDocument();
+    // PR 50 — both the Status badge ("Expired") and the Expires
+    // column ("expired") match /expired/i, so narrow to the badge
+    // by case-sensitive match on its uppercase label.
+    expect(screen.getByText('Expired')).toBeInTheDocument();
+    expect(screen.getByText('expired')).toBeInTheDocument();
   });
 
   it('wires onViewActivity to the per-row Activity link with the agent name', () => {

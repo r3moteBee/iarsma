@@ -106,6 +106,7 @@ export function AgentDashboardView({
                 <th scope="col">Scopes</th>
                 <th scope="col">Status</th>
                 <th scope="col">Last used</th>
+                <th scope="col">Expires</th>
                 <th scope="col" className={styles.numericCol}>
                   Actions (24h)
                 </th>
@@ -168,8 +169,11 @@ function AgentRow({
     >
       <td>
         <span className={styles.agentName}>{a.name}</span>
+        {/* PR 50 / CoWork #10 — label the bare id so a row reading
+            "alice / e" is recognizable as "name / token id" rather
+            than mystery text. The full id stays in the title attr. */}
         <span className={styles.tokenIdHint} title={a.tokenId}>
-          {shortId(a.tokenId)}
+          ID&nbsp;{shortId(a.tokenId)}
         </span>
       </td>
       <td>
@@ -183,6 +187,7 @@ function AgentRow({
       </td>
       <td>{statusFor(a)}</td>
       <td>{a.lastUsedAt !== undefined ? formatTimestamp(a.lastUsedAt) : '—'}</td>
+      <td title={a.expiresAt}>{formatExpiry(a.expiresAt)}</td>
       <td className={styles.numericCol}>
         {a.actionsInWindow}
         {a.actionsInWindow > 0 ? (
@@ -290,4 +295,33 @@ function formatTimestamp(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+/**
+ * Format an ISO expiry timestamp as a coarse relative interval:
+ *   - "in 14d", "in 6h", "in 22m", "in <1m"
+ *   - "expired" when in the past
+ *   - "never" for placeholder far-future expiries the apikey-issuer
+ *     uses for keys with `expiresAt: null` from Stalwart
+ */
+function formatExpiry(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return '—';
+  const now = Date.now();
+  if (ms <= now) return 'expired';
+  // The apikey issuer (PR 39) substitutes a 100-year placeholder when
+  // Stalwart returns expiresAt: null. Treat anything more than 25
+  // years out as "never" so the column doesn't shout "in 36500d".
+  const yearMs = 365 * 24 * 60 * 60 * 1000;
+  if (ms - now > 25 * yearMs) return 'never';
+  const diffMs = ms - now;
+  const min = Math.floor(diffMs / 60_000);
+  if (min < 1) return 'in <1m';
+  if (min < 60) return `in ${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `in ${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 365) return `in ${day}d`;
+  const yr = Math.floor(day / 365);
+  return `in ${yr}y`;
 }
