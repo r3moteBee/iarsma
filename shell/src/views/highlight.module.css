@@ -1,0 +1,8 @@
+/* Search-match highlights (PR 53 / CoWork #15). */
+
+.mark {
+  background-color: color-mix(in srgb, #ff6b35 25%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
