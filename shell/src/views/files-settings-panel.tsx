@@ -110,8 +110,17 @@ function ConnectForm({
           type="password"
           value={token}
           onChange={setToken}
-          placeholder="ghp_..."
+          placeholder="ghp_… or github_pat_…"
         />
+        {/* PR 50 / CoWork #12 — point users at a least-privilege PAT.
+            Stored in encrypted IDB (D-051) on this device only; not
+            transmitted to any server other than github.com. */}
+        <p style={{ margin: '-0.25em 0 0', fontSize: '0.85em', color: 'var(--text-2)' }}>
+          Prefer a fine-grained PAT scoped to <strong>this repo only</strong>{' '}
+          with <em>Contents: read &amp; write</em>. The token is stored
+          encrypted in this browser&apos;s IndexedDB (D-051) — it is not
+          sent anywhere except github.com.
+        </p>
         <Input label="Owner" value={owner} onChange={setOwner} placeholder="octocat" />
         <Input label="Repo" value={repo} onChange={setRepo} placeholder="my-repo" />
         <Input label="Branch" value={branch} onChange={setBranch} placeholder="main" />
