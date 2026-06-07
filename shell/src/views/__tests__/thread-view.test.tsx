@@ -722,3 +722,90 @@ describe('ThreadView — reply actions', () => {
     });
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Auto-mark-on-open (PR 45 / CoWork #1)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadView — auto-mark-read on open', () => {
+  it('patches unread emails to $seen=true once when the thread loads', async () => {
+    const modifyCalls: Array<{ emailIds: readonly string[]; patch: unknown }> = [];
+    const invoker = mockInvoker({
+      'thread.get': async () =>
+        fixtureThreadGet([
+          email({ id: 'E1', keywords: [{ name: '$seen', value: false }] }),
+          email({ id: 'E2', keywords: [{ name: '$seen', value: false }] }),
+        ]),
+      'mail.modify': async (input) => {
+        modifyCalls.push(input as { emailIds: readonly string[]; patch: unknown });
+        return { modifiedCount: (input as { emailIds: readonly string[] }).emailIds.length };
+      },
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedThread threadId="T1">
+            <ThreadView />
+          </WithSelectedThread>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]!.emailIds).toEqual(['E1', 'E2']);
+    expect(modifyCalls[0]!.patch).toEqual({ 'keywords/$seen': true });
+  });
+
+  it('does NOT call mail.modify when every email is already $seen', async () => {
+    const modifyCalls: unknown[] = [];
+    const invoker = mockInvoker({
+      'thread.get': async () =>
+        fixtureThreadGet([
+          email({ id: 'E1', keywords: [{ name: '$seen', value: true }] }),
+        ]),
+      'mail.modify': async (input) => {
+        modifyCalls.push(input);
+        return { modifiedCount: 1 };
+      },
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedThread threadId="T1">
+            <ThreadView />
+          </WithSelectedThread>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitFor(() => screen.getByRole('region', { name: 'Thread' }));
+    // Give the effect a tick to run if it were going to.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(modifyCalls).toHaveLength(0);
+  });
+
+  it('only patches the still-unread emails when some are already read', async () => {
+    const modifyCalls: Array<{ emailIds: readonly string[] }> = [];
+    const invoker = mockInvoker({
+      'thread.get': async () =>
+        fixtureThreadGet([
+          email({ id: 'E1', keywords: [{ name: '$seen', value: true }] }),
+          email({ id: 'E2', keywords: [{ name: '$seen', value: false }] }),
+          email({ id: 'E3', keywords: [{ name: '$seen', value: false }] }),
+        ]),
+      'mail.modify': async (input) => {
+        modifyCalls.push(input as { emailIds: readonly string[] });
+        return { modifiedCount: 2 };
+      },
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedThread threadId="T1">
+            <ThreadView />
+          </WithSelectedThread>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]!.emailIds).toEqual(['E2', 'E3']);
+  });
+});

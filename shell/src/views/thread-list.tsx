@@ -54,6 +54,7 @@ import {
   selectedThreadIdAtom,
 } from '../mail-state.js';
 import { useInvoker } from '../runtime/invoker.js';
+import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import type { EmailFull, ThreadGet } from '../runtime/jmap-client.js';
 import {
   classifySender,
@@ -392,6 +393,7 @@ function ThreadListBody(props: {
   // mail.modify contract uses the legacy `contract` export shape and
   // doesn't have a generated React hook today — invoking via
   // `useInvoker` is the same path the existing send/draft flows use.
+  const bumpPushGeneration = useSetAtom(pushGenerationAtom);
   const toggleKeyword = useCallback(
     (emailId: string, keyword: '$seen' | '$flagged', set: boolean) => {
       void (async () => {
@@ -401,13 +403,15 @@ function ThreadListBody(props: {
             patch: { [`keywords/${keyword}`]: set ? true : null },
           });
           await refetch();
+          // PR 45 — refresh the sidebar unread badge + document title.
+          if (keyword === '$seen') bumpPushGeneration((n) => n + 1);
         } catch (e) {
           // eslint-disable-next-line no-console
           console.warn(`[iarsma] mail.modify ${keyword} failed:`, e);
         }
       })();
     },
-    [invoker, refetch],
+    [invoker, refetch, bumpPushGeneration],
   );
 
   // PR 31 — per-row delete. Outside Trash, this is a soft delete to
