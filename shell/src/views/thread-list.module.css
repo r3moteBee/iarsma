@@ -391,3 +391,24 @@
     gap: 0 var(--space-sm);
   }
 }
+
+/* PR 53 / CoWork #15 — bottom indicator while the paginated search
+ * hook fetches the next page. Sits below the virtualized <ul> inside
+ * the scroll container so it appears at the end of the loaded rows. */
+.loadingMore {
+  padding: var(--space-md);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+/* PR 53 — when the preview holds a search snippet (rather than the
+ * full preview), allow up to two lines so the highlighted match is
+ * never clipped off-screen. */
+.previewSnippet {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

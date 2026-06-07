@@ -47,7 +47,8 @@ import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useThreadList } from '../generated/capabilities/thread-list.js';
-import { useThreadSearch } from '../generated/capabilities/thread-search.js';
+import { useThreadSearchPaginated } from '../runtime/use-thread-search-paginated.js';
+import { tokenize, buildSnippet, Highlight } from './highlight.js';
 import {
   searchQueryAtom,
   mailboxScrollPositionsAtom,
@@ -127,6 +128,10 @@ type ThreadListData = {
 // density=1 so the initial frame doesn't reflow when measurement settles.
 const ROW_HEIGHT_PX = 72;
 
+/** Stable empty array so rows in non-search mode don't churn React
+ *  identity on every render (PR 53 / CoWork #15). */
+const EMPTY_TOKENS: readonly string[] = [];
+
 export function ThreadList() {
   const mailboxId = useAtomValue(selectedMailboxIdAtom);
   const searchQuery = useAtomValue(searchQueryAtom);
@@ -153,17 +158,30 @@ export function ThreadList() {
 }
 
 function ThreadListSearchMode({ query }: { readonly query: string }) {
-  const { data, error, isLoading, refetch } = useThreadSearch({ query });
-  // Search mode doesn't carry a mailboxId — `isDrafts` is forced
-  // false. Future "search within Drafts only" could pass `inMailboxId`
-  // and recompute, but item 9 ships search-everywhere.
-  const threadsLen = (data as ThreadListData | undefined)?.threads.length ?? 0;
-  const total = (data as ThreadListData | undefined)?.total;
+  // PR 53 / CoWork #15 — accumulate pages, drive infinite scroll from
+  // the body's scroll handler, and pass the tokenized query down so
+  // rows can highlight matches in the subject + preview snippet.
+  const {
+    threads,
+    total,
+    isLoading,
+    isLoadingMore,
+    error,
+    hasMore,
+    loadMore,
+    refetch,
+  } = useThreadSearchPaginated({ query });
+  const data: ThreadListData = {
+    threads,
+    position: 0,
+    ...(total !== undefined ? { total } : {}),
+  };
+  const tokens = useMemo(() => tokenize(query), [query]);
   const countText =
-    total !== undefined ? `${threadsLen} of ${total} for "${query}"` : null;
+    total !== undefined ? `${threads.length} of ${total} for "${query}"` : null;
   return (
     <ThreadListBody
-      data={data as ThreadListData | undefined}
+      data={data}
       error={error}
       isLoading={isLoading}
       isDrafts={false}
@@ -172,7 +190,11 @@ function ThreadListSearchMode({ query }: { readonly query: string }) {
       mailboxId={null}
       title={`Search: ${query}`}
       countText={countText}
-      onRefresh={refetch}
+      onRefresh={() => refetch()}
+      tokens={tokens}
+      isLoadingMore={isLoadingMore}
+      hasMore={hasMore}
+      onLoadMore={loadMore}
     />
   );
 }
@@ -237,9 +259,20 @@ function ThreadListBody(props: {
   readonly title: string;
   readonly countText: string | null;
   readonly onRefresh: () => Promise<void> | void;
+  /** Search-mode props (PR 53 / CoWork #15). Defined only when the
+   *  list is showing search results — mailbox-mode passes undefined
+   *  and the body skips highlighting + pagination. */
+  readonly tokens?: readonly string[];
+  readonly isLoadingMore?: boolean;
+  readonly hasMore?: boolean;
+  readonly onLoadMore?: () => void;
 }) {
   const { data, error, isLoading, isDrafts, isTrash, emptyMessage, mailboxId, title, countText, onRefresh } =
     props;
+  const tokens = props.tokens;
+  const isLoadingMore = props.isLoadingMore === true;
+  const hasMore = props.hasMore === true;
+  const onLoadMore = props.onLoadMore;
   const refetch = onRefresh;
   const selectedThreadId = useAtomValue(selectedThreadIdAtom);
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
@@ -579,11 +612,22 @@ function ThreadListBody(props: {
         ref={scrollRef}
         className={styles['body']}
         onScroll={(e) => {
+          const el = e.currentTarget;
+          // PR 53 / CoWork #15 — infinite-scroll trigger in search
+          // mode. Fire `onLoadMore` while the user is still 600px
+          // above the bottom so the next page lands before they hit
+          // the end of the list. The hook ignores calls while
+          // already loading or when no more pages exist.
+          if (onLoadMore !== undefined && hasMore && !isLoadingMore) {
+            const distanceFromBottom =
+              el.scrollHeight - (el.scrollTop + el.clientHeight);
+            if (distanceFromBottom < 600) onLoadMore();
+          }
           // PR 51 — throttle via the browser's natural scroll event
           // batching plus a microtask flush. mailboxId is captured
           // here so search-mode (mailboxId=null) skips the write.
           if (mailboxId === null) return;
-          const top = e.currentTarget.scrollTop;
+          const top = el.scrollTop;
           setScrollPositions((prev) =>
             prev[mailboxId] === top ? prev : { ...prev, [mailboxId]: top },
           );
@@ -618,10 +662,20 @@ function ThreadListBody(props: {
                 onToggleRead={(id, current) => toggleKeyword(id, '$seen', !current)}
                 onDelete={isTrash ? handlePurgeRow : handleSoftDelete}
                 deleteMode={isTrash ? 'purge' : 'soft'}
+                {...(tokens !== undefined ? { tokens } : {})}
               />
             );
           })}
         </ul>
+        {isLoadingMore ? (
+          <div
+            className={styles['loadingMore']}
+            role="status"
+            aria-live="polite"
+          >
+            Loading more results…
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -746,6 +800,11 @@ type ThreadRowProps = {
   /** 'soft' → mail.delete + no confirm; 'purge' → ask parent to
    *  open the destructive confirm dialog. PR 31. */
   readonly deleteMode: 'soft' | 'purge';
+  /** Tokenized search query (PR 53 / CoWork #15). When non-empty,
+   *  the subject + preview are rendered through `<Highlight>` and the
+   *  preview is reduced to a 120-char snippet centered on the first
+   *  match. Mailbox-mode rows pass undefined and render unchanged. */
+  readonly tokens?: readonly string[];
 };
 
 const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(props, ref) {
@@ -761,7 +820,10 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
     onToggleRead,
     onDelete,
     deleteMode,
+    tokens,
   } = props;
+  const highlightTokens = tokens ?? EMPTY_TOKENS;
+  const isSearchMode = highlightTokens.length > 0;
   const e = thread.latestEmail;
   const seen = e.keywords.find((k) => k.name === '$seen')?.value ?? false;
   const flagged = e.keywords.find((k) => k.name === '$flagged')?.value ?? false;
@@ -843,9 +905,30 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
         </span>
         <span className={styles['main']}>
           <span className={styles['sender']}>{senderName}</span>
-          <span className={styles['subject']}>{subject}</span>
+          <span className={styles['subject']}>
+            {isSearchMode ? (
+              <Highlight text={subject} tokens={highlightTokens} />
+            ) : (
+              subject
+            )}
+          </span>
           {e.preview !== undefined && e.preview.length > 0 ? (
-            <span className={styles['preview']}>{e.preview}</span>
+            <span
+              className={
+                isSearchMode
+                  ? `${styles['preview']} ${styles['previewSnippet']}`
+                  : styles['preview']
+              }
+            >
+              {isSearchMode ? (
+                <Highlight
+                  text={buildSnippet(e.preview, highlightTokens)}
+                  tokens={highlightTokens}
+                />
+              ) : (
+                e.preview
+              )}
+            </span>
           ) : null}
         </span>
         <span className={styles['meta']}>
