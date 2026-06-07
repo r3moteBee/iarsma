@@ -110,7 +110,17 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
-    const args = (req.params.arguments ?? {}) as Record<string, unknown>;
+    const rawArgs = (req.params.arguments ?? {}) as Record<string, unknown>;
+
+    // PR 42 — destructive tools (mail.draft, mail.send, files.propose_write)
+    // publish a `{mode: 'preview'|'commit', params: {...}}` envelope in their
+    // input schema, but the handlers' parseInput functions expect the params
+    // at the top level. Agents following the documented schema were getting
+    // "input.xxx must be a non-empty string" errors before this normalize ran.
+    //
+    // The shell's invoker calls tools with flat input + `_iarsmaDryRun`
+    // (its internal back-channel), so we preserve that path too.
+    const { args, envelopeDryRun } = normalizeEnvelope(rawArgs);
     const dryRunArg = args['_iarsmaDryRun'];
 
     // Scope resolution: prefer authInfo from HTTP transport (real per-agent
@@ -126,13 +136,19 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
             : [],
         );
     const cleanInput = stripIarsmaArgs(args);
+    const dryRun =
+      envelopeDryRun !== undefined
+        ? envelopeDryRun
+        : typeof dryRunArg === 'boolean'
+          ? dryRunArg
+          : false;
 
     const result = await dispatcher.invoke(
       req.params.name,
       cleanInput,
       scopes,
       {
-        dryRun: typeof dryRunArg === 'boolean' ? dryRunArg : false,
+        dryRun,
         ...(authInfo?.stalwartApiKey !== undefined ? { bearerToken: authInfo.stalwartApiKey } : {}),
         ...(authInfo?.id !== undefined ? { agentId: authInfo.id } : {}),
         ...(authInfo?.name !== undefined ? { agentName: authInfo.name } : {}),
@@ -186,6 +202,41 @@ export function createIarsmaMcpServer(opts: IarsmaServerOptions): Server {
 
 /** Re-export for callers wiring up server options. */
 export { AGENT_CONTEXT_URN };
+
+/**
+ * Detect + unwrap the `{mode, params}` input envelope used by destructive
+ * tools (PR 42). When the raw arguments are `{mode: 'preview'|'commit', params: {...}}`
+ * — the public schema contract — return the inner `params` plus an explicit
+ * `envelopeDryRun` derived from `mode`. Otherwise pass the args through
+ * unchanged so flat callers (the shell's invoker) keep working.
+ *
+ * The envelope detection is intentionally narrow: requires `params` to be a
+ * plain object AND `mode` to be one of the two enum values. Stray top-level
+ * keys named `mode` or `params` on a non-envelope tool won't trip it.
+ */
+export function normalizeEnvelope(
+  raw: Record<string, unknown>,
+): { readonly args: Record<string, unknown>; readonly envelopeDryRun?: boolean } {
+  const mode = raw['mode'];
+  const params = raw['params'];
+  const isEnvelope =
+    (mode === 'preview' || mode === 'commit') &&
+    params !== null &&
+    typeof params === 'object' &&
+    !Array.isArray(params);
+  if (!isEnvelope) return { args: raw };
+  // Preserve any `_iarsma*` back-channel keys that may have been set at the
+  // envelope level alongside `mode`/`params` — paranoia, no current caller
+  // does this, but the strip path below would otherwise lose them silently.
+  const backChannel: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (k.startsWith('_iarsma')) backChannel[k] = v;
+  }
+  return {
+    args: { ...(params as Record<string, unknown>), ...backChannel },
+    envelopeDryRun: mode === 'preview',
+  };
+}
 
 function stripIarsmaArgs(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

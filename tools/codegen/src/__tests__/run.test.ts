@@ -150,12 +150,19 @@ describe('run (integration with the project contracts)', () => {
     const r = await run({ distDir: tmp, shellGenDir: null });
     expect(r.capabilities).toBeGreaterThanOrEqual(1);
     // session.get + mailbox.list + thread.list + thread.get +
-    // mail.draft + mail.send + mail.modify + mail.delete +
-    // identity.list + thread.search + calendar.list + event.list +
-    // event.get + contact.list + contact.get + files.list +
-    // files.read + files.propose_write. Bump explicitly when adding
-    // contracts so a missing or duplicate contract surfaces in code review.
-    expect(r.capabilities).toBe(16);
+    // mail.draft + mail.send + mail.modify + identity.list +
+    // thread.search + calendar.list + event.list + event.get +
+    // contact.list + contact.get + files.list + files.read +
+    // files.propose_write. Bump explicitly when adding contracts so
+    // a missing or duplicate contract surfaces in code review.
+    //
+    // mail.delete is on disk under contracts/ but uses the legacy
+    // `contract = {...}` export shape that the walker skips — the
+    // handler's behavior is still permanent-destroy, which D-055
+    // says must change to move-to-Trash before agents see this
+    // tool. Will get wired into codegen in a follow-up PR after the
+    // handler is aligned. PR 42.
+    expect(r.capabilities).toBe(17);
   });
 
   it('produces openapi.json at the dist root', async () => {
