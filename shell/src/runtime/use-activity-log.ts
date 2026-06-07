@@ -33,6 +33,9 @@ type ActivityFilters = {
   readonly action: string;
   readonly mode: string;
   readonly timeRange: string;
+  /** Include read-only / polling operations? Default false — those
+   *  drown out meaningful events (PR 51 / CoWork #9). */
+  readonly includeReads: boolean;
 };
 
 const DEFAULT_FILTERS: ActivityFilters = {
@@ -40,7 +43,30 @@ const DEFAULT_FILTERS: ActivityFilters = {
   action: 'all',
   mode: 'all',
   timeRange: 'all',
+  includeReads: false,
 };
+
+/**
+ * Tool names that are pure reads / polls. These dominate the chain
+ * because the cachedInvoker + read-hooks issue them constantly via
+ * SWR revalidation. Hidden from the activity view by default; the
+ * "Show read-only operations" toggle un-hides them.
+ */
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'mailbox.list',
+  'thread.list',
+  'thread.get',
+  'thread.search',
+  'session.get',
+  'identity.list',
+  'calendar.list',
+  'event.list',
+  'event.get',
+  'contact.list',
+  'contact.get',
+  'files.list',
+  'files.read',
+]);
 
 /**
  * Cross-view atom holding the Activity view's active filters. Lifted
@@ -76,7 +102,7 @@ export type UseActivityLogResult = {
   readonly integrityError?: string;
   readonly onVerify: () => void;
   readonly filters: ActivityFilters;
-  readonly onFilterChange: (key: string, value: string) => void;
+  readonly onFilterChange: (key: string, value: string | boolean) => void;
   readonly page: number;
   readonly pageSize: number;
   readonly totalEntries: number;
@@ -150,7 +176,7 @@ export function useActivityLog(opts: UseActivityLogOptions): UseActivityLogResul
     return sorted.slice(start, start + DEFAULT_PAGE_SIZE);
   }, [sorted, page]);
 
-  const onFilterChange = useCallback((key: string, value: string) => {
+  const onFilterChange = useCallback((key: string, value: string | boolean) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(1);
   }, [setFilters]);
@@ -248,6 +274,12 @@ function mapEntry(
 }
 
 function matchesFilters(e: ActivityEntry, f: ActivityFilters): boolean {
+  // PR 51 — drop read-only polls unless explicitly requested. The
+  // action filter still wins if the user typed an exact tool name
+  // (so they can find a specific mailbox.list call by name).
+  if (!f.includeReads && f.action === 'all' && READ_ONLY_TOOLS.has(e.action)) {
+    return false;
+  }
   if (f.actor !== 'all' && e.actor !== f.actor) return false;
   if (f.action !== 'all' && e.action !== f.action) return false;
   if (f.mode !== 'all') {

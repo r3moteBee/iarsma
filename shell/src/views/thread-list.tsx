@@ -29,7 +29,7 @@
  */
 
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   forwardRef,
   useCallback,
@@ -50,6 +50,7 @@ import { useThreadList } from '../generated/capabilities/thread-list.js';
 import { useThreadSearch } from '../generated/capabilities/thread-search.js';
 import {
   searchQueryAtom,
+  mailboxScrollPositionsAtom,
   selectedMailboxIdAtom,
   selectedThreadIdAtom,
 } from '../mail-state.js';
@@ -251,6 +252,28 @@ function ThreadListBody(props: {
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // PR 51 / CoWork #8 — restore the scroll position when this list
+  // remounts for a known mailbox. Throttled save runs from the
+  // onScroll handler below. Search mode passes mailboxId=null, in
+  // which case scroll persistence is skipped (each query is unique
+  // enough that landing-at-top is the right default).
+  const [scrollPositions, setScrollPositions] = useAtom(mailboxScrollPositionsAtom);
+  useEffect(() => {
+    if (mailboxId === null) return;
+    const saved = scrollPositions[mailboxId];
+    if (saved === undefined) return;
+    // Defer one paint so the virtualizer has measured the rows and
+    // can honor the requested scrollTop without snapping back to 0.
+    const handle = requestAnimationFrame(() => {
+      if (scrollRef.current !== null) scrollRef.current.scrollTop = saved;
+    });
+    return () => cancelAnimationFrame(handle);
+    // We only want to restore when the *mailbox* changes — not on
+    // every scrollPositions write (that would fight live scrolling).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mailboxId]);
+
   const virtualizer = useVirtualizer({
     count: threads.length,
     getScrollElement: () => scrollRef.current,
@@ -552,7 +575,20 @@ function ThreadListBody(props: {
     );
   } else {
     body = (
-      <div ref={scrollRef} className={styles['body']}>
+      <div
+        ref={scrollRef}
+        className={styles['body']}
+        onScroll={(e) => {
+          // PR 51 — throttle via the browser's natural scroll event
+          // batching plus a microtask flush. mailboxId is captured
+          // here so search-mode (mailboxId=null) skips the write.
+          if (mailboxId === null) return;
+          const top = e.currentTarget.scrollTop;
+          setScrollPositions((prev) =>
+            prev[mailboxId] === top ? prev : { ...prev, [mailboxId]: top },
+          );
+        }}
+      >
         <ul
           aria-label="Threads"
           onKeyDown={onKeyDown}
