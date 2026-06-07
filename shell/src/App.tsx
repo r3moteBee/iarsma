@@ -36,6 +36,7 @@ import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import { stalwartApiKeyIssuer } from './runtime/stalwart-apikey-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { getAccessToken, handleCallback, signOut } from './runtime/oauth.js';
+import { replaceCallbackUrlWithHome, useRouter } from './hooks/use-router.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
 import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
 import { hiddenCalendarIdsAtom, toggleCalendarId } from './runtime/calendar-visibility.js';
@@ -445,6 +446,13 @@ function SignedInShell({
   const isMobile = breakpoint === 'mobile';
   const isTablet = breakpoint === 'tablet';
   const isDesktop = breakpoint === 'desktop';
+
+  // PR 46 — bidirectional sync between window.location and the
+  // view / mailbox / thread / search atoms. The hook reads the URL
+  // on mount, listens for popstate, and pushes new history entries
+  // on atom changes. Deep links + back/forward + tab title now all
+  // reflect the actual view rather than /auth/callback?...
+  useRouter();
 
   const [activeView, setActiveView] = useAtom(activeViewAtom);
   const [themePreference, setThemePreference] = useAtom(themePreferenceAtom);
@@ -1524,13 +1532,13 @@ function CallbackView({
             console.warn('[iarsma] failed to append sign-in event to action log:', e);
           }
         }
-        // Strip the callback params from the URL so a refresh doesn't
-        // replay the (now-spent) authorization code.
-        if (typeof window !== 'undefined') {
-          const clean = new URL(window.location.href);
-          clean.search = '';
-          window.history.replaceState({}, '', clean.toString());
-        }
+        // PR 46 — replace the spent callback URL with the app's home
+        // route. Previously this only cleared the query string, so
+        // the URL stayed at /webmail/auth/callback through the
+        // session. Now it lands on /webmail/mail (or wherever the
+        // initial route would resolve), and the router hook takes
+        // over for subsequent navigation.
+        replaceCallbackUrlWithHome();
         bumpAuth((v) => v + 1);
         onDone();
       } catch (e) {
