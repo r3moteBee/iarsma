@@ -303,10 +303,14 @@ describe('ComposeView — open state', () => {
     });
   });
 
-  it('shows an inline error for an invalid recipient', () => {
+  it('shows an inline error for an invalid recipient on blur (PR 47)', () => {
     renderComposer();
     const toField = screen.getByLabelText('To');
     fireEvent.change(toField, { target: { value: 'not-an-email' } });
+    // PR 47 / CoWork #3 — the error no longer fires mid-keystroke;
+    // it only surfaces after the field is blurred (or on Send).
+    expect(screen.queryByText(/Invalid recipient/i)).not.toBeInTheDocument();
+    fireEvent.blur(toField);
     expect(screen.getByText(/Invalid recipient/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send…' })).toBeDisabled();
   });
@@ -484,7 +488,13 @@ describe('ComposeView — identity selector', () => {
         screen.getByText('Brent <brent@example.net>'),
       ).toBeInTheDocument();
     });
-    expect(screen.queryByRole('combobox')).toBeNull();
+    // PR 47 — To/Cc/Bcc now expose role=combobox for autocomplete,
+    // so just asserting "no combobox at all" no longer captures
+    // intent. Narrow to the From-identity select specifically by
+    // its label.
+    expect(
+      screen.queryByLabelText('From', { selector: 'select' }),
+    ).toBeNull();
   });
 
   it('renders a dropdown when there are multiple identities, defaulting to the first', async () => {

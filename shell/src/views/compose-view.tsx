@@ -32,6 +32,7 @@ import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
 import { Notice } from '../components/notice.js';
 import { PreviewCard } from '../components/preview-card.js';
+import { RecipientField } from '../components/recipient-field.js';
 import { composeStateAtom, type ComposePrefill } from '../compose-state.js';
 import { useMailDraft } from '../generated/capabilities/mail-draft.js';
 import { useIdentityList } from '../generated/capabilities/identity-list.js';
@@ -248,6 +249,14 @@ function ComposeModal(props: {
   const parsedTo = useMemo(() => parseRecipients(toText), [toText]);
   const parsedCc = useMemo(() => parseRecipients(ccText), [ccText]);
   const parsedBcc = useMemo(() => parseRecipients(bccText), [bccText]);
+
+  // PR 47 / CoWork #3 — only render the "Invalid recipient(s)"
+  // alert AFTER the user leaves the field (or hits Send). Typing
+  // "elle" mid-keystroke shouldn't fire a red error before they're
+  // done. Send-time validation lives in the submit gate below.
+  const [toBlurred, setToBlurred] = useState(false);
+  const [ccBlurred, setCcBlurred] = useState(false);
+  const [bccBlurred, setBccBlurred] = useState(false);
 
   const hasRecipientErrors =
     parsedTo.errors.length > 0 ||
@@ -548,11 +557,23 @@ function ComposeModal(props: {
     selectedIdentity === null ||
     uploadsInFlight > 0;
 
+  // PR 47 / CoWork #4 — flush any pending debounced save before
+  // the modal closes. Without this, typing "hi" then immediately
+  // clicking X / pressing Escape leaves the 500ms timer dangling
+  // and the draft is silently discarded.
+  const handleClose = useCallback((): void => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    void doSaveDraftRef.current().finally(() => onClose());
+  }, [onClose]);
+
   return (
     <>
       <Dialog
         open
-        onClose={onClose}
+        onClose={handleClose}
         title={title}
         footer={
           <>
@@ -606,21 +627,21 @@ function ComposeModal(props: {
                 )}
               </FieldRow>
               <FieldRow label="To" htmlFor="compose-to">
-                <input
+                <RecipientField
                   id="compose-to"
-                  type="text"
                   value={toText}
-                  onChange={(e) => setToText(e.target.value)}
-                  onBlur={triggerDebouncedSave}
-                  aria-invalid={parsedTo.errors.length > 0}
-                  aria-describedby={
-                    parsedTo.errors.length > 0 ? 'compose-to-errors' : undefined
+                  onChange={setToText}
+                  onBlur={() => { setToBlurred(true); triggerDebouncedSave(); }}
+                  ariaInvalid={toBlurred && parsedTo.errors.length > 0}
+                  ariaDescribedBy={
+                    toBlurred && parsedTo.errors.length > 0
+                      ? 'compose-to-errors' : undefined
                   }
                   placeholder="alice@example.net, Bob <bob@example.net>"
                   className={styles['fieldInput']}
                 />
               </FieldRow>
-              {parsedTo.errors.length > 0 ? (
+              {toBlurred && parsedTo.errors.length > 0 ? (
                 <p
                   id="compose-to-errors"
                   role="alert"
@@ -630,33 +651,31 @@ function ComposeModal(props: {
                 </p>
               ) : null}
               <FieldRow label="Cc" htmlFor="compose-cc">
-                <input
+                <RecipientField
                   id="compose-cc"
-                  type="text"
                   value={ccText}
-                  onChange={(e) => setCcText(e.target.value)}
-                  onBlur={triggerDebouncedSave}
-                  aria-invalid={parsedCc.errors.length > 0}
+                  onChange={setCcText}
+                  onBlur={() => { setCcBlurred(true); triggerDebouncedSave(); }}
+                  ariaInvalid={ccBlurred && parsedCc.errors.length > 0}
                   className={styles['fieldInput']}
                 />
               </FieldRow>
-              {parsedCc.errors.length > 0 ? (
+              {ccBlurred && parsedCc.errors.length > 0 ? (
                 <p role="alert" className={styles['fieldError']}>
                   Invalid recipient(s): {parsedCc.errors.join(', ')}
                 </p>
               ) : null}
               <FieldRow label="Bcc" htmlFor="compose-bcc">
-                <input
+                <RecipientField
                   id="compose-bcc"
-                  type="text"
                   value={bccText}
-                  onChange={(e) => setBccText(e.target.value)}
-                  onBlur={triggerDebouncedSave}
-                  aria-invalid={parsedBcc.errors.length > 0}
+                  onChange={setBccText}
+                  onBlur={() => { setBccBlurred(true); triggerDebouncedSave(); }}
+                  ariaInvalid={bccBlurred && parsedBcc.errors.length > 0}
                   className={styles['fieldInput']}
                 />
               </FieldRow>
-              {parsedBcc.errors.length > 0 ? (
+              {bccBlurred && parsedBcc.errors.length > 0 ? (
                 <p role="alert" className={styles['fieldError']}>
                   Invalid recipient(s): {parsedBcc.errors.join(', ')}
                 </p>
