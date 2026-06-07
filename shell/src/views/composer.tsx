@@ -76,6 +76,29 @@ export function Composer(props: ComposerProps) {
 
     if (value !== undefined && value !== '') {
       editor.setHTML(value);
+      // PR 48 / CoWork #5 — when the prefilled HTML opens with an
+      // empty paragraph (the reply-prefill convention — a blank
+      // `<p>` before the `<blockquote>`), put the cursor in that
+      // empty paragraph so the user can immediately type above the
+      // quoted block. Without this, Squire's default lands the
+      // caret at the end of the document — below the entire quote.
+      const opensWithEmptyParagraph = /^\s*<p>\s*<\/p>/i.test(value);
+      if (opensWithEmptyParagraph) {
+        try {
+          editor.moveCursorToStart();
+        } catch {
+          // moveCursorToStart isn't guaranteed across Squire versions;
+          // fall through to default placement on any error.
+        }
+      }
+    }
+    // Auto-focus on mount so the user can start typing immediately
+    // without an extra click. The composer is always rendered inside
+    // an open modal (the Dialog focus trap allows this).
+    try {
+      editor.focus();
+    } catch {
+      // No-op — focus is a polish, not a correctness gate.
     }
 
     const handler = () => {
