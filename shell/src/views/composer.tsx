@@ -51,20 +51,31 @@ export type ComposerProps = {
   readonly placeholder?: string;
   /** Optional `id` for `aria-labelledby` consumers. */
   readonly id?: string;
+  /**
+   * Fires with the Squire instance once init completes, and with `null`
+   * on unmount. Lets a sibling toolbar (PR 52 / CoWork #6) drive
+   * formatting commands without owning the editor lifecycle.
+   */
+  readonly onEditorReady?: (editor: Squire | null) => void;
 };
 
 export function Composer(props: ComposerProps) {
-  const { value, onChange, label, placeholder, id } = props;
+  const { value, onChange, label, placeholder, id, onEditorReady } = props;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Squire | null>(null);
 
-  // onChange is held in a ref so the effect doesn't re-init Squire on
-  // every parent re-render. Squire init is heavy (mutation observer +
-  // event listeners + clipboard handlers); we want to do it once.
+  // onChange / onEditorReady are held in refs so the effect doesn't
+  // re-init Squire on every parent re-render. Squire init is heavy
+  // (mutation observer + event listeners + clipboard handlers); we
+  // want to do it once.
   const onChangeRef = useRef(onChange);
+  const onEditorReadyRef = useRef(onEditorReady);
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+  useEffect(() => {
+    onEditorReadyRef.current = onEditorReady;
+  }, [onEditorReady]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -107,8 +118,10 @@ export function Composer(props: ComposerProps) {
     editor.addEventListener('input', handler);
 
     editorRef.current = editor;
+    onEditorReadyRef.current?.(editor);
 
     return () => {
+      onEditorReadyRef.current?.(null);
       editor.removeEventListener('input', handler);
       editor.destroy();
       editorRef.current = null;

@@ -51,7 +51,14 @@ import {
   parseRecipients,
   type ParsedRecipient,
 } from './recipient-parser.js';
+import type Squire from 'squire-rte';
 import { Composer } from './composer.js';
+import { ComposerToolbar } from './composer-toolbar.js';
+
+// Lift the Composer's Squire instance so the toolbar can drive it.
+// `null` while the editor is unmounted; set once Composer fires its
+// `onEditorReady` callback.
+type SquireInstance = Squire | null;
 import styles from './compose-view.module.css';
 
 const COMPOSE_FORM_ID = 'compose-form';
@@ -198,6 +205,10 @@ function ComposeModal(props: {
   const [bccText, setBccText] = useState(formatRecipients(prefill.bcc));
   const [subject, setSubject] = useState(prefill.subject ?? '');
   const [bodyHtml, setBodyHtml] = useState(prefill.bodyHtml ?? '');
+  // PR 52 / CoWork #6 — Squire instance is owned by Composer; the
+  // toolbar reads it via this state. `null` until Composer mounts and
+  // again after unmount, so the toolbar renders disabled in between.
+  const [editor, setEditor] = useState<SquireInstance>(null);
 
   // PR 33 — auto-prepend the selected identity's textSignature when
   // composing a brand-new message (no prefill body, no draft body
@@ -691,11 +702,13 @@ function ComposeModal(props: {
                 />
               </FieldRow>
             </div>
+            <ComposerToolbar editor={editor} />
             <div className={styles['bodyWrapper']} onBlur={triggerDebouncedSave}>
               <Composer
                 label="Message body"
                 value={bodyHtml}
                 onChange={setBodyHtml}
+                onEditorReady={setEditor}
               />
             </div>
             <AttachmentsPanel
