@@ -150,7 +150,7 @@ function statusToKeywordFilter(
 
 export type JmapApprovalStoreOptions = {
   readonly baseUrl: string;
-  readonly getAuthToken: () => string | null;
+  readonly getAuthToken: () => string | null | Promise<string | null>;
   readonly fetch?: typeof fetch;
 };
 
@@ -172,7 +172,7 @@ export function jmapApprovalStore(opts: JmapApprovalStoreOptions): ApprovalStore
   }
 
   async function jmapPost(session: Session, body: string): Promise<unknown> {
-    const token = opts.getAuthToken();
+    const token = await opts.getAuthToken();
     if (token === null) {
       throw makeError('unauthorized', 'No auth token available.');
     }

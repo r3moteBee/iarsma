@@ -57,6 +57,12 @@ export type LoggingInvokerOptions = {
    *  each reversible commit (PR 21+). Failures here are best-effort
    *  — the user-facing call still succeeds. */
   readonly undoRegistry?: UndoRegistry;
+  /** PR 44 — invoked when the inner invoker throws with
+   *  `code === 'unauthorized'`. The wrapper still re-throws; this
+   *  callback exists so the App can clear stored tokens + bump the
+   *  auth atom, flipping the UI to SignedOutView instead of leaving
+   *  it rendering with a stale Bearer that will keep 401-ing. */
+  readonly onUnauthorized?: () => void;
 };
 
 const defaultOnAppendError = (toolName: string, error: unknown): void => {
@@ -77,7 +83,22 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
       input: I,
       options: InvocationOptions = {},
     ): Promise<O | DryRunPreview<O>> {
-      const result = await opts.inner.invoke<I, O>(name, input, options);
+      let result: O | DryRunPreview<O>;
+      try {
+        result = await opts.inner.invoke<I, O>(name, input, options);
+      } catch (e) {
+        // PR 44 — surface unauthorized errors to App-level handler so
+        // it can clear tokens + flip to SignedOutView. The error is
+        // still re-thrown for normal failure-path handling.
+        if (
+          opts.onUnauthorized !== undefined &&
+          isUnauthorizedError(e)
+        ) {
+          try { opts.onUnauthorized(); } catch { /* never let the
+            handler break the rethrow */ }
+        }
+        throw e;
+      }
 
       if (!isLoggable(name)) return result;
       const identity = opts.getIdentity();
@@ -167,4 +188,15 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
         }
       : {}),
   };
+}
+
+/**
+ * Detect the JMAP / invoker `unauthorized` error code on a thrown
+ * value without depending on a specific Error subclass. Both
+ * `jmap-client.ts` and `invoker.ts` produce errors with this code
+ * for 401 responses + missing-bearer cases.
+ */
+function isUnauthorizedError(e: unknown): boolean {
+  if (e === null || typeof e !== 'object') return false;
+  return (e as { code?: unknown }).code === 'unauthorized';
 }

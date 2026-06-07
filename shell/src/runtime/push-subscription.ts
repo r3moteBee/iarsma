@@ -85,7 +85,7 @@ const HIDDEN_TIMEOUT_MS = 5 * 60 * 1000;
 
 export type UsePushSubscriptionOptions = {
   readonly session: Session | null;
-  readonly getAuthToken: () => string | null;
+  readonly getAuthToken: () => string | null | Promise<string | null>;
   readonly onStateChange: (changes: StateChange) => void;
 };
 
@@ -198,7 +198,7 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
     async function open(): Promise<void> {
       close();
       if (cancelled) return;
-      const token = getAuthTokenRef.current();
+      const token = await getAuthTokenRef.current();
       if (token === null) {
         // eslint-disable-next-line no-console
         console.warn(
