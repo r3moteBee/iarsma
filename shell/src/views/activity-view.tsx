@@ -45,8 +45,9 @@ export type ActivityViewProps = {
     readonly action: string; // 'all' | tool name
     readonly mode: string; // 'all' | 'preview' | 'commit'
     readonly timeRange: string; // 'all' | 'hour' | 'today' | 'week'
+    readonly includeReads: boolean;
   };
-  readonly onFilterChange: (key: string, value: string) => void;
+  readonly onFilterChange: (key: string, value: string | boolean) => void;
   readonly page: number;
   readonly pageSize: number;
   readonly totalEntries: number;
@@ -215,6 +216,24 @@ export function ActivityView({
             <option value="today">Today</option>
             <option value="week">Last 7 days</option>
           </select>
+        </div>
+
+        {/* PR 51 / CoWork #9 — read-only polls (mailbox.list,
+            thread.list, …) dominate the chain because the SWR
+            layer issues them constantly. Hidden by default. */}
+        <div className={styles['filterField']}>
+          <label htmlFor="activity-filter-reads" className={styles['filterLabel']}>
+            Read-only ops
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4em', userSelect: 'none' }}>
+            <input
+              id="activity-filter-reads"
+              type="checkbox"
+              checked={filters.includeReads}
+              onChange={(e) => onFilterChange('includeReads', e.target.checked)}
+            />
+            <span style={{ fontSize: '0.9em', color: 'var(--text-2)' }}>Show</span>
+          </label>
         </div>
       </div>
 

@@ -69,6 +69,7 @@ const DEFAULT_FILTERS: ActivityViewProps['filters'] = {
   action: 'all',
   mode: 'all',
   timeRange: 'all',
+  includeReads: true, // tests want all entries visible by default
 };
 
 function defaultProps(overrides?: Partial<ActivityViewProps>): ActivityViewProps {

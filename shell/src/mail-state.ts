@@ -19,6 +19,20 @@ import { atom } from 'jotai';
 export const selectedMailboxIdAtom = atom<string | null>(null);
 
 /**
+ * Per-mailbox scroll position in the ThreadList (PR 51 / CoWork #8).
+ * Keyed by mailboxId; value is the last-observed `scrollTop` of the
+ * thread list scroll container. ThreadList writes on scroll (throttled
+ * via the `scroll` event handler) and reads on mount so navigating
+ * away → back lands on the same row the user was looking at.
+ *
+ * Stored only in memory — refreshing the tab resets all positions.
+ * That's acceptable: scroll position is ephemeral state, not a
+ * preference, and IndexedDB pressure for an N-mailboxes-per-tab cache
+ * isn't worth it.
+ */
+export const mailboxScrollPositionsAtom = atom<Readonly<Record<string, number>>>({});
+
+/**
  * Currently-selected thread id within the selected mailbox, or `null`.
  * ThreadList writes (on Enter / click); the upcoming ThreadView (item 7)
  * reads. Switching mailboxes clears the selection — the previous-mailbox
