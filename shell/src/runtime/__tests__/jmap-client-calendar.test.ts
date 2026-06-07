@@ -356,6 +356,66 @@ describe('parseEventListResponse', () => {
     expect(second.description).toBe('Lunch with Bob');
   });
 
+  // PR 54 — participant role + expectReply parsing.
+  it('parses participant roles, expectReply, and sendTo.imip fallback', () => {
+    const body = JSON.stringify({
+      methodResponses: [
+        ['CalendarEvent/query', { accountId: 'c', ids: ['Ev99'], total: 1 }, '0'],
+        [
+          'CalendarEvent/get',
+          {
+            accountId: 'c',
+            state: 's',
+            list: [
+              {
+                id: 'Ev99',
+                calendarIds: { Cal01: true },
+                title: 'Mixed participants',
+                start: '2026-06-10T09:00:00',
+                participants: {
+                  organizer: {
+                    name: 'Brent',
+                    email: 'brent@r3motely.com',
+                    roles: { owner: true, chair: true },
+                    participationStatus: 'accepted',
+                    expectReply: false,
+                  },
+                  required: {
+                    email: 'alice@example.invalid',
+                    roles: { attendee: true },
+                    participationStatus: 'needs-action',
+                    expectReply: true,
+                  },
+                  // No `email` property — only sendTo.imip. We accept
+                  // this shape so REPLY ingest doesn't need a separate
+                  // path (PR 55).
+                  fallback: {
+                    sendTo: { imip: 'mailto:bob@example.invalid' },
+                    roles: { attendee: true, optional: true },
+                  },
+                  // No identifiable email anywhere — dropped from the
+                  // parsed result rather than crashing.
+                  malformed: { name: 'Mystery' },
+                },
+              },
+            ],
+            notFound: [],
+          },
+          '0',
+        ],
+      ],
+    });
+    const result = parseEventListResponse(body);
+    const ev = result.events[0]!;
+    expect(ev.participants).toBeDefined();
+    expect(ev.participants!['organizer']!.roles).toEqual({ owner: true, chair: true });
+    expect(ev.participants!['organizer']!.expectReply).toBe(false);
+    expect(ev.participants!['required']!.roles).toEqual({ attendee: true });
+    expect(ev.participants!['fallback']!.email).toBe('bob@example.invalid');
+    expect(ev.participants!['fallback']!.roles).toEqual({ attendee: true, optional: true });
+    expect(ev.participants!['malformed']).toBeUndefined();
+  });
+
   it('throws ToolError on malformed JSON', () => {
     try {
       parseEventListResponse('{not json');

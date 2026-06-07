@@ -34,12 +34,36 @@ export type CalendarViewEvent = {
    *  when absent; 'agent' triggers the agent-treatment row dot so
    *  "your scheduling agent booked this" is legible at a glance. */
   readonly createdBy?: 'human' | 'agent';
+  /** PR 54 — attendees on the event as parsed from JMAP. Surfaces in
+   *  the detail view (with PARTSTAT badges) and seeds the form when
+   *  the user edits the event. */
+  readonly participants?: readonly {
+    readonly email: string;
+    readonly name?: string;
+    readonly roles?: Readonly<Record<string, boolean>>;
+    readonly participationStatus?: string;
+    readonly expectReply?: boolean;
+  }[];
 };
 
 export type CalendarInfo = {
   readonly id: string;
   readonly name: string;
   readonly color?: string;
+};
+
+/**
+ * One attendee row as edited in the form (PR 54 / CoWork #7). Optional
+ * because the form can produce an empty list (no invites). `name` is
+ * optional — many users only have email addresses on hand.
+ */
+export type EventFormAttendee = {
+  readonly email: string;
+  readonly name?: string;
+  /** Whether this attendee is marked optional. Defaults to false
+   *  (regular `attendee` role). Optional attendees ride along with
+   *  `roles: { attendee: true, optional: true }` on commit. */
+  readonly optional?: boolean;
 };
 
 export type EventFormData = {
@@ -49,6 +73,11 @@ export type EventFormData = {
   readonly duration: string; // ISO duration "PT30M", "PT1H", "PT2H", "P1D"
   readonly description?: string;
   readonly location?: string;
+  /** PR 54 — when present and non-empty, the host wraps these into
+   *  JSCalendar participants (plus an organizer entry from the
+   *  current identity) and sends through CalendarEvent/set. Stalwart's
+   *  server-side scheduling fires iTIP REQUEST. */
+  readonly attendees?: readonly EventFormAttendee[];
 };
 
 export type CalendarViewProps = {
@@ -1249,6 +1278,12 @@ function EventFormDialog({
   const [duration, setDuration] = useState(initialDuration);
   const [description, setDescription] = useState(editEvent?.description ?? '');
   const [location, setLocation] = useState(editEvent?.location ?? '');
+  // PR 54 — attendees field. Seeds from `editEvent.participants` after
+  // dropping the organizer entry (the host re-injects the organizer on
+  // save, derived from the current identity).
+  const [attendees, setAttendees] = useState<readonly EventFormAttendee[]>(
+    () => seedAttendees(editEvent?.participants),
+  );
 
   const isEditing = editEvent !== undefined;
   const titleValid = title.trim().length > 0;
@@ -1263,6 +1298,11 @@ function EventFormDialog({
       duration,
       ...(description.trim() !== '' ? { description: description.trim() } : {}),
       ...(location.trim() !== '' ? { location: location.trim() } : {}),
+      // Always pass `attendees` — empty array communicates "clear
+      // existing invites" on edit. The host short-circuits the
+      // organizer-injection when the array is empty AND the event
+      // has no existing participants.
+      attendees,
     };
     void onSave(data);
   };
@@ -1378,8 +1418,215 @@ function EventFormDialog({
             placeholder="Add a location..."
           />
         </div>
+
+        <AttendeesField attendees={attendees} onChange={setAttendees} />
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * Compose the participants array sent to JMAP `event.create`/`event.update`
+ * from the form's attendee list + the current user (organizer).
+ *
+ * Returns `undefined` when neither the organizer is known nor any
+ * attendees are present — that case skips the participants field on
+ * the wire entirely (server doesn't need to fire iTIP for a solo
+ * event).
+ *
+ * Returns an empty array only when the caller explicitly wants to
+ * clear participants (form attendees=[] + organizer unknown). Pure;
+ * unit-tested.
+ */
+export function buildEventParticipants(
+  attendees: readonly EventFormAttendee[] | undefined,
+  organizer: { readonly email: string; readonly name?: string } | undefined,
+): readonly {
+  readonly email: string;
+  readonly name?: string;
+  readonly roles: Readonly<Record<string, boolean>>;
+  readonly participationStatus?: 'needs-action' | 'accepted' | 'declined' | 'tentative' | 'delegated';
+  readonly expectReply?: boolean;
+}[] | undefined {
+  const list = attendees ?? [];
+  if (list.length === 0 && organizer === undefined) return undefined;
+  const out: {
+    email: string;
+    name?: string;
+    roles: Record<string, boolean>;
+    participationStatus?: 'needs-action' | 'accepted' | 'declined' | 'tentative' | 'delegated';
+    expectReply?: boolean;
+  }[] = [];
+  if (organizer !== undefined && list.length > 0) {
+    // Only inject the organizer when there's at least one attendee —
+    // a solo event doesn't need a participant entry for iTIP.
+    out.push({
+      email: organizer.email,
+      ...(organizer.name !== undefined ? { name: organizer.name } : {}),
+      roles: { owner: true, chair: true },
+      participationStatus: 'accepted',
+      expectReply: false,
+    });
+  }
+  for (const a of list) {
+    out.push({
+      email: a.email,
+      ...(a.name !== undefined ? { name: a.name } : {}),
+      roles:
+        a.optional === true
+          ? { attendee: true, optional: true }
+          : { attendee: true },
+      participationStatus: 'needs-action',
+      expectReply: true,
+    });
+  }
+  return out;
+}
+
+/** Pure helper used by tests AND the form's initial-state seed. Drops
+ *  the organizer (role.owner=true) so the user can't accidentally
+ *  remove themselves; the host re-injects an organizer on save. */
+export function seedAttendees(
+  participants: readonly NonNullable<CalendarViewEvent['participants']>[number][] | undefined,
+): readonly EventFormAttendee[] {
+  if (participants === undefined) return [];
+  const out: EventFormAttendee[] = [];
+  for (const p of participants) {
+    if (p.roles?.owner === true) continue;
+    out.push({
+      email: p.email,
+      ...(p.name !== undefined ? { name: p.name } : {}),
+      ...(p.roles?.optional === true ? { optional: true } : {}),
+    });
+  }
+  return out;
+}
+
+/** Pure email shape check — sufficient for "you haven't typed gibberish"
+ *  validation in the chip input. Server is the authority. */
+export function isPlausibleEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+}
+
+function AttendeesField({
+  attendees,
+  onChange,
+}: {
+  readonly attendees: readonly EventFormAttendee[];
+  readonly onChange: (next: readonly EventFormAttendee[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const commit = useCallback(() => {
+    const trimmed = draft.trim();
+    if (trimmed === '') return;
+    if (!isPlausibleEmail(trimmed)) {
+      setError(`"${trimmed}" doesn't look like an email address.`);
+      return;
+    }
+    if (attendees.some((a) => a.email.toLowerCase() === trimmed.toLowerCase())) {
+      setError(`${trimmed} is already on the invite list.`);
+      return;
+    }
+    onChange([...attendees, { email: trimmed }]);
+    setDraft('');
+    setError(null);
+  }, [draft, attendees, onChange]);
+
+  const remove = useCallback(
+    (email: string) => {
+      onChange(attendees.filter((a) => a.email !== email));
+    },
+    [attendees, onChange],
+  );
+
+  const toggleOptional = useCallback(
+    (email: string) => {
+      onChange(
+        attendees.map((a) =>
+          a.email === email ? { ...a, optional: a.optional !== true } : a,
+        ),
+      );
+    },
+    [attendees, onChange],
+  );
+
+  return (
+    <div className={styles.formField}>
+      <label htmlFor="event-attendees" className={styles.formLabel}>
+        Attendees
+      </label>
+      {attendees.length > 0 ? (
+        <ul
+          className={styles.attendeeList}
+          aria-label="Invited attendees"
+        >
+          {attendees.map((a) => (
+            <li key={a.email} className={styles.attendeeChip}>
+              <span className={styles.attendeeEmail}>{a.email}</span>
+              <button
+                type="button"
+                className={styles.attendeeOptionalBtn}
+                onClick={() => toggleOptional(a.email)}
+                aria-pressed={a.optional === true}
+                title={
+                  a.optional === true
+                    ? 'Marked optional — click to make required'
+                    : 'Mark as optional attendee'
+                }
+              >
+                {a.optional === true ? 'optional' : 'required'}
+              </button>
+              <button
+                type="button"
+                className={styles.attendeeRemoveBtn}
+                onClick={() => remove(a.email)}
+                aria-label={`Remove ${a.email}`}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className={styles.attendeeInputRow}>
+        <input
+          id="event-attendees"
+          type="email"
+          className={styles.formInput}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (error !== null) setError(null);
+          }}
+          onKeyDown={(e) => {
+            // Commit on Enter or comma; both are common in
+            // invite-style fields (Gmail, GCal).
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault();
+              commit();
+            } else if (
+              e.key === 'Backspace' &&
+              draft === '' &&
+              attendees.length > 0
+            ) {
+              // Backspace in an empty input removes the last chip,
+              // matching mail-client convention.
+              const last = attendees[attendees.length - 1];
+              if (last !== undefined) remove(last.email);
+            }
+          }}
+          onBlur={commit}
+          placeholder="email@example.com (press Enter to add)"
+        />
+      </div>
+      {error !== null ? (
+        <p className={styles.attendeeError} role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -1448,8 +1695,87 @@ function EventDetailDialog({
             <span>{event.description}</span>
           </div>
         ) : null}
+        {event.participants !== undefined && event.participants.length > 0 ? (
+          <div className={styles.detailRow}>
+            <span className={styles.detailLabel}>Attendees</span>
+            <ul
+              className={styles.participantList}
+              aria-label={`${event.participants.length} attendee${
+                event.participants.length === 1 ? '' : 's'
+              }`}
+            >
+              {event.participants.map((p) => {
+                const status = p.participationStatus ?? 'needs-action';
+                return (
+                  <li key={p.email} className={styles.participantRow}>
+                    <span className={styles.participantName}>
+                      {p.name !== undefined && p.name !== ''
+                        ? `${p.name} <${p.email}>`
+                        : p.email}
+                    </span>
+                    <ParticipantStatusBadge status={status} />
+                    {p.roles?.optional === true ? (
+                      <span
+                        className={styles.participantOptional}
+                        title="Optional attendee"
+                      >
+                        optional
+                      </span>
+                    ) : null}
+                    {p.roles?.owner === true ? (
+                      <span
+                        className={styles.participantOrganizer}
+                        title="Organizer"
+                      >
+                        organizer
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </Dialog>
+  );
+}
+
+/** Pure mapping from PARTSTAT → human-facing label + visual treatment. */
+export function partstatLabel(status: string): {
+  readonly label: string;
+  readonly tone: 'accepted' | 'declined' | 'tentative' | 'pending';
+} {
+  switch (status) {
+    case 'accepted':
+      return { label: 'Accepted', tone: 'accepted' };
+    case 'declined':
+      return { label: 'Declined', tone: 'declined' };
+    case 'tentative':
+      return { label: 'Tentative', tone: 'tentative' };
+    case 'delegated':
+      return { label: 'Delegated', tone: 'pending' };
+    default:
+      return { label: 'Awaiting reply', tone: 'pending' };
+  }
+}
+
+function ParticipantStatusBadge({ status }: { readonly status: string }) {
+  const { label, tone } = partstatLabel(status);
+  // Tone selects a CSS class; never raw className concatenation off
+  // user data, so axe-prone string ops stay simple.
+  const cls =
+    tone === 'accepted'
+      ? styles.partstatAccepted
+      : tone === 'declined'
+        ? styles.partstatDeclined
+        : tone === 'tentative'
+          ? styles.partstatTentative
+          : styles.partstatPending;
+  return (
+    <span className={`${styles.partstatBadge} ${cls}`} aria-label={label}>
+      {label}
+    </span>
   );
 }
 
