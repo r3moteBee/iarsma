@@ -51,6 +51,7 @@ import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
 import { selectedThreadIdAtom } from '../mail-state.js';
 import { useThreadGet } from '../generated/capabilities/thread-get.js';
+import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import { useInvoker } from '../runtime/invoker.js';
 import { sanitizeHtml } from '../runtime/sanitizer.js';
 import type { EmailFull } from '../runtime/jmap-client.js';
@@ -126,7 +127,43 @@ function ThreadViewLoaded({
   const tokens = useAtomValue(tokensAtom);
   const setComposeState = useSetAtom(composeStateAtom);
   const invoker = useInvoker();
+  const bumpPushGeneration = useSetAtom(pushGenerationAtom);
   const userEmail = tokens?.email ?? 'unknown@example.invalid';
+
+  // PR 45 — auto-mark-on-open. Patches any unread emails in this
+  // thread to `$seen=true` once when the thread first loads. The
+  // ref-keyed-by-thread-emailIds guard prevents re-running when the
+  // thread refetches its own data (which would otherwise be a stable
+  // no-op call but a wasted round-trip).
+  const threadKey = emails.map((e) => e.id).join(',');
+  const autoMarkedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (autoMarkedRef.current === threadKey) return;
+    autoMarkedRef.current = threadKey;
+    const unreadIds = emails
+      .filter((e) => !(e.keywords.find((k) => k.name === '$seen')?.value ?? false))
+      .map((e) => e.id);
+    if (unreadIds.length === 0) return;
+    void (async () => {
+      try {
+        await invoker.invoke('mail.modify', {
+          emailIds: unreadIds,
+          patch: { 'keywords/$seen': true },
+        });
+        // Bump push-generation so the sidebar's useMailboxList
+        // refetches and the unread badge / document title update.
+        // JMAP push *should* fire for this, but we don't trust the
+        // server to always emit a Mailbox state-change for an
+        // Email/$seen flip — explicit bump is the belt-and-suspenders.
+        bumpPushGeneration((n) => n + 1);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] auto-mark-read failed:', e);
+        // Roll back the guard so a future render can retry.
+        autoMarkedRef.current = null;
+      }
+    })();
+  }, [threadKey, emails, invoker, bumpPushGeneration]);
   // Latest message is auto-expanded; older messages start collapsed.
   // Selection is keyed by index — emails are immutable per render so
   // index is stable across the lifetime of this view.
@@ -240,12 +277,14 @@ function ThreadViewLoaded({
           patch: { 'keywords/$seen': next ? true : null },
         });
         await refetch();
+        // PR 45 — refresh the sidebar unread badge + document title.
+        bumpPushGeneration((n) => n + 1);
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn('[iarsma] mail.modify $seen failed:', e);
       }
     })();
-  }, [invoker, refetch, emails, threadSeen]);
+  }, [invoker, refetch, emails, threadSeen, bumpPushGeneration]);
 
   const subject = emails[emails.length - 1]?.subject ?? '(no subject)';
   const messageCountLabel = `${emails.length} ${emails.length === 1 ? 'message' : 'messages'}`;
