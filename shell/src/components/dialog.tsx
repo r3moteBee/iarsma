@@ -28,7 +28,16 @@ export function Dialog({
     if (el === null) return;
 
     if (open && !el.open) {
-      el.showModal();
+      try {
+        el.showModal();
+      } catch (e) {
+        // showModal throws InvalidStateError if the element already
+        // has an `open` attribute or isn't connected. Both are
+        // bugs in the caller; logging makes them visible instead of
+        // silently degrading to a non-modal dialog (PR 55 / CoWork).
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] Dialog.showModal failed:', e);
+      }
     } else if (!open && el.open) {
       el.close();
     }
