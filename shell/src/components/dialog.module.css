@@ -8,6 +8,13 @@
   width: calc(100% - var(--space-xl) * 2);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  /* PR 48 / CoWork #5 — cap height so a long reply (with a tall
+   * quoted block) doesn't push the action bar past the viewport.
+   * The flex column layout keeps the header pinned to the top and
+   * the footer pinned to the bottom; the body absorbs the scroll. */
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
 }
 
 .dialog::backdrop {
@@ -51,6 +58,13 @@
 
 .body {
   padding: var(--space-lg);
+  /* PR 48 — absorb dialog overflow here so the footer stays sticky.
+   * `min-height: 0` is needed so this flex child can shrink below
+   * its content size (otherwise the dialog grows to fit everything
+   * and the max-height cap is bypassed). */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .footer {
@@ -60,6 +74,10 @@
   gap: var(--space-sm);
   padding: var(--space-lg);
   border-top: 1px solid var(--surface-3);
+  /* Sticky-by-virtue-of-flex: as a non-shrinking flex item in the
+   * dialog column, this row stays visible regardless of body length. */
+  flex: 0 0 auto;
+  background-color: var(--surface-1);
 }
 
 /* Mobile: full-screen dialog */
