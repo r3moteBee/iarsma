@@ -1,0 +1,59 @@
+/* ComposerToolbar — formatting buttons (PR 52 / CoWork #6) */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background-color: var(--surface-1);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background-color: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 80ms ease, color 80ms ease, border-color 80ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: var(--surface-2);
+  color: var(--text-1);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btnActive {
+  background-color: color-mix(in srgb, #ff6b35 18%, transparent);
+  color: var(--text-1);
+  border-color: color-mix(in srgb, #ff6b35 40%, transparent);
+}
+
+.btnActive:hover:not(:disabled) {
+  background-color: color-mix(in srgb, #ff6b35 28%, transparent);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.separator {
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--space-xs);
+  background-color: var(--border);
+}
