@@ -72,7 +72,17 @@ export function useReadHook<I, O>(opts: UseReadHookOptions<I>): UseReadHookResul
   const lastKeyRef = useRef<string | null>(null);
 
   const fetchOnce = useCallback(async () => {
-    setState({ status: 'loading' });
+    // PR 57 — preserve a prior `success` value during a background
+    // refetch. The earlier code unconditionally set `{ status: 'loading' }`,
+    // which made `data` go `undefined` for one render every time
+    // `pushGenerationAtom` ticked — flickering every consumer through
+    // its skeleton on each state change. With this guard, an initial
+    // load still shows `isLoading: true` (no prior data), but a
+    // revalidation after a push tick keeps showing the stale data
+    // until the new data arrives. Matches the SWR convention.
+    setState((prev) =>
+      prev.status === 'success' ? prev : { status: 'loading' },
+    );
     try {
       const result = await invoker.invoke<I, O>(opts.name, opts.input);
       setState({ status: 'success', data: result as O });

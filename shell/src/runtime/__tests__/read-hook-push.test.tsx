@@ -103,6 +103,48 @@ describe('useReadHook × pushGenerationAtom (PR 29)', () => {
     });
   });
 
+  // PR 57 regression — preserve prior success data through a
+  // pushGeneration refetch. Earlier code unconditionally set
+  // { status: 'loading' } on the entry to fetchOnce, flickering
+  // every consumer through `data: undefined` once per push tick.
+  it('preserves prior `data` across a push-generation refetch (no flicker to undefined)', async () => {
+    let resolveSecond!: (v: { ok: boolean }) => void;
+    let call = 0;
+    const invoker: Invoker = {
+      async invoke<I, O>(_name: string, _input: I): Promise<O> {
+        call++;
+        if (call === 1) return { ok: true } as unknown as O;
+        return new Promise<O>((r) => {
+          resolveSecond = r as (v: { ok: boolean }) => void;
+        });
+      },
+    };
+    const { getByTestId } = render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <HookConsumer name="test.tool" />
+          <PushBumper />
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitFor(() => {
+      expect(getByTestId('data').textContent).toBe('ok');
+    });
+    // Bump push generation. Second invoke is in-flight (won't resolve
+    // until we let it). The hook must NOT clear data in the meantime.
+    getByTestId('bump').click();
+    // Give React time to commit the state transition the buggy code
+    // would have produced.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getByTestId('data').textContent).toBe('ok');
+    // Let the second fetch resolve and confirm the consumer stays
+    // showing data the whole way through.
+    resolveSecond({ ok: true });
+    await waitFor(() => {
+      expect(getByTestId('data').textContent).toBe('ok');
+    });
+  });
+
   it('does NOT refetch when the bumper is called with the same value', async () => {
     // pushGenerationAtom is a number; writing the same number via
     // the (n) => n updater means we increment, so this test verifies

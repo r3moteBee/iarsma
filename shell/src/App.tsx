@@ -503,10 +503,26 @@ function SignedInShell({
   // eventSourceUrl is known) and tears down on sign-out (session.data
   // returns undefined when tokens clear).
   const bumpPushGeneration = useSetAtom(pushGenerationAtom);
+  // PR 57 — track session identity for the push subscription off the
+  // load-bearing fields ONLY (URL + account + token capability set).
+  // A naive `[session.data]` dep made every read-hook refetch (which
+  // produces a new Session object even when contents are identical)
+  // tear down + reopen the SSE; the reopen drained pending state
+  // events which bumped `pushGenerationAtom`, which refetched
+  // `useSessionGet`, which restarted the cycle — the v0.10.20
+  // post-click flicker loop. Keying off the URL + accountId makes
+  // pushSession identity-stable across content-equal refetches and
+  // breaks the loop.
+  const pushSessionRaw = session.data as Session | undefined;
+  const pushSessionKey =
+    pushSessionRaw !== undefined
+      ? `${pushSessionRaw.eventSourceUrl}|${pushSessionRaw.primaryAccountIdMail}`
+      : '';
   const pushSession: Session | null = useMemo(() => {
-    if (session.data === undefined) return null;
-    return session.data as Session;
-  }, [session.data]);
+    if (pushSessionRaw === undefined) return null;
+    return pushSessionRaw;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushSessionKey]);
   usePushSubscription({
     session: pushSession,
     getAuthToken: getAuthTokenAsync,
