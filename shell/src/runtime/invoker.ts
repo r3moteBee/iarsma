@@ -96,6 +96,15 @@ export type InvocationOptions = {
    * tools or commits that didn't go through a preview gate.
    */
   readonly previewHashHex?: string;
+  /**
+   * PR 58 — when true, the cachedInvoker bypasses its
+   * stale-while-revalidate cache and goes straight to the underlying
+   * fetch. The fresh result still writes through to the cache for
+   * the next call. Used by `useReadHook` on push-generation refetches
+   * so a JMAP state change actually delivers fresh data instead of
+   * the just-stale-then-quietly-revalidated value.
+   */
+  readonly bypassCache?: boolean;
 };
 
 export interface Invoker {

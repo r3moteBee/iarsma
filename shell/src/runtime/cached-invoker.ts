@@ -81,6 +81,30 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
       const cacheKey = canonicalize(input);
       const dedupKey = `${name}|${cacheKey}`;
 
+      // PR 58 — bypassCache is a "give me fresh data" signal from
+      // useReadHook on push-generation refetches. We still write
+      // through to the cache so the next call benefits, but we don't
+      // serve the stale value here. Without this, a JMAP state change
+      // arrives → bumpPushGen → refetch → cachedInvoker returns the
+      // pre-change value while a background revalidate silently
+      // updates the cache, and the UI never re-renders to show the
+      // fresh state.
+      if (options.bypassCache === true) {
+        const existing = inFlight.get(dedupKey);
+        if (existing !== undefined) return existing as Promise<O>;
+        const promise = (async () => {
+          try {
+            const result = (await opts.inner.invoke<I, O>(name, input, options)) as O;
+            await opts.store.put<O>(purpose, cacheKey, result);
+            return result;
+          } finally {
+            inFlight.delete(dedupKey);
+          }
+        })();
+        inFlight.set(dedupKey, promise);
+        return promise;
+      }
+
       // Sync dedup gate. The cache lookup happens INSIDE the IIFE —
       // moving it out would create a race where two concurrent calls
       // both await `store.get()` before either sets `inFlight`.
