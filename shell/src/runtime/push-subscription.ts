@@ -83,6 +83,48 @@ export function mapStateChangeToCacheInvalidations(
 /** How long (ms) a tab must be hidden before we close the EventSource. */
 const HIDDEN_TIMEOUT_MS = 5 * 60 * 1000;
 
+/** Backoff schedule for SSE reconnects (PR 56 / CoWork follow-up). The
+ *  cap matches the BFCache resume window and the typical user-attention
+ *  threshold: longer waits feel broken; shorter waits hammer the
+ *  server when something's persistently wrong. */
+const RECONNECT_BACKOFF_MS = [1500, 3000, 6000, 12000, 24000, 60000] as const;
+/** After this many consecutive failures we give up and stop reconnecting.
+ *  The app degrades gracefully — read-hooks still work; the user just
+ *  doesn't get realtime push. */
+const MAX_RECONNECT_ATTEMPTS = RECONNECT_BACKOFF_MS.length;
+
+/**
+ * Expand the RFC 6570 URI template variables in Stalwart's
+ * `eventSourceUrl` to concrete values for the JMAP push subscription.
+ *
+ * Per RFC 8620 §7.3 the session resource's `eventSourceUrl` is a URI
+ * template like
+ *   `/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}`
+ * and the client MUST expand the variables. The earlier implementation
+ * naively appended `?types=*&closeafter=state&ping=30` regardless,
+ * leaving the literal `{types}` placeholders in place; Stalwart then
+ * rejected the malformed URL with 400 every cycle (PR 56).
+ *
+ * Pure function — exported for unit tests.
+ */
+export function buildPushUrl(eventSourceUrl: string): string {
+  // RFC 6570 template form — expand the three variables Stalwart's
+  // session resource publishes. We URL-encode `*` because some
+  // intermediaries (and the spec's level-2 expansion) treat `*` as a
+  // reserved char inside templates.
+  if (eventSourceUrl.includes('{')) {
+    return eventSourceUrl
+      .replace('{types}', encodeURIComponent('*'))
+      .replace('{closeafter}', 'state')
+      .replace('{ping}', '30');
+  }
+  // Legacy / non-templated URL — append as query params, dedup the
+  // separator. Kept so a hand-configured non-Stalwart server that
+  // skips the template form still works.
+  const sep = eventSourceUrl.includes('?') ? '&' : '?';
+  return `${eventSourceUrl}${sep}types=*&closeafter=state&ping=30`;
+}
+
 export type UsePushSubscriptionOptions = {
   readonly session: Session | null;
   readonly getAuthToken: () => string | null | Promise<string | null>;
@@ -117,10 +159,14 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
     let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
+    // PR 56 — track consecutive failures so we back off and eventually
+    // stop hammering the server. Reset to 0 on any successful
+    // connection (response.ok with a readable body).
+    let reconnectAttempts = 0;
+    let gaveUp = false;
 
     function buildUrl(): string {
-      const separator = session.eventSourceUrl.includes('?') ? '&' : '?';
-      return `${session.eventSourceUrl}${separator}types=*&closeafter=state&ping=30`;
+      return buildPushUrl(session.eventSourceUrl);
     }
 
     function handleStateEventData(rawData: string): void {
@@ -226,6 +272,9 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
           scheduleReconnect();
           return;
         }
+        // Successful response — reset the failure counter so the next
+        // disconnect starts the backoff schedule from the top.
+        reconnectAttempts = 0;
         const body = response.body;
         if (body === null) {
           scheduleReconnect();
@@ -253,11 +302,33 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
 
     function scheduleReconnect(): void {
       if (cancelled) return;
+      if (gaveUp) return;
       if (reconnectTimer !== null) return;
+      // PR 56 — exponential backoff with a hard ceiling. After
+      // MAX_RECONNECT_ATTEMPTS consecutive failures, give up and let
+      // the app run without realtime push (it still works — read-hooks
+      // just don't auto-invalidate). Reconnection picks back up on
+      // tab visibility transition (visible → reset attempts via the
+      // `onVisibilityChange` path).
+      const idx = Math.min(reconnectAttempts, RECONNECT_BACKOFF_MS.length - 1);
+      const base = RECONNECT_BACKOFF_MS[idx]!;
+      // Jitter ±20% so a cluster of clients reconnecting after a
+      // server blip doesn't synchronize into a thundering herd.
+      const jitter = base * 0.4 * (Math.random() - 0.5);
+      const delay = Math.max(0, Math.round(base + jitter));
+      reconnectAttempts += 1;
+      if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+        gaveUp = true;
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[iarsma] push-subscription: giving up after ${MAX_RECONNECT_ATTEMPTS} failed reconnects; realtime push disabled until tab refocus`,
+        );
+        return;
+      }
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         void open();
-      }, 1500);
+      }, delay);
     }
 
     function close(): void {
@@ -287,6 +358,12 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
           clearTimeout(hiddenTimer);
           hiddenTimer = null;
         }
+        // PR 56 — visibility transition is a strong "user is here"
+        // signal, so reset the give-up state and the failure counter.
+        // If push was broken because of a transient server issue,
+        // refocusing the tab is exactly the moment to retry.
+        gaveUp = false;
+        reconnectAttempts = 0;
         if (abort === null && reconnectTimer === null) {
           void open();
         }
