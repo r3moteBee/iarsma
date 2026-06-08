@@ -71,7 +71,7 @@ export function useReadHook<I, O>(opts: UseReadHookOptions<I>): UseReadHookResul
   const pushGeneration = useAtomValue(pushGenerationAtom);
   const lastKeyRef = useRef<string | null>(null);
 
-  const fetchOnce = useCallback(async () => {
+  const fetchOnce = useCallback(async (bypassCache = false) => {
     // PR 57 — preserve a prior `success` value during a background
     // refetch. The earlier code unconditionally set `{ status: 'loading' }`,
     // which made `data` go `undefined` for one render every time
@@ -84,7 +84,11 @@ export function useReadHook<I, O>(opts: UseReadHookOptions<I>): UseReadHookResul
       prev.status === 'success' ? prev : { status: 'loading' },
     );
     try {
-      const result = await invoker.invoke<I, O>(opts.name, opts.input);
+      const result = await invoker.invoke<I, O>(
+        opts.name,
+        opts.input,
+        bypassCache ? { bypassCache: true } : {},
+      );
       setState({ status: 'success', data: result as O });
     } catch (e) {
       setState({ status: 'error', error: toToolError(e) });
@@ -95,8 +99,19 @@ export function useReadHook<I, O>(opts: UseReadHookOptions<I>): UseReadHookResul
     if (!enabled) return;
     const compositeKey = `${inputKey}#${pushGeneration}`;
     if (lastKeyRef.current === compositeKey) return;
+    // PR 58 — distinguish "first fetch (or input changed)" from
+    // "pushGeneration ticked". The former is fine to serve from cache
+    // for instant first paint; the latter is an explicit "data changed
+    // on the server, give me fresh" signal — bypass the cache. Without
+    // this, a state change after mail.modify silently revalidated the
+    // cache but the UI saw the pre-change stale read on its way
+    // through useReadHook and never re-rendered with the fresh value
+    // (the auto-mark-on-open never visibly took effect after PR 57).
+    const inputChanged =
+      lastKeyRef.current === null ||
+      !lastKeyRef.current.startsWith(`${inputKey}#`);
     lastKeyRef.current = compositeKey;
-    void fetchOnce();
+    void fetchOnce(!inputChanged);
   }, [enabled, inputKey, pushGeneration, fetchOnce]);
 
   return {

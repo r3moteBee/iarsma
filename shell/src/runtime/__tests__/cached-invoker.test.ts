@@ -257,4 +257,42 @@ describe('cachedInvoker — revalidation errors', () => {
       wrapped.invoke('thread.list', { mailboxId: 'mb1' }),
     ).rejects.toThrow('miss-time error');
   });
+
+  // PR 58 regression — when the caller passes `bypassCache: true`,
+  // cachedInvoker MUST skip the cached value and go straight to the
+  // inner invoker. Without this, `useReadHook` refetching on a JMAP
+  // state change (push-generation bump) would see the pre-change
+  // cached value, the background revalidate would silently update the
+  // cache, and the UI never re-rendered with fresh data (the
+  // auto-mark-on-open never visibly took effect).
+  it('bypassCache forces a fresh fetch even when the cache is populated', async () => {
+    let counter = 0;
+    const { invoker, calls } = inner({
+      'thread.list': () => ({ threads: [{ id: `t${++counter}` }] }),
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+    // Populate the cache (counter → 1).
+    const r1 = await wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    expect((r1 as { threads: { id: string }[] }).threads[0]!.id).toBe('t1');
+    await flush();
+
+    // Subsequent call with bypassCache: counter increments again, and
+    // the FRESH value is what we receive (not the cached `t1`).
+    const r2 = await wrapped.invoke(
+      'thread.list',
+      { mailboxId: 'mb1' },
+      { bypassCache: true },
+    );
+    expect((r2 as { threads: { id: string }[] }).threads[0]!.id).not.toBe('t1');
+    expect((r2 as { threads: { id: string }[] }).threads[0]!.id).toBe(
+      `t${counter}`,
+    );
+    // Cache write-through: the bypass-fetched value is now in the
+    // cache. A non-bypass call returns it synchronously.
+    const r3 = await wrapped.invoke('thread.list', { mailboxId: 'mb1' });
+    expect((r3 as { threads: { id: string }[] }).threads[0]!.id).toBe(
+      (r2 as { threads: { id: string }[] }).threads[0]!.id,
+    );
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+  });
 });
