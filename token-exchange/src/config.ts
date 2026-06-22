@@ -25,6 +25,9 @@ import { z } from 'zod';
 
 const ConfigSchema = z.object({
   TOKEN_EXCHANGE_PORT: z.coerce.number().int().positive().default(4000),
+  // Bind to loopback by default — the sidecar holds the client_secret and
+  // must sit behind a reverse proxy, not be exposed on all interfaces.
+  TOKEN_EXCHANGE_HOST: z.string().min(1).default('127.0.0.1'),
   OIDC_ISSUER: z.string().url(),
   OIDC_CLIENT_ID: z.string().min(1),
   OIDC_CLIENT_SECRET: z.string().min(1),
@@ -35,6 +38,8 @@ const ConfigSchema = z.object({
 
 export type Config = {
   readonly port: number;
+  /** Bind address. Default 127.0.0.1 (loopback) — see TOKEN_EXCHANGE_HOST. */
+  readonly host: string;
   readonly oidcIssuer: string;
   readonly clientId: string;
   readonly clientSecret: string;
@@ -65,6 +70,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = parseResult.data;
   return {
     port: parsed.TOKEN_EXCHANGE_PORT,
+    host: parsed.TOKEN_EXCHANGE_HOST,
     oidcIssuer: parsed.OIDC_ISSUER,
     clientId: parsed.OIDC_CLIENT_ID,
     clientSecret: parsed.OIDC_CLIENT_SECRET,

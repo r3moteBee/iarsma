@@ -351,7 +351,9 @@ function TreeRow<T extends MailboxRow>(props: {
           <span aria-hidden="true" style={{ display: 'inline-block', width: '1em' }} />
         )}
         <span className={styles['mailboxName']}>{labelFor(mailbox)}</span>
-        {mailbox.unreadCount > 0 ? (
+        {/* U-8 — Drafts are work-in-progress, not "unread mail"; an unread
+            badge there is misleading (Gmail shows none). Suppress it. */}
+        {mailbox.unreadCount > 0 && mailbox.role !== 'drafts' ? (
           <span
             aria-hidden="true"
             className={styles['mailboxUnread']}
@@ -359,7 +361,7 @@ function TreeRow<T extends MailboxRow>(props: {
             {mailbox.unreadCount}
           </span>
         ) : null}
-        {mailbox.unreadCount > 0 ? (
+        {mailbox.unreadCount > 0 && mailbox.role !== 'drafts' ? (
           <span style={visuallyHidden}>{`, ${mailbox.unreadCount} unread`}</span>
         ) : null}
       </span>

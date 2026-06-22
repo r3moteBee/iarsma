@@ -95,6 +95,23 @@ describe('MailboxTreeView — ARIA structure', () => {
     expect(inboxRow.textContent).toContain('3');
     expect(inboxRow.textContent).toContain('3 unread');
   });
+
+  it('does NOT show an unread badge for the Drafts role (U-8)', () => {
+    // Drafts are work-in-progress, not "unread mail" — an unread pill
+    // there is misleading (Gmail shows no unread badge for Drafts).
+    renderTree({
+      mailboxes: [
+        { id: 'Mb01', name: 'INBOX', role: 'inbox', unreadCount: 3, sortOrder: 0 },
+        { id: 'Mb03', name: 'Drafts', role: 'drafts', unreadCount: 5, sortOrder: 1 },
+      ],
+    });
+    const draftsRow = screen.getByText('Drafts').closest('li')!;
+    expect(draftsRow.textContent).not.toContain('5');
+    expect(draftsRow.textContent).not.toContain('unread');
+    // Other roles still show their unread badge.
+    const inboxRow = screen.getByText('Inbox').closest('li')!;
+    expect(inboxRow.textContent).toContain('3 unread');
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────
