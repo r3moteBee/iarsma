@@ -278,6 +278,8 @@ describe('ComposeView — open state', () => {
     renderComposer();
     const dialog = screen.getByRole('dialog', { name: /new message/i });
     expect(within(dialog).getByLabelText('To')).toBeInTheDocument();
+    // Cc/Bcc are progressively disclosed (U-9) — reveal them first.
+    fireEvent.click(within(dialog).getByRole('button', { name: /cc\/bcc/i }));
     expect(within(dialog).getByLabelText('Cc')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Bcc')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Subject')).toBeInTheDocument();
@@ -652,5 +654,67 @@ describe('ComposeView — a11y', () => {
     const { container } = renderComposer();
     const violations = await runAxe(container);
     expect(violations.map((v) => v.id)).toEqual([]);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// U-9 — progressive Cc/Bcc disclosure
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ComposeView — Cc/Bcc disclosure', () => {
+  it('hides Cc and Bcc until the Cc/Bcc toggle is clicked', () => {
+    renderComposer();
+    expect(screen.queryByLabelText('Cc')).toBeNull();
+    expect(screen.queryByLabelText('Bcc')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /cc\/bcc/i }));
+    expect(screen.getByLabelText('Cc')).toBeInTheDocument();
+    expect(screen.getByLabelText('Bcc')).toBeInTheDocument();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// U-10 — skippable send confirmation
+// ──────────────────────────────────────────────────────────────────────
+
+import { skipSendReviewAtom } from '../../runtime/skip-send-review-state.js';
+
+function SetSkip() {
+  const set = useSetAtom(skipSendReviewAtom);
+  useEffect(() => {
+    set(true);
+  }, [set]);
+  return null;
+}
+
+describe('ComposeView — skippable send (U-10)', () => {
+  it('exposes a "Don\'t ask again" checkbox in the review dialog', async () => {
+    renderComposer();
+    await fillRecipientAndWaitForSendEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    const dialog = await screen.findByRole('dialog', { name: /send this message/i });
+    expect(within(dialog).getByLabelText(/don't ask again/i)).toBeInTheDocument();
+  });
+
+  it('skips the dialog and sends directly when the pref is on', async () => {
+    const { invoker, calls } = makeInvoker();
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <SetSkip />
+          <WithOpen>
+            <ComposeView />
+          </WithOpen>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await fillRecipientAndWaitForSendEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Send…' }));
+    // Commits without ever showing the review dialog.
+    await waitFor(() => {
+      expect(calls.some((c) => c.name === 'mail.send' && !c.dryRun)).toBe(true);
+    });
+    expect(
+      screen.queryByRole('dialog', { name: /send this message/i }),
+    ).toBeNull();
   });
 });
