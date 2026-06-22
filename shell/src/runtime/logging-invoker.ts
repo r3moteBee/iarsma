@@ -57,6 +57,17 @@ export type LoggingInvokerOptions = {
    *  each reversible commit (PR 21+). Failures here are best-effort
    *  — the user-facing call still succeeds. */
   readonly undoRegistry?: UndoRegistry;
+  /** PR — fired after an inverse is successfully registered for a
+   *  commit, carrying the action-log seq so a caller (the shell) can
+   *  surface an immediate Undo affordance (e.g. the delete toast).
+   *  Not called when no inverse exists. Best-effort: a throw here is
+   *  swallowed so it never breaks the user's call. */
+  readonly onUndoRegistered?: (info: {
+    readonly tool: string;
+    readonly seq: number;
+    readonly params: unknown;
+    readonly callerClass: CallerClass;
+  }) => void;
   /** PR 44 — invoked when the inner invoker throws with
    *  `code === 'unauthorized'`. The wrapper still re-throws; this
    *  callback exists so the App can clear stored tokens + bump the
@@ -160,6 +171,18 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
                 inverseAction: inv.inverseAction,
                 inverseParams: inv.inverseParams,
               });
+              if (opts.onUndoRegistered !== undefined) {
+                try {
+                  opts.onUndoRegistered({
+                    tool: name,
+                    seq: entry.seq,
+                    params: input,
+                    callerClass,
+                  });
+                } catch {
+                  /* never let the toast hook break the user's call */
+                }
+              }
             } catch (e) {
               // Best-effort — the modify succeeded; the user just
               // won't see an Undo button for it.
