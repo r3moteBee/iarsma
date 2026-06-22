@@ -808,3 +808,43 @@ describe('ThreadList — row keyword actions', () => {
     });
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Restore from Trash (U-3) — "Move to Inbox" row action
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadList — restore from Trash', () => {
+  const TRASH_MAILBOXES = [
+    { id: 'Mb-inbox', role: 'inbox' },
+    { id: 'Mb-trash', role: 'trash' },
+  ];
+
+  it('shows a Move to Inbox action on rows only when viewing Trash', async () => {
+    // Not in Trash → no restore action.
+    renderThreadList();
+    await waitForList();
+    expect(screen.queryByLabelText(/move to inbox/i)).toBeNull();
+    cleanup();
+
+    // In Trash → restore action present.
+    renderThreadList({ mailboxes: TRASH_MAILBOXES, mailboxId: 'Mb-trash' });
+    await waitForList();
+    expect(screen.getAllByLabelText(/move to inbox/i).length).toBeGreaterThan(0);
+  });
+
+  it('restores a row to the Inbox via mail.modify (remove Trash, add Inbox)', async () => {
+    const modifyCalls: unknown[] = [];
+    renderThreadList({
+      mailboxes: TRASH_MAILBOXES,
+      mailboxId: 'Mb-trash',
+      onModify: (input) => modifyCalls.push(input),
+    });
+    await waitForList();
+    fireEvent.click(screen.getByLabelText('Move to Inbox: (no subject)'));
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]).toEqual({
+      emailIds: ['E-T3'],
+      patch: { mailboxIds: { 'Mb-trash': false, 'Mb-inbox': true } },
+    });
+  });
+});

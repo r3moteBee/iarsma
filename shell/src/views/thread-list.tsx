@@ -212,6 +212,12 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
   const isDrafts = currentMailbox?.role === 'drafts';
   const isTrash = currentMailbox?.role === 'trash';
 
+  // U-3 — the Inbox mailbox id, so Trash rows can offer "Move to Inbox".
+  const inboxMailboxId = useMemo(() => {
+    const list = (mailboxes.data ?? []) as ReadonlyArray<MailboxLike>;
+    return list.find((m) => m.role === 'inbox')?.id;
+  }, [mailboxes.data]);
+
   // Reset thread selection when the mailbox changes.
   useEffect(() => {
     setSelectedThreadId(null);
@@ -242,6 +248,7 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
       title={title}
       countText={countText}
       onRefresh={refetch}
+      {...(inboxMailboxId !== undefined ? { inboxMailboxId } : {})}
     />
   );
 }
@@ -259,6 +266,8 @@ function ThreadListBody(props: {
   readonly title: string;
   readonly countText: string | null;
   readonly onRefresh: () => Promise<void> | void;
+  /** U-3 — Inbox mailbox id; present so Trash rows can restore. */
+  readonly inboxMailboxId?: string;
   /** Search-mode props (PR 53 / CoWork #15). Defined only when the
    *  list is showing search results — mailbox-mode passes undefined
    *  and the body skips highlighting + pagination. */
@@ -489,6 +498,38 @@ function ThreadListBody(props: {
     [invoker, refetch],
   );
 
+  // U-3 — restore a trashed message to the Inbox. Removes the Trash
+  // membership and adds Inbox via mail.modify. Only wired onto rows
+  // while viewing Trash. We move to Inbox (not the original mailbox)
+  // because a message already sitting in Trash carries no record of
+  // where it came from — this matches Gmail's "Move to Inbox".
+  const handleRestore = useCallback(
+    (emailId: string) => {
+      const inboxId = props.inboxMailboxId;
+      const trashId = mailboxId;
+      if (inboxId === undefined || trashId === null) {
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] restore: missing inbox/trash mailbox id');
+        return;
+      }
+      void (async () => {
+        try {
+          await invoker.invoke('mail.modify', {
+            emailIds: [emailId],
+            patch: { mailboxIds: { [trashId]: false, [inboxId]: true } },
+          });
+          await refetch();
+          // Refresh the sidebar Inbox unread badge + document title.
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] mail.restore failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch, bumpPushGeneration, props.inboxMailboxId, mailboxId],
+  );
+
   // Track which row (if any) is awaiting purge-forever confirmation.
   // null = no confirm open; a string is the emailId being prompted.
   const [purgeConfirmEmailId, setPurgeConfirmEmailId] = useState<string | null>(null);
@@ -662,6 +703,7 @@ function ThreadListBody(props: {
                 onToggleRead={(id, current) => toggleKeyword(id, '$seen', !current)}
                 onDelete={isTrash ? handlePurgeRow : handleSoftDelete}
                 deleteMode={isTrash ? 'purge' : 'soft'}
+                {...(isTrash ? { onRestore: handleRestore } : {})}
                 {...(tokens !== undefined ? { tokens } : {})}
               />
             );
@@ -800,6 +842,9 @@ type ThreadRowProps = {
   /** 'soft' → mail.delete + no confirm; 'purge' → ask parent to
    *  open the destructive confirm dialog. PR 31. */
   readonly deleteMode: 'soft' | 'purge';
+  /** U-3 — restore a trashed message to the Inbox. Present only when
+   *  viewing Trash; renders a "Move to Inbox" row action. */
+  readonly onRestore?: (emailId: string) => void;
   /** Tokenized search query (PR 53 / CoWork #15). When non-empty,
    *  the subject + preview are rendered through `<Highlight>` and the
    *  preview is reduced to a 120-char snippet centered on the first
@@ -820,6 +865,7 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
     onToggleRead,
     onDelete,
     deleteMode,
+    onRestore,
     tokens,
   } = props;
   const highlightTokens = tokens ?? EMPTY_TOKENS;
@@ -945,6 +991,20 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
        * satisfied because the buttons aren't descendants of an
        * interactive element. */}
       <div className={styles['rowActions']} role="group" aria-label="Row actions">
+        {onRestore !== undefined ? (
+          <button
+            type="button"
+            className={styles['iconBtn']}
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onRestore(e.id);
+            }}
+            aria-label={`Move to Inbox: ${subject}`}
+            title="Move to Inbox"
+          >
+            <InboxIcon />
+          </button>
+        ) : null}
         <button
           type="button"
           className={`${styles['iconBtn']} ${flagged ? styles['iconBtnFlagged'] : ''}`}
@@ -1037,6 +1097,15 @@ function TrashIcon() {
       <path d="M10 11v6" />
       <path d="M14 11v6" />
       <path d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2" />
+    </svg>
+  );
+}
+
+function InboxIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
     </svg>
   );
 }
