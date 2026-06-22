@@ -3549,6 +3549,33 @@ export type FetchContactDeleteOptions = JmapClientOptions & {
 };
 
 /**
+ * Normalize a contact name into a JSContact-valid `Name`. RFC 9553 cards
+ * are keyed off the formatted name (`full` / vCard FN); without it
+ * Stalwart drops the structured given/surname and the contact renders as
+ * its email address (U-2). When `full` is absent we derive it from the
+ * given/surname parts. Returns `undefined` when no name parts are present
+ * so callers can omit the field entirely rather than send an empty object.
+ */
+function normalizeContactName(
+  name: { readonly full?: string; readonly given?: string; readonly surname?: string },
+): { full?: string; given?: string; surname?: string } | undefined {
+  const given = name.given !== undefined && name.given.trim() !== '' ? name.given : undefined;
+  const surname =
+    name.surname !== undefined && name.surname.trim() !== '' ? name.surname : undefined;
+  const explicitFull = name.full !== undefined && name.full.trim() !== '' ? name.full : undefined;
+  const derived = [given, surname].filter((p) => p !== undefined).join(' ').trim();
+  const full = explicitFull ?? (derived === '' ? undefined : derived);
+  if (full === undefined && given === undefined && surname === undefined) {
+    return undefined;
+  }
+  return {
+    ...(full !== undefined ? { full } : {}),
+    ...(given !== undefined ? { given } : {}),
+    ...(surname !== undefined ? { surname } : {}),
+  };
+}
+
+/**
  * Build the JMAP `ContactCard/set` create payload. Translates the flat
  * array-based input into JSContact's map-keyed structure.
  */
@@ -3559,8 +3586,11 @@ export function buildContactCreateRequest(opts: {
   const { accountId, params } = opts;
   const card: Record<string, unknown> = {
     '@type': 'Card',
-    name: params.name,
   };
+  const name = normalizeContactName(params.name);
+  if (name !== undefined) {
+    card.name = name;
+  }
   if (params.addressBookId !== undefined) {
     card.addressBookIds = { [params.addressBookId]: true };
   }
@@ -3620,7 +3650,10 @@ export function buildContactUpdateRequest(opts: {
   const { accountId, params } = opts;
   const patch: Record<string, unknown> = {};
   if (params.name !== undefined) {
-    patch.name = params.name;
+    const name = normalizeContactName(params.name);
+    if (name !== undefined) {
+      patch.name = name;
+    }
   }
   if (params.emails !== undefined && params.emails.length > 0) {
     const emailMap: Record<string, unknown> = {};
