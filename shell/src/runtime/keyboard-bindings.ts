@@ -8,8 +8,8 @@
  * dispatch. The help overlay reads from `KEYBOARD_BINDINGS` so adding a
  * binding to a single file makes it discoverable in the UI.
  *
- * Reserved bindings (Phase 2: c, r, R, x, !, #, /) are intentionally
- * NOT included here — listing un-wired keys in the help overlay would
+ * Reserved (still un-wired) bindings (x, !) are intentionally NOT
+ * included here — listing un-wired keys in the help overlay would
  * confuse users. They appear in `docs/keyboard.md` instead.
  */
 
@@ -77,6 +77,9 @@ export const KEYBOARD_BINDINGS: ReadonlyArray<Binding> = [
     action: 'Open focused thread',
     scope: 'thread-list',
   },
+  { keys: '#', action: 'Delete focused thread', scope: 'thread-list' },
+  { keys: 'Shift-I', action: 'Mark focused thread read', scope: 'thread-list' },
+  { keys: 'Shift-U', action: 'Mark focused thread unread', scope: 'thread-list' },
   // Thread view ────────────────────────────────────────────────────
   {
     keys: 'n / ↓',
