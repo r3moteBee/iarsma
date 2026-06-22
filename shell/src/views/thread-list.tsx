@@ -456,7 +456,7 @@ function ThreadListBody(props: {
         try {
           await invoker.invoke('mail.modify', {
             emailIds: [emailId],
-            patch: { [`keywords/${keyword}`]: set ? true : null },
+            patch: { keywords: { [keyword]: set ? true : null } },
           });
           await refetch();
           // PR 45 — refresh the sidebar unread badge + document title.
