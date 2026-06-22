@@ -177,3 +177,36 @@
   color: var(--destructive);
   font-size: var(--text-sm);
 }
+
+/* U-9 — progressive Cc/Bcc disclosure toggle. A quiet link-style button
+   that sits where the Cc row would be until the user reveals it. */
+.ccBccToggleRow {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2xs) var(--space-sm);
+}
+.ccBccToggle {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: var(--space-2xs) var(--space-xs);
+  border-radius: var(--radius-sm);
+}
+.ccBccToggle:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* U-10 — "Don't ask again" checkbox in the send-review dialog footer.
+   Pushed to the left so the Cancel/Send buttons stay right-aligned. */
+.skipReviewLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  margin-right: auto;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  cursor: pointer;
+}
