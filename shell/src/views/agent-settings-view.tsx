@@ -26,6 +26,7 @@ import {
   MAX_SEND_DELAY_MS,
   sendDelayMsAtom,
 } from '../runtime/send-delay-state.js';
+import { skipSendReviewAtom } from '../runtime/skip-send-review-state.js';
 import { themePreferenceAtom, type ThemePreference } from '../runtime/theme.js';
 import type { IssuedToken } from '../runtime/agent-token-issuer.js';
 import { FilesSettingsPanel } from './files-settings-panel.js';
@@ -196,6 +197,7 @@ function ThemeToggleInline({
 
 function SendingSection() {
   const [delayMs, setDelayMs] = useAtom(sendDelayMsAtom);
+  const [skipReview, setSkipReview] = useAtom(skipSendReviewAtom);
   const seconds = Math.round(delayMs / 1000);
   return (
     <section aria-labelledby="sending-heading">
@@ -231,6 +233,24 @@ function SendingSection() {
           seconds
         </span>
       </div>
+      <div className={styles['appearanceRow']}>
+        <label
+          className={styles['appearanceLabel']}
+          htmlFor="confirm-send-input"
+        >
+          Confirm before sending
+        </label>
+        <input
+          id="confirm-send-input"
+          type="checkbox"
+          checked={!skipReview}
+          onChange={(e) => setSkipReview(!e.target.checked)}
+        />
+      </div>
+      <p className={styles['sectionDescription']}>
+        Shows a review dialog (recipients, subject, preview) before each
+        message you send. Turn off to send straight to the undo window.
+      </p>
     </section>
   );
 }
