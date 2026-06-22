@@ -752,7 +752,7 @@ describe('ThreadView — auto-mark-read on open', () => {
     );
     await waitFor(() => expect(modifyCalls).toHaveLength(1));
     expect(modifyCalls[0]!.emailIds).toEqual(['E1', 'E2']);
-    expect(modifyCalls[0]!.patch).toEqual({ 'keywords/$seen': true });
+    expect(modifyCalls[0]!.patch).toEqual({ keywords: { $seen: true } });
   });
 
   it('does NOT call mail.modify when every email is already $seen', async () => {
