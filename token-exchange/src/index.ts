@@ -56,12 +56,12 @@ async function main(): Promise<void> {
     discovery,
   });
 
-  await app.listen({ port: config.port, host: '0.0.0.0' });
+  await app.listen({ port: config.port, host: config.host });
   const discoveryNote = discovery === null
     ? 'discovery=disabled (set IARSMA_WEBMAIL_MCP_URL to enable)'
     : 'discovery=enabled at /.well-known/iarsma';
   app.log.info(
-    `[token-exchange] listening on port ${config.port}, ` +
+    `[token-exchange] listening on ${config.host}:${config.port}, ` +
       `client_id=${config.clientId}, allowed_redirects=${config.allowedRedirectUris.length}, ` +
       discoveryNote,
   );

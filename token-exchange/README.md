@@ -57,6 +57,7 @@ Required environment variables (see the repo-root `.env.example`):
 | `OIDC_CLIENT_SECRET` | yes | Registered client secret. **Never** ship to browser |
 | `TOKEN_EXCHANGE_ALLOWED_REDIRECT_URIS` | yes | CSV of redirect URIs the sidecar accepts |
 | `TOKEN_EXCHANGE_PORT` | no (4000) | HTTP port to listen on |
+| `TOKEN_EXCHANGE_HOST` | no (127.0.0.1) | Bind address. Loopback by default; see Security |
 | `TOKEN_EXCHANGE_CORS_ORIGINS` | no | CSV of browser origins; empty = CORS off |
 | `TOKEN_EXCHANGE_TOKEN_ENDPOINT` | no | Skip OIDC discovery; use this URL directly |
 
@@ -77,6 +78,13 @@ Three layers, each independently testable:
 - **`server.ts`** — Fastify glue. Validates the request body, dispatches to the exchanger, translates `ExchangeError` codes to HTTP status codes. Tests use Fastify's `inject()` so no listener is needed.
 
 CORS is opt-in (`TOKEN_EXCHANGE_CORS_ORIGINS`). For same-origin deployments (where the shell is served by Stalwart at a path on the same host as the sidecar's reverse proxy), CORS can stay off. For cross-origin dev (Vite at `localhost:5173` hitting this sidecar at `localhost:4000`), set `TOKEN_EXCHANGE_CORS_ORIGINS=http://localhost:5173`.
+
+## Security: bind address & reverse proxy
+
+This sidecar holds the OAuth `client_secret`, so it must **not** be reachable directly from untrusted networks. CORS is a browser-only control — it does nothing against `curl`/non-browser callers — so the network boundary is what matters.
+
+- The sidecar binds to **`127.0.0.1` by default** (`TOKEN_EXCHANGE_HOST`). Front it with a reverse proxy on the **same host** (e.g. Caddy/nginx routing `/auth/token` and `/.well-known/iarsma` to `127.0.0.1:4000`).
+- Only set `TOKEN_EXCHANGE_HOST=0.0.0.0` when the proxy runs on a different host and the network between them is trusted (private subnet + firewall). Never expose `0.0.0.0:4000` to the public internet.
 
 ## Status
 

@@ -202,3 +202,58 @@ describe('GET /healthz', () => {
     expect(res.json()).toEqual({ status: 'ok' });
   });
 });
+
+describe('CORS (fail-closed)', () => {
+  const okExchanger = () =>
+    makeStubExchanger({ exchange: async () => ({ accessToken: 't', tokenType: 'Bearer' }) });
+  const payload = {
+    code: 'c',
+    code_verifier: 'v',
+    redirect_uri: 'http://localhost:5173/auth/callback',
+  };
+
+  it('sends no Access-Control-Allow-Origin when no origins are configured', async () => {
+    const app = await buildServer({ exchanger: okExchanger(), logger: false });
+    appsToClose.push(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/token',
+      headers: { origin: 'https://anything.example' },
+      payload,
+    });
+    // CORS plugin isn't registered → browsers block cross-origin reads.
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('reflects a configured origin', async () => {
+    const app = await buildServer({
+      exchanger: okExchanger(),
+      corsOrigins: ['https://app.example'],
+      logger: false,
+    });
+    appsToClose.push(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/token',
+      headers: { origin: 'https://app.example' },
+      payload,
+    });
+    expect(res.headers['access-control-allow-origin']).toBe('https://app.example');
+  });
+
+  it('does not allow an unlisted origin', async () => {
+    const app = await buildServer({
+      exchanger: okExchanger(),
+      corsOrigins: ['https://app.example'],
+      logger: false,
+    });
+    appsToClose.push(app);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/auth/token',
+      headers: { origin: 'https://evil.example' },
+      payload,
+    });
+    expect(res.headers['access-control-allow-origin']).not.toBe('https://evil.example');
+  });
+});
