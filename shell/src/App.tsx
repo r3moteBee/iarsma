@@ -32,6 +32,7 @@ import {
 } from './runtime/index.js';
 import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
 import { announceUnreadDelta, updateTabTitle } from './runtime/new-mail-notify.js';
+import { toCalendarViewEvent } from './runtime/calendar-transform.js';
 import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import { stalwartApiKeyIssuer } from './runtime/stalwart-apikey-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
@@ -632,6 +633,7 @@ function SignedInShell({
           start: string;
           duration?: string;
           description?: string;
+          locations?: Readonly<Record<string, { name?: string }>>;
           calendarIds?: Readonly<Record<string, boolean>>;
           participants?: Readonly<Record<string, {
             email: string;
@@ -654,44 +656,9 @@ function SignedInShell({
           const colorByCalId = new Map<string, string | undefined>(
             calList.map((c) => [c.id, c.color]),
           );
-          const mapped = (e.events ?? []).map((evt) => {
-            const ids = evt.calendarIds;
-            const calId = ids !== undefined
-              ? Object.keys(ids).find((k) => ids[k] === true)
-              : undefined;
-            const color = calId !== undefined ? colorByCalId.get(calId) : undefined;
-            // PR 54 — flatten the JSCalendar participants map into the
-            // array the view consumes. Order isn't load-bearing but
-            // alphabetic-by-email keeps badge rendering stable across
-            // refreshes.
-            const participants = evt.participants !== undefined
-              ? Object.values(evt.participants)
-                  .map((p) => ({
-                    email: p.email,
-                    ...(p.name !== undefined ? { name: p.name } : {}),
-                    ...(p.roles !== undefined ? { roles: p.roles } : {}),
-                    ...(p.participationStatus !== undefined
-                      ? { participationStatus: p.participationStatus }
-                      : {}),
-                    ...(p.expectReply !== undefined
-                      ? { expectReply: p.expectReply }
-                      : {}),
-                  }))
-                  .sort((a, b) => a.email.localeCompare(b.email))
-              : undefined;
-            return {
-              id: evt.id,
-              title: evt.title,
-              start: evt.start,
-              ...(evt.duration !== undefined ? { duration: evt.duration } : {}),
-              ...(evt.description !== undefined ? { description: evt.description } : {}),
-              ...(calId !== undefined ? { calendarId: calId } : {}),
-              ...(color !== undefined ? { calendarColor: color } : {}),
-              ...(participants !== undefined && participants.length > 0
-                ? { participants }
-                : {}),
-            };
-          });
+          const mapped = (e.events ?? []).map((evt) =>
+            toCalendarViewEvent(evt, colorByCalId),
+          );
           setCalendarEvents(mapped);
         }
       } catch (err) {
