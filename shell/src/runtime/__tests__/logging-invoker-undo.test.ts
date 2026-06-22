@@ -54,6 +54,52 @@ describe('loggingInvoker × UndoRegistry (PR 21)', () => {
     expect(u?.consumed).toBe(false);
   });
 
+  it('fires onUndoRegistered with the entry seq for a reversible commit', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+      now: () => 1000,
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const calls: Array<{ tool: string; seq: number; params: unknown }> = [];
+    const inv = loggingInvoker({
+      inner: fakeInner({ modifiedCount: 1 }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+      onUndoRegistered: (info) =>
+        calls.push({ tool: info.tool, seq: info.seq, params: info.params }),
+    });
+
+    const params = {
+      emailIds: ['em-1'],
+      patch: { mailboxIds: { 'Mb-inbox': false } },
+    };
+    await inv.invoke('mail.modify', params);
+
+    expect(calls).toEqual([{ tool: 'mail.modify', seq: 0, params }]);
+  });
+
+  it('does NOT fire onUndoRegistered when no inverse is registered', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const calls: unknown[] = [];
+    const inv = loggingInvoker({
+      inner: fakeInner({ id: 'em-new' }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+      onUndoRegistered: (info) => calls.push(info),
+    });
+
+    // mail.draft has no inverse → no registration → no callback.
+    await inv.invoke('mail.draft', { to: [{ email: 'a@b.c' }], subject: 'hi' });
+    expect(calls).toHaveLength(0);
+  });
+
   it('skips registration for tools without a known inverse', async () => {
     const log = createActionLog({
       store: inMemoryActionLogStore(),

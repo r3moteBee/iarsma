@@ -41,6 +41,20 @@ export const mailboxScrollPositionsAtom = atom<Readonly<Record<string, number>>>
 export const selectedThreadIdAtom = atom<string | null>(null);
 
 /**
+ * Pending delete-undo (U-4). Set by the loggingInvoker's
+ * `onUndoRegistered` hook the moment a UI `mail.delete` commits and its
+ * inverse is registered. `DeleteToast` reads it to show an act-then-undo
+ * toast ("Moved to Trash · Undo") and clears it on Undo or timeout.
+ * `seq` is the action-log seq whose inverse restores the message.
+ */
+export type PendingDeleteUndo = {
+  readonly seq: number;
+  readonly count: number;
+  readonly createdAtMs: number;
+};
+export const pendingDeleteUndoAtom = atom<PendingDeleteUndo | null>(null);
+
+/**
  * Search query atom (Phase 2 item 9). Empty string = inactive (the
  * ThreadList renders the selected mailbox); non-empty = active (the
  * ThreadList runs `thread.search` and renders results, ignoring
