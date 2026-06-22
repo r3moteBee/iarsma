@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildContactListRequest,
   buildContactGetRequest,
+  buildContactCreateRequest,
+  buildContactUpdateRequest,
   fetchContactList,
   fetchContactGet,
   parseContactListResponse,
@@ -332,5 +334,82 @@ describe('fetchContactGet', () => {
     } catch (e) {
       expect((e as ToolError).code).toBe('unauthorized');
     }
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// buildContactCreateRequest / buildContactUpdateRequest — FN derivation
+//
+// JSContact (RFC 9553) names need a formatted `full` (FN). The UI only
+// collects given/surname, so the builder must derive `full` — otherwise
+// Stalwart drops the name and the contact displays as its email (U-2).
+// ──────────────────────────────────────────────────────────────────────
+
+function createdCard(body: string): Record<string, unknown> {
+  const parsed = JSON.parse(body) as {
+    methodCalls: Array<[string, { create: Record<string, Record<string, unknown>> }, string]>;
+  };
+  return parsed.methodCalls[0]![1].create.c0!;
+}
+
+function updatedPatch(body: string, id: string): Record<string, unknown> {
+  const parsed = JSON.parse(body) as {
+    methodCalls: Array<[string, { update: Record<string, Record<string, unknown>> }, string]>;
+  };
+  return parsed.methodCalls[0]![1].update[id]!;
+}
+
+describe('buildContactCreateRequest — name FN derivation', () => {
+  it('derives full from given + surname when full is absent', () => {
+    const card = createdCard(
+      buildContactCreateRequest({
+        accountId: 'c',
+        params: { name: { given: 'Test', surname: 'Contact' } },
+      }),
+    );
+    expect(card.name).toEqual({ full: 'Test Contact', given: 'Test', surname: 'Contact' });
+  });
+
+  it('derives full from given alone', () => {
+    const card = createdCard(
+      buildContactCreateRequest({
+        accountId: 'c',
+        params: { name: { given: 'Cher' } },
+      }),
+    );
+    expect((card.name as { full?: string }).full).toBe('Cher');
+  });
+
+  it('keeps an explicitly provided full', () => {
+    const card = createdCard(
+      buildContactCreateRequest({
+        accountId: 'c',
+        params: { name: { full: 'Sir Test Contact III', given: 'Test', surname: 'Contact' } },
+      }),
+    );
+    expect((card.name as { full?: string }).full).toBe('Sir Test Contact III');
+  });
+
+  it('omits name entirely when no name parts are given', () => {
+    const card = createdCard(
+      buildContactCreateRequest({
+        accountId: 'c',
+        params: { name: {}, emails: [{ address: 'x@example.net' }] },
+      }),
+    );
+    expect(card.name).toBeUndefined();
+  });
+});
+
+describe('buildContactUpdateRequest — name FN derivation', () => {
+  it('derives full from given + surname on update', () => {
+    const patch = updatedPatch(
+      buildContactUpdateRequest({
+        accountId: 'c',
+        params: { contactId: 'C-1', name: { given: 'Testy', surname: 'McTester' } },
+      }),
+      'C-1',
+    );
+    expect(patch.name).toEqual({ full: 'Testy McTester', given: 'Testy', surname: 'McTester' });
   });
 });
