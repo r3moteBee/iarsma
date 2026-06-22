@@ -1846,7 +1846,9 @@ export type MailModifyInput = {
   readonly emailIds: readonly string[];
   readonly patch: {
     readonly mailboxIds?: Readonly<Record<string, boolean>>;
-    readonly keywords?: Readonly<Record<string, boolean>>;
+    // A keyword value of `true` adds the flag; `null` removes it (JMAP
+    // PatchObject semantics) — used for mark-unread / unflag.
+    readonly keywords?: Readonly<Record<string, boolean | null>>;
   };
 };
 
@@ -1868,7 +1870,19 @@ export function buildMailModifyRequest(opts: {
   readonly params: MailModifyInput;
 }): string {
   const { accountId, params } = opts;
-  const patchObj: Record<string, boolean> = {};
+  // Guard against the flat path-key mistake (e.g. `{ 'keywords/$seen': true }`),
+  // which the builder used to silently drop, producing an empty patch that the
+  // server accepted as a no-op. Callers MUST use the nested shape.
+  for (const key of Object.keys(params.patch)) {
+    if (key !== 'mailboxIds' && key !== 'keywords') {
+      throw makeError(
+        'invalid_argument',
+        `mail.modify: unknown patch key "${key}". Use the nested shape, ` +
+          `e.g. { keywords: { $seen: true } } or { mailboxIds: { 'Mb-x': true } }.`,
+      );
+    }
+  }
+  const patchObj: Record<string, boolean | null> = {};
   if (params.patch.mailboxIds !== undefined) {
     for (const [id, value] of Object.entries(params.patch.mailboxIds)) {
       patchObj[`mailboxIds/${id}`] = value;
@@ -1879,7 +1893,13 @@ export function buildMailModifyRequest(opts: {
       patchObj[`keywords/${keyword}`] = value;
     }
   }
-  const update: Record<string, Record<string, boolean>> = {};
+  if (Object.keys(patchObj).length === 0) {
+    throw makeError(
+      'invalid_argument',
+      'mail.modify: empty patch — nothing to update.',
+    );
+  }
+  const update: Record<string, Record<string, boolean | null>> = {};
   for (const emailId of params.emailIds) {
     update[emailId] = { ...patchObj };
   }

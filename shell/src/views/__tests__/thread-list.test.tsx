@@ -118,6 +118,7 @@ function renderThreadList(opts: {
   invokerError?: Error;
   mailboxes?: ReadonlyArray<MailboxFixture>;
   threadGet?: (input: { threadId: string }) => unknown;
+  onModify?: (input: unknown) => void;
 } = {}) {
   const data = opts.data ?? FIXTURES;
   const mailboxId = opts.mailboxId === undefined ? 'Mb01' : opts.mailboxId;
@@ -136,6 +137,10 @@ function renderThreadList(opts: {
         return opts.threadGet(input as { threadId: string });
       }
       return { thread: { id: '', emailIds: [] }, emails: [] };
+    },
+    'mail.modify': async (input) => {
+      opts.onModify?.(input);
+      return { modifiedCount: 1 };
     },
   });
   return render(
@@ -767,5 +772,39 @@ describe('ThreadList — Trash UI (PR 30)', () => {
     // Empty result → no purge call attempted.
     await new Promise((r) => setTimeout(r, 10));
     expect(calls.find((c) => c.name === 'mail.purge')).toBeUndefined();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Row keyword actions (mark-read / flag) — mail.modify patch shape
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadList — row keyword actions', () => {
+  it('marks a row read with the nested keywords patch shape', async () => {
+    const modifyCalls: unknown[] = [];
+    renderThreadList({ onModify: (input) => modifyCalls.push(input) });
+    await waitForList();
+    // T3 ("(no subject)") is unread → its action is "Mark read".
+    const btn = await screen.findByLabelText('Mark read: (no subject)');
+    fireEvent.click(btn);
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]).toEqual({
+      emailIds: ['E-T3'],
+      patch: { keywords: { $seen: true } },
+    });
+  });
+
+  it('flags a row with the nested keywords patch shape', async () => {
+    const modifyCalls: unknown[] = [];
+    renderThreadList({ onModify: (input) => modifyCalls.push(input) });
+    await waitForList();
+    // T1 ("Welcome") is unflagged → its action is "Flag".
+    const btn = await screen.findByLabelText('Flag: Welcome');
+    fireEvent.click(btn);
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]).toEqual({
+      emailIds: ['E-T1'],
+      patch: { keywords: { $flagged: true } },
+    });
   });
 });
