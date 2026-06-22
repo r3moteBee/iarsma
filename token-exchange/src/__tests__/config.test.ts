@@ -27,11 +27,18 @@ describe('loadConfig', () => {
     ]);
     expect(cfg.corsOrigins).toEqual([]);
     expect(cfg.tokenEndpoint).toBeUndefined();
+    // Fail-safe default: loopback, not all-interfaces (U-2 / High-2).
+    expect(cfg.host).toBe('127.0.0.1');
   });
 
   it('respects custom port', () => {
     const cfg = loadConfig({ ...baseEnv, TOKEN_EXCHANGE_PORT: '4321' } as NodeJS.ProcessEnv);
     expect(cfg.port).toBe(4321);
+  });
+
+  it('respects a custom bind host', () => {
+    const cfg = loadConfig({ ...baseEnv, TOKEN_EXCHANGE_HOST: '0.0.0.0' } as NodeJS.ProcessEnv);
+    expect(cfg.host).toBe('0.0.0.0');
   });
 
   it('parses CORS origins as a CSV', () => {
