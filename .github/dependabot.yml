@@ -1,0 +1,40 @@
+# Dependabot — the enforcing layer for dependency freshness/security.
+# CI's `pnpm audit` / `cargo audit` steps are advisory (report-only);
+# Dependabot opens PRs that get the full required-check gate before merge.
+#
+# Known-vulnerable transitive deps are pinned in the root package.json
+# `pnpm.overrides` block (each keyed to its GHSA); when an upstream ships
+# a native fix, Dependabot's bump lets us drop the corresponding override.
+version: 2
+updates:
+  # npm / pnpm workspace (root manifest covers all workspace packages).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Batch low-risk dev-dependency bumps into one PR to cut noise.
+      dev-dependencies:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "build(deps)"
+      prefix-development: "build(deps-dev)"
+
+  # Rust / Cargo workspace.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "build(deps)"
+
+  # GitHub Actions used in the workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci(deps)"
