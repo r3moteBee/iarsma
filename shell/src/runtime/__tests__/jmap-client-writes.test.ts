@@ -864,7 +864,9 @@ describe('buildContactUpdateRequest', () => {
     };
     const update = parsed.methodCalls[0]![1]!.update as Record<string, Record<string, unknown>>;
     const patch = update['card-456']!;
-    expect(patch.name).toEqual({ given: 'Updated' });
+    // `full` (FN) is derived from the given/surname parts so JSContact
+    // accepts the name (U-2) — see normalizeContactName.
+    expect(patch.name).toEqual({ full: 'Updated', given: 'Updated' });
     expect(patch.emails).toBeUndefined();
     expect(patch.phones).toBeUndefined();
   });
