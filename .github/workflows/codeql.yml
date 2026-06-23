@@ -1,0 +1,49 @@
+# CodeQL static analysis (SAST) for the TypeScript/JavaScript surface.
+#
+# Complements the advisory `pnpm audit` / `cargo audit` steps in ci.yml:
+# those flag known-vulnerable *dependencies*; CodeQL flags vulnerable
+# *code patterns* (injection, unsafe deserialization, etc.). Findings
+# surface in the repo's Security → Code scanning tab.
+#
+# Rust is not analyzed here — CodeQL's Rust support is still maturing and
+# the Rust crates are covered by `cargo audit` + the type system. Revisit
+# when CodeQL Rust leaves beta.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly full scan so advisories added after a merge still get caught.
+    - cron: "27 4 * * 1"
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (javascript-typescript)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+
+      # No build needed for the JS/TS analysis — CodeQL extracts source
+      # directly. The generated artifacts are gitignored and regenerated
+      # at build time, so they're intentionally out of scope here.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:javascript-typescript"

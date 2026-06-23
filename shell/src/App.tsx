@@ -19,7 +19,7 @@ import { useMailboxList } from './generated/capabilities/mailbox-list.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { useBreakpoint } from './hooks/use-media-query.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
-import { mailLayoutAtom, searchQueryAtom, selectedMailboxIdAtom, type MailLayout as MailLayoutType } from './mail-state.js';
+import { mailLayoutAtom, pendingDeleteUndoAtom, searchQueryAtom, selectedMailboxIdAtom, type MailLayout as MailLayoutType } from './mail-state.js';
 import { activeViewAtom } from './nav-state.js';
 import type { ActiveView } from './nav-state.js';
 import {
@@ -32,6 +32,7 @@ import {
 } from './runtime/index.js';
 import { inMemoryAgentMetadataStore, indexedDbAgentMetadataStore } from './runtime/agent-metadata-store.js';
 import { announceUnreadDelta, updateTabTitle } from './runtime/new-mail-notify.js';
+import { toCalendarViewEvent } from './runtime/calendar-transform.js';
 import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import { stalwartApiKeyIssuer } from './runtime/stalwart-apikey-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
@@ -71,6 +72,7 @@ import {
 import { CalendarView, buildEventParticipants } from './views/calendar-view.js';
 import { CommandPalette, type CommandItem } from './components/command-palette.js';
 import { SendToast } from './components/send-toast.js';
+import { DeleteToast } from './components/delete-toast.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
 import { SignedOutView } from './views/signed-out-view.js';
 import { ThreadList } from './views/thread-list.js';
@@ -184,6 +186,11 @@ export function App() {
 function ConnectedApp({ config }: { readonly config: ShellConfig }) {
   const setAgentContext = useSetAtom(agentContextAtom);
   const bumpAuth = useSetAtom(authVersionAtom);
+  // U-4 — surface a "Moved to Trash · Undo" toast the moment a UI
+  // delete commits and its inverse is registered. useSetAtom returns a
+  // stable setter, so referencing it in the invoker memo below doesn't
+  // rebuild the invoker.
+  const setPendingDeleteUndo = useSetAtom(pendingDeleteUndoAtom);
   // PR 44 — token accessor with auto-refresh. Replaces the bare
   // `authStorage.loadTokens()?.accessToken ?? null` at every invoker /
   // push / approval-store wiring. `getAccessToken` checks expiresAtMs
@@ -228,8 +235,20 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
         onUnauthorized: () => {
           void authStorage.clearTokens().then(() => bumpAuth((v) => v + 1));
         },
+        // U-4 — only UI deletes get the act-then-undo toast; agent
+        // deletes are surfaced in the Activity log instead.
+        onUndoRegistered: (info) => {
+          if (info.tool !== 'mail.delete' || info.callerClass !== 'ui') return;
+          const emailIds =
+            (info.params as { emailIds?: readonly string[] }).emailIds ?? [];
+          setPendingDeleteUndo({
+            seq: info.seq,
+            count: emailIds.length,
+            createdAtMs: Date.now(),
+          });
+        },
       }),
-    [config, getAuthTokenAsync, bumpAuth],
+    [config, getAuthTokenAsync, bumpAuth, setPendingDeleteUndo],
   );
   // Populate the agent-context atom from config so capabilities and
   // agent-facing surfaces can read it without re-walking the config.
@@ -614,6 +633,7 @@ function SignedInShell({
           start: string;
           duration?: string;
           description?: string;
+          locations?: Readonly<Record<string, { name?: string }>>;
           calendarIds?: Readonly<Record<string, boolean>>;
           participants?: Readonly<Record<string, {
             email: string;
@@ -636,44 +656,9 @@ function SignedInShell({
           const colorByCalId = new Map<string, string | undefined>(
             calList.map((c) => [c.id, c.color]),
           );
-          const mapped = (e.events ?? []).map((evt) => {
-            const ids = evt.calendarIds;
-            const calId = ids !== undefined
-              ? Object.keys(ids).find((k) => ids[k] === true)
-              : undefined;
-            const color = calId !== undefined ? colorByCalId.get(calId) : undefined;
-            // PR 54 — flatten the JSCalendar participants map into the
-            // array the view consumes. Order isn't load-bearing but
-            // alphabetic-by-email keeps badge rendering stable across
-            // refreshes.
-            const participants = evt.participants !== undefined
-              ? Object.values(evt.participants)
-                  .map((p) => ({
-                    email: p.email,
-                    ...(p.name !== undefined ? { name: p.name } : {}),
-                    ...(p.roles !== undefined ? { roles: p.roles } : {}),
-                    ...(p.participationStatus !== undefined
-                      ? { participationStatus: p.participationStatus }
-                      : {}),
-                    ...(p.expectReply !== undefined
-                      ? { expectReply: p.expectReply }
-                      : {}),
-                  }))
-                  .sort((a, b) => a.email.localeCompare(b.email))
-              : undefined;
-            return {
-              id: evt.id,
-              title: evt.title,
-              start: evt.start,
-              ...(evt.duration !== undefined ? { duration: evt.duration } : {}),
-              ...(evt.description !== undefined ? { description: evt.description } : {}),
-              ...(calId !== undefined ? { calendarId: calId } : {}),
-              ...(color !== undefined ? { calendarColor: color } : {}),
-              ...(participants !== undefined && participants.length > 0
-                ? { participants }
-                : {}),
-            };
-          });
+          const mapped = (e.events ?? []).map((evt) =>
+            toCalendarViewEvent(evt, colorByCalId),
+          );
           setCalendarEvents(mapped);
         }
       } catch (err) {
@@ -1043,13 +1028,16 @@ function SignedInShell({
           await invoker.invoke(u.inverseAction, u.inverseParams);
           await undoRegistry.consume(seq);
           setCrudRefresh((n) => n + 1);
+          // Restored mail must reappear in the thread list / unread
+          // badge — bump push-generation so the read hooks refetch.
+          bumpPushGeneration((n) => n + 1);
         } catch (e) {
           // eslint-disable-next-line no-console
           console.error('[iarsma] undo failed:', e);
         }
       })();
     },
-    [invoker],
+    [invoker, bumpPushGeneration],
   );
 
   // View title for mobile top bar
@@ -1389,6 +1377,7 @@ function SignedInShell({
       <KeyboardHelpOverlay />
       <ComposeView />
       <SendToast />
+      <DeleteToast onUndo={handleUndo} />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

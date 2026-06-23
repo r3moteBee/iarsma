@@ -40,6 +40,10 @@ export type RecipientFieldProps = {
   readonly className?: string | undefined;
   readonly ariaInvalid?: boolean | undefined;
   readonly ariaDescribedBy?: string | undefined;
+  /** U-5 — recently-emailed addresses (from send history) merged into
+   *  the contact suggestions. Most-recent-first; deduped against
+   *  contacts by email (a contact's name wins when both exist). */
+  readonly recentRecipients?: ReadonlyArray<{ readonly email: string; readonly name?: string }> | undefined;
 };
 
 // ── Pure helpers (also exported for unit testing) ────────────────
@@ -138,13 +142,26 @@ export function RecipientField({
   className,
   ariaInvalid,
   ariaDescribedBy,
+  recentRecipients,
 }: RecipientFieldProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const contactsHook = useContactList({});
-  const allSuggestions = useMemo<RecipientSuggestion[]>(
-    () => flattenContacts(((contactsHook.data ?? { contacts: [] }).contacts) as Contact[]),
-    [contactsHook.data],
-  );
+  const allSuggestions = useMemo<RecipientSuggestion[]>(() => {
+    const fromContacts = flattenContacts(
+      ((contactsHook.data ?? { contacts: [] }).contacts) as Contact[],
+    );
+    // Merge send-history (U-5). Contacts win on name; recents only add
+    // addresses not already covered by a contact.
+    const seen = new Set(fromContacts.map((s) => s.email.toLowerCase()));
+    const fromRecents: RecipientSuggestion[] = [];
+    for (const r of recentRecipients ?? []) {
+      const key = r.email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      fromRecents.push({ displayName: r.name ?? '', email: r.email });
+    }
+    return [...fromContacts, ...fromRecents];
+  }, [contactsHook.data, recentRecipients]);
 
   // Cursor position and the candidate matches at that cursor.
   const [cursor, setCursor] = useState(value.length);

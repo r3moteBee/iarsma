@@ -93,6 +93,49 @@ describe('buildMailModifyRequest', () => {
     expect(update['keywords/$flagged']).toBe(false);
   });
 
+  it('serializes a null keyword value as a removal (JMAP PatchObject)', () => {
+    const body = buildMailModifyRequest({
+      accountId: 'c',
+      params: {
+        emailIds: ['E-1'],
+        patch: {
+          keywords: { $seen: null },
+        },
+      },
+    });
+    const update = (
+      JSON.parse(body) as {
+        methodCalls: Array<[string, { update: Record<string, Record<string, unknown>> }, string]>;
+      }
+    ).methodCalls[0]![1].update['E-1']!;
+    expect(update).toHaveProperty('keywords/$seen', null);
+  });
+
+  it('throws on an unknown patch key instead of silently no-opping', () => {
+    // Regression guard for the flat path-key bug: callers must pass the
+    // nested `{ keywords: { $seen: true } }` shape, NOT `{ 'keywords/$seen': true }`.
+    // The old builder silently dropped the latter, producing an empty patch.
+    expect(() =>
+      buildMailModifyRequest({
+        accountId: 'c',
+        params: {
+          emailIds: ['E-1'],
+          // @ts-expect-error — deliberately wrong shape the guard must reject
+          patch: { 'keywords/$seen': true },
+        },
+      }),
+    ).toThrow(/unknown patch key/i);
+  });
+
+  it('throws when a patch resolves to no changes', () => {
+    expect(() =>
+      buildMailModifyRequest({
+        accountId: 'c',
+        params: { emailIds: ['E-1'], patch: {} },
+      }),
+    ).toThrow(/empty patch/i);
+  });
+
   it('handles both mailboxIds and keywords together', () => {
     const body = buildMailModifyRequest({
       accountId: 'c',

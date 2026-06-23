@@ -18,7 +18,7 @@
  * UI surfaces the error correctly. Save-as-draft is fully functional.
  */
 
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   useCallback,
   useEffect,
@@ -46,6 +46,8 @@ import type { AttachmentRef, Identity, MailSendInput } from '../runtime/jmap-cli
 import { previewHashHex } from '../runtime/preview-hash.js';
 import { useSendBufferOrNull } from '../runtime/send-buffer-context.js';
 import { sendDelayMsAtom } from '../runtime/send-delay-state.js';
+import { skipSendReviewAtom } from '../runtime/skip-send-review-state.js';
+import { useRecentRecipients } from '../runtime/recent-recipients.js';
 import {
   formatRecipients,
   parseRecipients,
@@ -101,6 +103,9 @@ function ComposeModal(props: {
   // path (no buffer, no undo).
   const sendBuffer = useSendBufferOrNull();
   const sendDelayMs = useAtomValue(sendDelayMsAtom);
+  const skipSendReview = useAtomValue(skipSendReviewAtom);
+  // U-5 — send-history feeds recipient autocomplete alongside contacts.
+  const recentRecipients = useRecentRecipients();
 
   // Attachments. Each `UploadedAttachment` is a successful upload; the
   // user can remove them with the per-row button (no server-side
@@ -203,6 +208,11 @@ function ComposeModal(props: {
   const [toText, setToText] = useState(formatRecipients(prefill.to));
   const [ccText, setCcText] = useState(formatRecipients(prefill.cc));
   const [bccText, setBccText] = useState(formatRecipients(prefill.bcc));
+  // U-9 — Cc/Bcc are progressively disclosed: hidden until the user asks
+  // for them, but shown from the start when a reply/draft prefilled them.
+  const [ccBccVisible, setCcBccVisible] = useState(
+    () => (prefill.cc?.length ?? 0) > 0 || (prefill.bcc?.length ?? 0) > 0,
+  );
   const [subject, setSubject] = useState(prefill.subject ?? '');
   const [bodyHtml, setBodyHtml] = useState(prefill.bodyHtml ?? '');
   // PR 52 / CoWork #6 — Squire instance is owned by Composer; the
@@ -537,6 +547,15 @@ function ComposeModal(props: {
     onClose,
   ]);
 
+  // U-10 — when the user has opted to skip the review dialog, a Send
+  // click still runs the dry-run preview (so the action-log keeps its
+  // provenance hash), but we auto-confirm instead of showing the modal.
+  useEffect(() => {
+    if (sendPreview !== null && skipSendReview) {
+      void onPreviewConfirm();
+    }
+  }, [sendPreview, skipSendReview, onPreviewConfirm]);
+
   // Discard draft (PR 5.5): if the user saved a draft at any point
   // during this session, delete it via mail.delete; then close. If
   // nothing was ever saved, the destructive button is hidden so the
@@ -640,6 +659,7 @@ function ComposeModal(props: {
               <FieldRow label="To" htmlFor="compose-to">
                 <RecipientField
                   id="compose-to"
+                  recentRecipients={recentRecipients}
                   value={toText}
                   onChange={setToText}
                   onBlur={() => { setToBlurred(true); triggerDebouncedSave(); }}
@@ -661,9 +681,23 @@ function ComposeModal(props: {
                   Invalid recipient(s): {parsedTo.errors.join(', ')}
                 </p>
               ) : null}
+              {!ccBccVisible ? (
+                <div className={styles['ccBccToggleRow']}>
+                  <button
+                    type="button"
+                    className={styles['ccBccToggle']}
+                    onClick={() => setCcBccVisible(true)}
+                  >
+                    Cc/Bcc
+                  </button>
+                </div>
+              ) : null}
+              {ccBccVisible ? (
+                <>
               <FieldRow label="Cc" htmlFor="compose-cc">
                 <RecipientField
                   id="compose-cc"
+                  recentRecipients={recentRecipients}
                   value={ccText}
                   onChange={setCcText}
                   onBlur={() => { setCcBlurred(true); triggerDebouncedSave(); }}
@@ -679,6 +713,7 @@ function ComposeModal(props: {
               <FieldRow label="Bcc" htmlFor="compose-bcc">
                 <RecipientField
                   id="compose-bcc"
+                  recentRecipients={recentRecipients}
                   value={bccText}
                   onChange={setBccText}
                   onBlur={() => { setBccBlurred(true); triggerDebouncedSave(); }}
@@ -690,6 +725,8 @@ function ComposeModal(props: {
                 <p role="alert" className={styles['fieldError']}>
                   Invalid recipient(s): {parsedBcc.errors.join(', ')}
                 </p>
+              ) : null}
+                </>
               ) : null}
               <FieldRow label="Subject" htmlFor="compose-subject">
                 <input
@@ -731,7 +768,7 @@ function ComposeModal(props: {
           </form>
         </div>
       </Dialog>
-      {sendPreview !== null ? (
+      {sendPreview !== null && !skipSendReview ? (
         <SendPreviewModal
           preview={sendPreview}
           onCancel={() => {
@@ -766,6 +803,7 @@ function SendPreviewModal(props: {
   readonly onConfirm: () => void;
 }) {
   const { preview, onCancel, onConfirm } = props;
+  const setSkipSendReview = useSetAtom(skipSendReviewAtom);
   const details: ReadonlyArray<{ label: string; value: React.ReactNode }> = [
     { label: 'To', value: preview.recipients.to.map((a) => a.email).join(', ') },
     ...(preview.recipients.cc !== undefined && preview.recipients.cc.length > 0
@@ -793,6 +831,13 @@ function SendPreviewModal(props: {
       title="Send this message?"
       footer={
         <>
+          <label className={styles['skipReviewLabel']}>
+            <input
+              type="checkbox"
+              onChange={(e) => setSkipSendReview(e.target.checked)}
+            />
+            Don&apos;t ask again
+          </label>
           <Button variant="secondary" onClick={onCancel}>
             Cancel
           </Button>

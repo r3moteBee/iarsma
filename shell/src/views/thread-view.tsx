@@ -148,7 +148,7 @@ function ThreadViewLoaded({
       try {
         await invoker.invoke('mail.modify', {
           emailIds: unreadIds,
-          patch: { 'keywords/$seen': true },
+          patch: { keywords: { $seen: true } },
         });
         // Bump push-generation so the sidebar's useMailboxList
         // refetches and the unread badge / document title update.
@@ -274,7 +274,7 @@ function ThreadViewLoaded({
       try {
         await invoker.invoke('mail.modify', {
           emailIds: emails.map((e) => e.id),
-          patch: { 'keywords/$seen': next ? true : null },
+          patch: { keywords: { $seen: next ? true : null } },
         });
         await refetch();
         // PR 45 — refresh the sidebar unread badge + document title.

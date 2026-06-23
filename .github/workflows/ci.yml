@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -83,6 +83,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Advisory: surfaces known vulnerabilities in the dependency tree
+      # without failing the build — transitive advisories are handled
+      # reactively via the pnpm.overrides block in package.json, and
+      # Dependabot (.github/dependabot.yml) is the enforcing layer.
+      - name: Audit npm dependencies (advisory)
+        run: pnpm audit --prod || true
+
       - name: Build + transpile WASM components
         run: bash .github/scripts/build-wasm.sh
 
@@ -106,7 +113,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -152,6 +159,13 @@ jobs:
       - name: Workspace check
         run: cargo check --workspace
 
+      # Advisory: report RustSec advisories without failing the build
+      # (same posture as the npm audit step — Dependabot enforces).
+      - name: Audit Rust dependencies (advisory)
+        run: |
+          cargo install --locked cargo-audit >/dev/null 2>&1 || cargo install cargo-audit
+          cargo audit || true
+
       - name: Workspace test (host target)
         run: cargo test --workspace
 
@@ -168,7 +182,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -238,7 +252,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
