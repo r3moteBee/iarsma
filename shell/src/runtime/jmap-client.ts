@@ -4788,7 +4788,7 @@ export async function fetchBlobUpload(opts: FetchBlobUploadOptions): Promise<Blo
         'content-type': opts.contentType,
         authorization: `Bearer ${token}`,
       },
-      body: opts.bytes,
+      body: new Blob([opts.bytes as Uint8Array<ArrayBuffer>], { type: opts.contentType }),
     });
   } catch (e) {
     throw makeError('network_error', `Blob upload failed: ${describe(e)}`);

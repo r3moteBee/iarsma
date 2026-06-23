@@ -19,22 +19,8 @@ import {
   parseBlobUpload,
   fetchBlobUpload,
   fetchBlobText,
-  type Session,
 } from '../jmap-client.js';
-import type { ToolError } from '../types.js';
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const SAMPLE_SESSION: Session = {
-  username: 'admin@r3motely.net',
-  apiUrl: 'https://sw-mail.r3motely.net/jmap/',
-  downloadUrl: 'https://sw-mail.r3motely.net/jmap/download/{accountId}/{blobId}/{name}?accept={type}',
-  uploadUrl: 'https://sw-mail.r3motely.net/jmap/upload/{accountId}/',
-  eventSourceUrl:
-    'https://sw-mail.r3motely.net/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}',
-  state: '817d3028',
-  primaryAccountIdMail: 'b',
-};
 
 type FetchSpy = ReturnType<typeof makeFetchSpy>;
 

@@ -30,6 +30,6 @@ describe('label-registry', () => {
     const json = JSON.stringify({ version: 1, labels: [
       { key: 'ok', name: 'Ok', order: 0 },
     ]});
-    expect(parseRegistry(json).labels[0].color).toBe(DEFAULT_LABEL_COLOR);
+    expect(parseRegistry(json).labels[0]!.color).toBe(DEFAULT_LABEL_COLOR);
   });
 });
