@@ -219,7 +219,7 @@ jobs:
 
       - name: Upload single variant as workflow artifact
         if: ${{ steps.trig.outputs.tag == '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.dispatch_pkg.outputs.asset }}
           path: |
