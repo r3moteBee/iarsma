@@ -15,8 +15,10 @@ export const labelList = capability({
   description:
     'List all labels defined on the authenticated account. Returns a flat ' +
     'array of label objects; each has a stable `key` you can pass to ' +
-    'label.update, label.delete, and label.apply. Non-destructive read; ' +
-    'no refusals in normal operation.',
+    'label.update, label.delete, and label.apply. The keyword stored on ' +
+    'each tagged message is this `key` — call label.list to resolve a ' +
+    "message's keywords to their display names and colors. " +
+    'Non-destructive read; no refusals in normal operation.',
   isDestructive: false,
   input: z.object({}),
   output: z.object({
