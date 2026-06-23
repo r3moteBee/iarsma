@@ -4345,6 +4345,173 @@ export async function fetchMailboxUpdateCommit(
   return parseMailboxUpdateResponse(text, opts.params.mailboxId);
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Mailbox/set — delete (RFC 8621 §2.5)
+//
+// Safe delete: move all messages in the target to Trash, then destroy
+// the empty mailbox. The pure guard `assertMailboxDeletable` is exported
+// so the UI can run it synchronously before issuing the commit call.
+// ──────────────────────────────────────────────────────────────────────
+
+const SYSTEM_ROLES = new Set(['inbox', 'sent', 'drafts', 'trash', 'junk', 'archive']);
+
+/**
+ * Pure structural guard for mailbox deletion. Throws a typed ToolError for
+ * any structural refusal (system role / has children / no delete permission).
+ * Called by `fetchMailboxDeleteCommit` after loading the mailbox list.
+ */
+export function assertMailboxDeletable(target: Mailbox, all: readonly Mailbox[]): void {
+  if (target.role !== undefined && SYSTEM_ROLES.has(target.role)) {
+    throw makeError('mailbox_protected', `"${target.name}" is a system folder and can't be renamed or deleted.`);
+  }
+  if (target.myRights.mayDelete === false) {
+    throw makeError('mailbox_forbidden', `You don't have permission to delete "${target.name}".`);
+  }
+  const children = all.filter((m) => m.parentId === target.id);
+  if (children.length > 0) {
+    const n = children.length;
+    throw makeError('mailbox_has_children', `Can't delete "${target.name}" — it has ${n} subfolder${n === 1 ? '' : 's'}. Delete or move those first.`);
+  }
+}
+
+export type MailboxDeleteInput = { readonly mailboxId: string };
+export type MailboxDeleteResult = { readonly deleted: boolean; readonly movedToTrash: number };
+export type MailboxDeletePreview = { readonly affectedCount: number };
+
+export type FetchMailboxDeleteOptions = FetchMailboxListOptions & {
+  readonly params: MailboxDeleteInput;
+};
+
+/**
+ * POST a `Mailbox/set` destroy for a single mailbox id and throw on failure.
+ */
+async function postMailboxDestroy(
+  opts: FetchMailboxListOptions,
+  mailboxId: string,
+): Promise<void> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Mailbox/set',
+        {
+          accountId: opts.session.primaryAccountIdMail,
+          destroy: [mailboxId],
+        },
+        '0',
+      ],
+    ],
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Mailbox/set destroy returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError('jmap_parse_error', `Failed to parse Mailbox/set destroy response: ${describe(e)}`, e);
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Mailbox/set destroy response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError('jmap_parse_error', 'Mailbox/set destroy: no methodResponses array.');
+  }
+  const first = methodResponses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) {
+    throw makeError('jmap_parse_error', 'Mailbox/set destroy: malformed methodResponse entry.');
+  }
+  const result = first[1] as {
+    destroyed?: string[];
+    notDestroyed?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notDestroyed !== undefined) {
+    const entries = Object.entries(result.notDestroyed);
+    if (entries.length > 0) {
+      const [id, err] = entries[0]!;
+      throw makeError(
+        'mailbox_set_failed',
+        `Mailbox/set destroy rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
+        result.notDestroyed,
+      );
+    }
+  }
+}
+
+/**
+ * Delete a mailbox safely: move its messages to Trash, then destroy it.
+ *
+ * Sequence:
+ * 1. `Mailbox/get` — load all mailboxes, find target + Trash by role.
+ * 2. Guard: `assertMailboxDeletable` — throws on system role / children / no permission.
+ * 3. `Email/query` — fetch ids of messages in the target mailbox.
+ * 4. `Email/set` update — move those messages to Trash (skip if none).
+ * 5. `Mailbox/set` destroy — delete the now-empty mailbox.
+ */
+export async function fetchMailboxDeleteCommit(
+  opts: FetchMailboxDeleteOptions,
+): Promise<MailboxDeleteResult> {
+  const all = await fetchMailboxList(opts);
+  const target = all.find((m) => m.id === opts.params.mailboxId);
+  if (target === undefined) throw makeError('not_found', 'That folder no longer exists.');
+  assertMailboxDeletable(target, all);
+  const trash = all.find((m) => m.role === 'trash');
+  if (trash === undefined) {
+    throw makeError('trash_not_found', `Can't delete "${target.name}" safely — no Trash folder was found on this account.`);
+  }
+  const ids = await fetchEmailIdsInMailbox({ ...opts, mailboxId: target.id });
+  if (ids.length > 0) {
+    await fetchMailModifyCommit({
+      ...opts,
+      params: {
+        emailIds: ids as string[],
+        patch: { mailboxIds: { [target.id]: false, [trash.id]: true } },
+      },
+    });
+  }
+  await postMailboxDestroy(opts, target.id);
+  return { deleted: true, movedToTrash: ids.length };
+}
+
+/**
+ * Dry-run preview for `mailbox.delete`. Loads the mailbox list, runs the
+ * structural guard, queries message count — but makes no mutations.
+ */
+export async function makeMailboxDeletePreview(
+  opts: FetchMailboxDeleteOptions,
+): Promise<MailboxDeletePreview> {
+  const all = await fetchMailboxList(opts);
+  const target = all.find((m) => m.id === opts.params.mailboxId);
+  if (target === undefined) throw makeError('not_found', 'That folder no longer exists.');
+  assertMailboxDeletable(target, all);
+  const ids = await fetchEmailIdsInMailbox({ ...opts, mailboxId: target.id });
+  return { affectedCount: ids.length };
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }
