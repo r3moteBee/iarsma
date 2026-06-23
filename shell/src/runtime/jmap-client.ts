@@ -4214,6 +4214,9 @@ export type MailboxCreateResult = { readonly mailboxId: string };
 
 export function buildMailboxCreateRequest(opts: { readonly accountId: string; readonly params: MailboxCreateInput }): string {
   const { accountId, params } = opts;
+  if (params.name.trim() === '') {
+    throw makeError('mailbox_name_invalid', "Folder name can't be empty.");
+  }
   const create: Record<string, unknown> = { name: params.name };
   if (params.parentId !== undefined) create.parentId = params.parentId;
   return JSON.stringify({
@@ -4286,6 +4289,9 @@ export type MailboxUpdateResult = { readonly updated: boolean };
 
 export function buildMailboxUpdateRequest(opts: { readonly accountId: string; readonly params: MailboxUpdateInput }): string {
   const { accountId, params } = opts;
+  if (params.name.trim() === '') {
+    throw makeError('mailbox_name_invalid', "Folder name can't be empty.");
+  }
   return JSON.stringify({
     using: JMAP_USING_MAIL,
     methodCalls: [['Mailbox/set', { accountId, update: { [params.mailboxId]: { name: params.name } } }, '0']],
@@ -4462,15 +4468,25 @@ async function postMailboxDestroy(
   }
 }
 
+/** Maximum pages to drain when moving all messages to Trash before destroy. */
+const MAILBOX_DELETE_MAX_PAGES = 200;
+/** Batch size per page when draining a mailbox for deletion. */
+const MAILBOX_DELETE_BATCH_SIZE = 500;
+
 /**
- * Delete a mailbox safely: move its messages to Trash, then destroy it.
+ * Delete a mailbox safely: move ALL its messages to Trash (paging through
+ * them in batches of up to 500), then destroy it.
  *
  * Sequence:
  * 1. `Mailbox/get` — load all mailboxes, find target + Trash by role.
  * 2. Guard: `assertMailboxDeletable` — throws on system role / children / no permission.
- * 3. `Email/query` — fetch ids of messages in the target mailbox.
- * 4. `Email/set` update — move those messages to Trash (skip if none).
- * 5. `Mailbox/set` destroy — delete the now-empty mailbox.
+ * 3. Loop: `Email/query` → `Email/set` move-to-Trash, until folder is empty.
+ *    (Moving emails out of the mailbox means each re-query returns the next
+ *    batch naturally — no position cursor needed.)
+ * 4. `Mailbox/set` destroy — delete the now-empty mailbox.
+ *
+ * A safety cap of MAILBOX_DELETE_MAX_PAGES iterations prevents an infinite
+ * loop; if hit, throws `mailbox_set_failed` BEFORE the destroy.
  */
 export async function fetchMailboxDeleteCommit(
   opts: FetchMailboxDeleteOptions,
@@ -4483,8 +4499,15 @@ export async function fetchMailboxDeleteCommit(
   if (trash === undefined) {
     throw makeError('trash_not_found', `Can't delete "${target.name}" safely — no Trash folder was found on this account.`);
   }
-  const ids = await fetchEmailIdsInMailbox({ ...opts, mailboxId: target.id });
-  if (ids.length > 0) {
+
+  let movedToTrash = 0;
+  for (let page = 0; page < MAILBOX_DELETE_MAX_PAGES; page++) {
+    const ids = await fetchEmailIdsInMailbox({
+      ...opts,
+      mailboxId: target.id,
+      maxIds: MAILBOX_DELETE_BATCH_SIZE,
+    });
+    if (ids.length === 0) break;
     await fetchMailModifyCommit({
       ...opts,
       params: {
@@ -4492,14 +4515,27 @@ export async function fetchMailboxDeleteCommit(
         patch: { mailboxIds: { [target.id]: false, [trash.id]: true } },
       },
     });
+    movedToTrash += ids.length;
+    if (ids.length < MAILBOX_DELETE_BATCH_SIZE) break;
+    if (page === MAILBOX_DELETE_MAX_PAGES - 1) {
+      throw makeError(
+        'mailbox_set_failed',
+        `Folder "${target.name}" has too many messages to delete in one step — empty it first.`,
+      );
+    }
   }
+
   await postMailboxDestroy(opts, target.id);
-  return { deleted: true, movedToTrash: ids.length };
+  return { deleted: true, movedToTrash };
 }
 
 /**
  * Dry-run preview for `mailbox.delete`. Loads the mailbox list, runs the
- * structural guard, queries message count — but makes no mutations.
+ * structural guard, counts ALL messages — but makes no mutations.
+ *
+ * Uses `totalEmails` from the Mailbox/get response (already loaded) as the
+ * authoritative server-side count. This avoids repeated Email/query calls and
+ * correctly reflects the full message count beyond a single 500-id page.
  */
 export async function makeMailboxDeletePreview(
   opts: FetchMailboxDeleteOptions,
@@ -4508,8 +4544,10 @@ export async function makeMailboxDeletePreview(
   const target = all.find((m) => m.id === opts.params.mailboxId);
   if (target === undefined) throw makeError('not_found', 'That folder no longer exists.');
   assertMailboxDeletable(target, all);
-  const ids = await fetchEmailIdsInMailbox({ ...opts, mailboxId: target.id });
-  return { affectedCount: ids.length };
+  // For the preview, issue one Email/query to confirm we can read the mailbox,
+  // but trust `totalEmails` from Mailbox/get for the true count (no 500-cap).
+  await fetchEmailIdsInMailbox({ ...opts, mailboxId: target.id, maxIds: 1 });
+  return { affectedCount: target.totalEmails };
 }
 
 function makeError(code: string, message: string, payload?: unknown): ToolError {

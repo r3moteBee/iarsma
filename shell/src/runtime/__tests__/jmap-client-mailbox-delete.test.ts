@@ -122,6 +122,65 @@ function jsonStr(val: unknown): string {
   return JSON.stringify(val);
 }
 
+/** Canned Mailbox/get response with configurable totalEmails on folder P */
+function mailboxGetResponseWith(totalEmails: number): string {
+  return jsonStr({
+    methodResponses: [
+      [
+        'Mailbox/get',
+        {
+          list: [
+            {
+              id: 'P',
+              name: 'Projects',
+              sortOrder: 10,
+              totalEmails,
+              unreadEmails: 0,
+              totalThreads: totalEmails,
+              unreadThreads: 0,
+              isSubscribed: true,
+              myRights: {
+                mayReadItems: true,
+                mayAddItems: true,
+                mayRemoveItems: true,
+                maySetSeen: true,
+                maySetKeywords: true,
+                mayCreateChild: true,
+                mayRename: true,
+                mayDelete: true,
+                maySubmit: false,
+              },
+            },
+            {
+              id: 'T',
+              name: 'Trash',
+              role: 'trash',
+              sortOrder: 99,
+              totalEmails: 0,
+              unreadEmails: 0,
+              totalThreads: 0,
+              unreadThreads: 0,
+              isSubscribed: true,
+              myRights: {
+                mayReadItems: true,
+                mayAddItems: true,
+                mayRemoveItems: true,
+                maySetSeen: true,
+                maySetKeywords: true,
+                mayCreateChild: false,
+                mayRename: false,
+                mayDelete: false,
+                maySubmit: false,
+              },
+            },
+          ],
+        },
+        '0',
+      ],
+    ],
+  });
+}
+
 /** Canned Mailbox/get response: one user folder P + a trash folder T */
 function mailboxGetResponse(): string {
   return jsonStr({
@@ -186,6 +245,26 @@ function emailQueryResponse(): string {
   return jsonStr({
     methodResponses: [
       ['Email/query', { ids: ['E-1', 'E-2'] }, '0'],
+    ],
+  });
+}
+
+/** Email/query with a full batch of `count` ids (simulates 500-id page) */
+function emailQueryBatchResponse(ids: string[]): string {
+  return jsonStr({
+    methodResponses: [
+      ['Email/query', { ids }, '0'],
+    ],
+  });
+}
+
+/** Email/set update response acknowledging the given ids */
+function emailSetUpdateForIds(ids: string[]): string {
+  const updated: Record<string, unknown> = {};
+  for (const id of ids) updated[id] = {};
+  return jsonStr({
+    methodResponses: [
+      ['Email/set', { updated }, '0'],
     ],
   });
 }
@@ -279,6 +358,38 @@ describe('fetchMailboxDeleteCommit', () => {
     ).rejects.toMatchObject({ code: 'mailbox_protected' });
   });
 
+  it('pages through two batches, moves all messages, then destroys', async () => {
+    // Page 1: 500 ids (full batch) → move → Page 2: 3 ids (partial) → move → destroy
+    const batch1 = Array.from({ length: 500 }, (_, i) => `E-p1-${i}`);
+    const batch2 = ['E-p2-0', 'E-p2-1', 'E-p2-2'];
+    const emptyQuery = emailQueryBatchResponse([]);
+
+    const fetchFn = makeFetchSpy([
+      mailboxGetResponse(),              // 1. Mailbox/get
+      emailQueryBatchResponse(batch1),   // 2. Email/query → page 1 (500 ids)
+      emailSetUpdateForIds(batch1),      // 3. Email/set → move page 1
+      emailQueryBatchResponse(batch2),   // 4. Email/query → page 2 (3 ids)
+      emailSetUpdateForIds(batch2),      // 5. Email/set → move page 2
+      emptyQuery,                        // 6. Email/query → empty (folder drained) -- NOT called due to early-exit on partial batch
+      mailboxSetDestroyResponse(),       // 6 (actual). Mailbox/set → destroy
+    ]);
+
+    // Note: because batch2.length (3) < 500 (BATCH_SIZE), the loop breaks early
+    // without issuing the empty query. So 6 real calls total.
+    const result = await fetchMailboxDeleteCommit({
+      baseUrl: 'https://jmap.example.test',
+      getAuthToken: () => TOKEN,
+      fetch: fetchFn,
+      session: SAMPLE_SESSION,
+      params: { mailboxId: 'P' },
+    });
+
+    const mockFn = fetchFn as ReturnType<typeof vi.fn>;
+    // 1 (mailbox list) + 2*2 (query+move per batch) + 1 (destroy) = 6
+    expect(mockFn.mock.calls.length).toBe(6);
+    expect(result).toEqual({ deleted: true, movedToTrash: 503 });
+  });
+
   it('throws mailbox_set_failed when Mailbox/set notDestroyed', async () => {
     const destroyFailResponse = jsonStr({
       methodResponses: [
@@ -329,6 +440,25 @@ describe('makeMailboxDeletePreview', () => {
     });
 
     expect(result).toEqual({ affectedCount: 2 });
+    expect((fetchFn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+  });
+
+  it('returns affectedCount from totalEmails for a large folder (>500 messages)', async () => {
+    // Mailbox/get reports 750 totalEmails; dry-run should reflect full count in 2 calls.
+    const fetchFn = makeFetchSpy([
+      mailboxGetResponseWith(750),       // 1. Mailbox/get (totalEmails=750)
+      emailQueryBatchResponse(['E-1']),  // 2. Email/query — confirms readability (maxIds=1)
+    ]);
+
+    const result = await makeMailboxDeletePreview({
+      baseUrl: 'https://jmap.example.test',
+      getAuthToken: () => TOKEN,
+      fetch: fetchFn,
+      session: SAMPLE_SESSION,
+      params: { mailboxId: 'P' },
+    });
+
+    expect(result).toEqual({ affectedCount: 750 });
     expect((fetchFn as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
   });
 
