@@ -351,10 +351,31 @@ function ThreadViewLoaded({
     })();
   }, [invoker, refetch, emails, threadSeen, bumpPushGeneration]);
 
+  // Task 10 — toggle a label on the latest email in this thread.
+  const latestEmail = emails[emails.length - 1];
+  const handleLabelToggle = useCallback(
+    (labelKey: string, add: boolean) => {
+      if (latestEmail === undefined) return;
+      void (async () => {
+        try {
+          await invoker.invoke('label.apply', {
+            emailIds: [latestEmail.id],
+            ...(add ? { add: [labelKey] } : { remove: [labelKey] }),
+          });
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] label.apply failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch, bumpPushGeneration, latestEmail],
+  );
+
   const subject = emails[emails.length - 1]?.subject ?? '(no subject)';
   const messageCountLabel = `${emails.length} ${emails.length === 1 ? 'message' : 'messages'}`;
   // Task 8 — resolve labels from the latest email's keywords.
-  const latestEmail = emails[emails.length - 1];
   const threadLabels = useMemo(
     () => resolveLabels(latestEmail?.keywords ?? [], labels),
     [latestEmail?.keywords, labels],
@@ -404,6 +425,24 @@ function ThreadViewLoaded({
               align="end"
             >
               <MoveToFolderIcon />
+            </MenuButton>
+          ) : null}
+          {labels.length > 0 ? (
+            // Task 10 — Label picker for the thread.
+            <MenuButton
+              label={`Label ${subject}`}
+              items={labels.map((lbl) => {
+                const isChecked = latestEmail?.keywords.find((k) => k.name === lbl.key)?.value === true;
+                return {
+                  key: lbl.key,
+                  label: lbl.name,
+                  checked: isChecked,
+                  onSelect: () => { handleLabelToggle(lbl.key, !isChecked); },
+                };
+              })}
+              align="end"
+            >
+              <LabelTagIcon />
             </MenuButton>
           ) : null}
         </div>
@@ -463,6 +502,16 @@ function MoveToFolderIcon() {
       <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
       <line x1="12" y1="11" x2="12" y2="17" />
       <polyline points="9 14 12 17 15 14" />
+    </svg>
+  );
+}
+
+/** Task 10 — label/tag icon for the label picker menu trigger. */
+function LabelTagIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
     </svg>
   );
 }

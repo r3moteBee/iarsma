@@ -565,6 +565,27 @@ function ThreadListBody(props: {
     [invoker, refetch, bumpPushGeneration, mailboxId],
   );
 
+  // Task 10 — toggle a label keyword on a single email. `add=true`
+  // applies the label keyword; `add=false` removes it.
+  const handleLabelToggle = useCallback(
+    (emailId: string, labelKey: string, add: boolean) => {
+      void (async () => {
+        try {
+          await invoker.invoke('label.apply', {
+            emailIds: [emailId],
+            ...(add ? { add: [labelKey] } : { remove: [labelKey] }),
+          });
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] label.apply failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch, bumpPushGeneration],
+  );
+
   // Candidate mailboxes for "Move to…" come from the prop (computed in
   // ThreadListWithMailbox, already filtered to exclude the current
   // mailbox). Fall back to empty in search mode.
@@ -811,6 +832,7 @@ function ThreadListBody(props: {
                   : {})}
                 {...(tokens !== undefined ? { tokens } : {})}
                 labels={labels}
+                {...(labels.length > 0 ? { onLabelToggle: handleLabelToggle } : {})}
               />
             );
           })}
@@ -963,6 +985,8 @@ type ThreadRowProps = {
   readonly tokens?: readonly string[];
   /** Task 8 — label registry for resolving label chips on this row. */
   readonly labels?: readonly LabelDef[];
+  /** Task 10 — callback to toggle a label on the row's latest email. */
+  readonly onLabelToggle?: (emailId: string, labelKey: string, add: boolean) => void;
 };
 
 const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(props, ref) {
@@ -983,6 +1007,7 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
     moveTargets,
     tokens,
     labels,
+    onLabelToggle,
   } = props;
   const highlightTokens = tokens ?? EMPTY_TOKENS;
   const isSearchMode = highlightTokens.length > 0;
@@ -1152,6 +1177,23 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
             <MoveToFolderIcon />
           </MenuButton>
         ) : null}
+        {labels !== undefined && labels.length > 0 && onLabelToggle !== undefined ? (
+          // Task 10 — Label picker. Checkbox items stay open for multi-select.
+          <MenuButton
+            label={`Label ${subject}`}
+            items={labels.map((lbl) => {
+              const isChecked = e.keywords.find((k) => k.name === lbl.key)?.value === true;
+              return {
+                key: lbl.key,
+                label: lbl.name,
+                checked: isChecked,
+                onSelect: () => { onLabelToggle(e.id, lbl.key, !isChecked); },
+              };
+            })}
+          >
+            <LabelTagIcon />
+          </MenuButton>
+        ) : null}
         <button
           type="button"
           className={`${styles['iconBtn']} ${flagged ? styles['iconBtnFlagged'] : ''}`}
@@ -1264,6 +1306,16 @@ function MoveToFolderIcon() {
       <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
       <line x1="12" y1="11" x2="12" y2="17" />
       <polyline points="9 14 12 17 15 14" />
+    </svg>
+  );
+}
+
+/** Task 10 — label/tag icon for the label picker menu trigger. */
+function LabelTagIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
     </svg>
   );
 }

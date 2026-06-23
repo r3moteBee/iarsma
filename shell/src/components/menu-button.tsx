@@ -22,6 +22,10 @@ export type MenuItem = {
   readonly onSelect: () => void;
   readonly disabled?: boolean;
   readonly disabledReason?: string;
+  /** When defined, renders as `role="menuitemcheckbox"` with `aria-checked`.
+   *  Activating a checkbox item calls `onSelect` but does NOT close the menu
+   *  (multi-select pattern). */
+  readonly checked?: boolean;
 };
 
 export function MenuButton({
@@ -73,7 +77,7 @@ export function MenuButton({
       const menu = menuRef.current;
       if (menu === null) return;
       const itemEls = Array.from(
-        menu.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not([aria-disabled="true"])'),
+        menu.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not([aria-disabled="true"]), button[role="menuitemcheckbox"]:not([aria-disabled="true"])'),
       );
       if (itemEls.length === 0) return;
       const focused = document.activeElement;
@@ -114,28 +118,33 @@ export function MenuButton({
           onKeyDown={handleKeyDown}
           aria-label={label}
         >
-          {items.map((item) => (
-            <li key={item.key ?? item.label} role="none">
-              <button
-                type="button"
-                role="menuitem"
-                tabIndex={-1}
-                className={styles['menuItem']}
-                aria-disabled={item.disabled === true ? 'true' : undefined}
-                title={item.disabled === true ? item.disabledReason : undefined}
-                onClick={
-                  item.disabled === true
-                    ? undefined
-                    : () => {
-                        item.onSelect();
-                        close();
-                      }
-                }
-              >
-                {item.label}
-              </button>
-            </li>
-          ))}
+          {items.map((item) => {
+            const isCheckbox = item.checked !== undefined;
+            return (
+              <li key={item.key ?? item.label} role="none">
+                <button
+                  type="button"
+                  role={isCheckbox ? 'menuitemcheckbox' : 'menuitem'}
+                  tabIndex={-1}
+                  className={styles['menuItem']}
+                  aria-checked={isCheckbox ? item.checked : undefined}
+                  aria-disabled={item.disabled === true ? 'true' : undefined}
+                  title={item.disabled === true ? item.disabledReason : undefined}
+                  onClick={
+                    item.disabled === true
+                      ? undefined
+                      : () => {
+                          item.onSelect();
+                          // Checkbox items stay open (multi-select); normal items close.
+                          if (!isCheckbox) close();
+                        }
+                  }
+                >
+                  {isCheckbox ? (item.checked ? '✓ ' : '  ') : null}{item.label}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
