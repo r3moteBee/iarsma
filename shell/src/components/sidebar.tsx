@@ -194,6 +194,9 @@ export type SidebarProps = {
   readonly onCompose: () => void;
   readonly userName?: string | undefined;
   readonly onSignOut: () => void;
+  /** P1.3 — opens the keyboard-shortcuts / help overlay. Optional so
+   *  existing call sites compile; the footer Help button no-ops without it. */
+  readonly onOpenHelp?: () => void;
   readonly theme: ThemePreference;
   readonly onThemeChange: (theme: ThemePreference) => void;
   readonly isOpen?: boolean;
@@ -239,6 +242,7 @@ export function Sidebar({
   onCompose,
   userName,
   onSignOut,
+  onOpenHelp,
   theme,
   onThemeChange,
   isOpen,
@@ -393,6 +397,19 @@ export function Sidebar({
               Sign out
             </button>
           </div>
+          {/* P1.3 — persistent, discoverable Help entry. Opens the same
+              shortcuts overlay the `?` key toggles, so it's reachable
+              without prior knowledge. */}
+          <button
+            type="button"
+            className={styles.helpButton}
+            onClick={() => onOpenHelp?.()}
+            aria-label="Help and keyboard shortcuts"
+            title="Help and keyboard shortcuts"
+          >
+            <span aria-hidden="true" className={styles.helpIcon}>?</span>
+            Help &amp; shortcuts
+          </button>
           {/* PR 49 / CoWork #16 — collapsed by default. The same
               controls live in Settings → Appearance; keeping them
               expanded permanently was wasted vertical space. */}

@@ -353,3 +353,34 @@
   background: var(--surface-3);
   color: var(--text-1);
 }
+
+/* P1.3 — Help & shortcuts entry in the sidebar footer. Quiet, full-width
+   row matching the footer's understated styling; the `?` glyph sits in a
+   small rounded badge so it reads as the keyboard-help affordance. */
+.helpButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-xs) 0;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  text-align: left;
+}
+.helpButton:hover {
+  color: var(--accent);
+}
+.helpIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25em;
+  height: 1.25em;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-size: 0.85em;
+  line-height: 1;
+}

@@ -465,6 +465,8 @@ function SignedInShell({
   const isMobile = breakpoint === 'mobile';
   const isTablet = breakpoint === 'tablet';
   const isDesktop = breakpoint === 'desktop';
+  // P1.3 — let the sidebar Help button open the shortcuts overlay.
+  const setKeyboardHelpOpen = useSetAtom(keyboardHelpOpenAtom);
 
   // PR 46 — bidirectional sync between window.location and the
   // view / mailbox / thread / search atoms. The hook reads the URL
@@ -1090,6 +1092,7 @@ function SignedInShell({
           onCompose={openCompose}
           userName={userName}
           onSignOut={onSignOut}
+          onOpenHelp={() => setKeyboardHelpOpen(true)}
           theme={themePreference}
           onThemeChange={setThemePreference}
           isOpen={sidebarOpen}
