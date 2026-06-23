@@ -136,7 +136,7 @@ const ROW_HEIGHT_PX = 72;
  *  identity on every render (PR 53 / CoWork #15). */
 const EMPTY_TOKENS: readonly string[] = [];
 
-export function ThreadList({ labels = [], labelFilterKey = null }: { readonly labels?: readonly LabelDef[]; readonly labelFilterKey?: string | null }) {
+export function ThreadList({ labels = [], labelFilterKey = null, selectedLabelName }: { readonly labels?: readonly LabelDef[]; readonly labelFilterKey?: string | null; readonly selectedLabelName?: string }) {
   const mailboxId = useAtomValue(selectedMailboxIdAtom);
   const searchQuery = useAtomValue(searchQueryAtom);
   // Search mode wins over mailbox selection — when the user types in
@@ -147,7 +147,7 @@ export function ThreadList({ labels = [], labelFilterKey = null }: { readonly la
   }
   // Label filter mode — show threads matching the selected label keyword.
   if (labelFilterKey !== null) {
-    return <ThreadListWithLabel hasKeyword={labelFilterKey} labels={labels} />;
+    return <ThreadListWithLabel hasKeyword={labelFilterKey} {...(selectedLabelName !== undefined ? { labelName: selectedLabelName } : {})} labels={labels} />;
   }
   if (mailboxId === null) {
     // After the auto-select effect in App.tsx, this state should be rare
@@ -165,7 +165,7 @@ export function ThreadList({ labels = [], labelFilterKey = null }: { readonly la
   return <ThreadListWithMailbox mailboxId={mailboxId} labels={labels} />;
 }
 
-function ThreadListWithLabel({ hasKeyword, labels }: { readonly hasKeyword: string; readonly labels: readonly LabelDef[] }) {
+function ThreadListWithLabel({ hasKeyword, labelName, labels }: { readonly hasKeyword: string; readonly labelName?: string; readonly labels: readonly LabelDef[] }) {
   const { data, error, isLoading, refetch } = useThreadList({ hasKeyword });
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
 
@@ -186,7 +186,7 @@ function ThreadListWithLabel({ hasKeyword, labels }: { readonly hasKeyword: stri
       isTrash={false}
       emptyMessage="No threads with this label."
       mailboxId={null}
-      title={`Label: ${hasKeyword}`}
+      title={`Label: ${labelName ?? hasKeyword}`}
       countText={countText}
       onRefresh={refetch}
       labels={labels}

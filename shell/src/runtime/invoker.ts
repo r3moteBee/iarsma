@@ -261,19 +261,22 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
         }
         case 'thread.list': {
           const session = await getSession();
-          // The contract input is `{mailboxId, position?, limit?}`. Cast
-          // through `unknown` because the invoker's surface is typed
-          // generically; the per-tool shape is enforced by the
-          // capability contract + codegen at the call site.
+          // The contract input is `{mailboxId?, hasKeyword?, position?, limit?}`.
+          // Exactly one of mailboxId or hasKeyword must be provided; this mirrors
+          // the constraint in buildThreadListRequest. Cast through `unknown`
+          // because the invoker's surface is typed generically; the per-tool
+          // shape is enforced by the capability contract + codegen at the call site.
           const params = _input as unknown as {
-            mailboxId: string;
+            mailboxId?: string;
+            hasKeyword?: string;
             position?: number;
             limit?: number;
           };
           const result: ThreadList = await fetchThreadList({
             ...opts,
             session,
-            mailboxId: params.mailboxId,
+            ...(params.mailboxId !== undefined ? { mailboxId: params.mailboxId } : {}),
+            ...(params.hasKeyword !== undefined ? { hasKeyword: params.hasKeyword } : {}),
             ...(params.position !== undefined ? { position: params.position } : {}),
             ...(params.limit !== undefined ? { limit: params.limit } : {}),
           });

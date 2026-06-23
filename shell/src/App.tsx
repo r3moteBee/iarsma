@@ -1562,6 +1562,7 @@ function MailLayout({
   layout,
   labels,
   labelFilterKey,
+  selectedLabelName,
 }: {
   readonly isLoading: boolean;
   readonly error?: { message: string } | undefined;
@@ -1589,7 +1590,7 @@ function MailLayout({
         {error !== undefined ? (
           <p role="alert">Session error: {error.message}</p>
         ) : null}
-        <ThreadList labels={labels} labelFilterKey={labelFilterKey ?? null} />
+        <ThreadList labels={labels} labelFilterKey={labelFilterKey ?? null} {...(selectedLabelName !== undefined ? { selectedLabelName } : {})} />
       </section>
       <section
         aria-label="Selected thread"

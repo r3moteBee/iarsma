@@ -499,7 +499,6 @@ export function Sidebar({
                 <div style={{ padding: '2px var(--space-sm)' }}>
                   <button
                     type="button"
-                    aria-label="+ New label"
                     onClick={() => onNewLabel?.()}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 'var(--text-sm)', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}
                   >

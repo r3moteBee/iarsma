@@ -94,7 +94,9 @@ describe('Sidebar Labels section', () => {
 
   it('renders nothing in the labels section when labels array is empty', () => {
     render(<Sidebar {...makeProps({ labels: [] })} />);
-    // No label rows, but the Labels header should still show
+    // No label rows, but the Labels header/collapse control should still show
     expect(screen.queryByText('Work')).not.toBeInTheDocument();
+    expect(screen.getByText('Labels')).toBeInTheDocument();
+    expect(screen.getByTestId('labels-section-toggle')).toBeInTheDocument();
   });
 });

@@ -433,3 +433,40 @@ describe('jmapInvoker — label.apply', () => {
     });
   });
 });
+
+// ─── thread.list invoker seam ─────────────────────────────────────────────────
+
+import { readFileSync as _readFileSync } from 'node:fs';
+import { resolve as _resolve } from 'node:path';
+
+const EMAIL_QUERY_FIXTURE = _readFileSync(
+  _resolve(__dirname, '../../../../components/jmap-client/tests/fixtures/email_query.json'),
+  'utf8',
+);
+
+describe('jmapInvoker — thread.list (invoker seam)', () => {
+  it('forwards hasKeyword and builds filter:{hasKeyword} in JMAP request', async () => {
+    const { fetch: fetchMock, apiCalls } = makeFetch({
+      apiBodies: [EMAIL_QUERY_FIXTURE],
+    });
+    const inv = makeInvoker(fetchMock);
+    await inv.invoke('thread.list', { hasKeyword: 'work' });
+    // The single API call is the Email/query+Email/get POST to session.apiUrl.
+    expect(apiCalls).toHaveLength(1);
+    const body = JSON.parse(apiCalls[0]!);
+    const [, queryArgs] = body.methodCalls[0];
+    expect(queryArgs.filter).toEqual({ hasKeyword: 'work' });
+  });
+
+  it('forwards mailboxId and builds filter:{inMailbox} in JMAP request', async () => {
+    const { fetch: fetchMock, apiCalls } = makeFetch({
+      apiBodies: [EMAIL_QUERY_FIXTURE],
+    });
+    const inv = makeInvoker(fetchMock);
+    await inv.invoke('thread.list', { mailboxId: 'Mb01' });
+    expect(apiCalls).toHaveLength(1);
+    const body = JSON.parse(apiCalls[0]!);
+    const [, queryArgs] = body.methodCalls[0];
+    expect(queryArgs.filter).toEqual({ inMailbox: 'Mb01' });
+  });
+});
