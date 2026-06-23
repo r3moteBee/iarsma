@@ -51,6 +51,7 @@ import {
 import { BottomNav } from './components/bottom-nav.js';
 import { SegmentedControl, type SegmentedOption } from './components/segmented-control.js';
 import { Sidebar } from './components/sidebar.js';
+import { toSidebarMailboxEntry } from './sidebar-mailbox-entry.js';
 import { TopBar } from './components/top-bar.js';
 import { ComposeView } from './views/compose-view.js';
 import { ContactsView } from './views/contacts-view.js';
@@ -86,6 +87,7 @@ type Phase =
   | { kind: 'config_error'; message: string }
   | { kind: 'callback'; url: URL }
   | { kind: 'ready' };
+
 
 export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
@@ -556,22 +558,7 @@ function SignedInShell({
   const mailboxListResult = useMailboxList({});
   const sidebarMailboxes = useMemo(() => {
     if (mailboxListResult.data === undefined) return undefined;
-    return (mailboxListResult.data as ReadonlyArray<{
-      id: string;
-      name: string;
-      role?: string;
-      unreadEmails: number;
-      parentId?: string;
-    }>).map((m) => {
-      const entry: { id: string; name: string; role?: string; unreadCount: number; parentId?: string | null } = {
-        id: m.id,
-        name: m.name,
-        unreadCount: m.unreadEmails,
-      };
-      if (m.role !== undefined) entry.role = m.role;
-      if (m.parentId !== undefined) entry.parentId = m.parentId;
-      return entry;
-    });
+    return mailboxListResult.data.map(toSidebarMailboxEntry);
   }, [mailboxListResult.data]);
 
   // Auto-select the Inbox the first time mailboxes load (§6.4 "no dead clicks").
@@ -654,10 +641,11 @@ function SignedInShell({
             mailboxId: id,
             affectedCount: (preview as { affectedCount: number }).affectedCount ?? 0,
           });
-        } catch {
-          // If dry-run fails open dialog with 0 count — the commit will fail too
-          // and show the real error message then.
-          setFolderDialogError(undefined);
+        } catch (e) {
+          // Dry-run threw — surface the error immediately rather than opening
+          // the confirm dialog with a misleading "0 messages" count.
+          const msg = e instanceof Error ? e.message : String(e);
+          setFolderDialogError(msg);
           setFolderDialog({ kind: 'delete', mailboxId: id, affectedCount: 0 });
         }
       })();

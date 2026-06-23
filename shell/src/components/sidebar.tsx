@@ -183,6 +183,11 @@ export type MailboxEntry = {
   readonly role?: string;
   readonly unreadCount: number;
   readonly parentId?: string | null;
+  readonly myRights?: {
+    readonly mayCreateChild?: boolean;
+    readonly mayRename?: boolean;
+    readonly mayDelete?: boolean;
+  };
 };
 
 export type SidebarProps = {
