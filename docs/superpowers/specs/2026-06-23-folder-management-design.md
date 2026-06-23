@@ -26,6 +26,8 @@ All new contracts live in `tools/codegen/contracts/` and generate the runtime ty
 
 New scope `mail:mailbox` is added to the scope registry (mirrors `mail:modify`, `files:write`).
 
+Each contract carries an **agent-grade `description` and `examples`** (see Documentation & help). Descriptions are not one-liners: they explain what the tool does, when to use it, how to resolve `mailboxId`/`parentId` (via `mailbox.list`), the safe-delete behavior, and which refusal `code`s the caller may get back — because for an agent the tool description *is* the interface.
+
 ## Runtime (`shell/src/runtime/jmap-client.ts`)
 
 Pure, unit-tested builders + parsers, plus `fetch*Commit`, plus invoker dispatch cases:
@@ -66,11 +68,28 @@ After any successful create/rename/delete/move, bump `pushGenerationAtom`. The r
 
 - **Runtime (unit):** `buildMailboxCreate/UpdateRequest` payload shape; `mailbox.delete` orchestration issues the Trash-resolve → Email/set move → Mailbox/set destroy sequence and returns the right `movedToTrash`; each refusal path returns the right `code` + `message`.
 - **Components:** `MenuButton` (keyboard nav, Esc, click-outside); tree-view menu gating (system roles show no Rename/Delete; folder with children disables Delete with the reason tooltip); create/rename dialog surfaces a refusal message inline; move-to picker fires `mail.modify` with the correct patch.
+- **Docs:** after `pnpm codegen`, assert the generated `mailbox.delete` MCP tool registration/description mentions the safe-delete behavior and enumerates the refusal codes (a small content check, so the agent doc can't silently regress); confirm the generated `docs/`/`llms.txt` are committed and accurate.
 - **Full suite + build + CI** green before merge, per project norm.
 
 ## MCP parity
 
 `mailbox.create` / `mailbox.update` / `mailbox.delete` ship as MCP tools in the same PR (generated from the contracts); move is already `mail.modify`. Agents create/rename/delete folders and move mail exactly as humans do, and hit the same human-readable refusals.
+
+## Documentation & help
+
+Documentation ships in the same PR, on two tracks.
+
+**Agent-facing (MCP / generated docs).** The codegen pipeline emits the agent's entire view of these tools from the contract `description` + `examples`: the MCP tool registrations (`tools/codegen/dist/tools/<name>.json`), the per-capability reference (`docs/<name>.md`), the index (`docs/index.md`), `llms.txt`, and the OpenAPI doc. So writing the contracts well *is* the agent documentation. Each new contract must include:
+- A `description` that states the action, when to use it, how to resolve `mailboxId`/`parentId` (call `mailbox.list` first), and — for `mailbox.delete` — the encapsulated safe behavior (moves the folder's messages to Trash, then destroys the empty folder; refuses if it has subfolders).
+- The **refusal `code`s + meanings** the caller may receive (the table above), so an agent can branch on them instead of guessing from prose.
+- `examples` with realistic input → output (create top-level + subfolder, rename, delete with `movedToTrash`), mirroring the style of the existing `mail.modify` contract.
+- A dry-run example for `mailbox.delete` showing the `affectedCount` preview, so an agent can confirm scope before committing.
+
+After editing contracts, `pnpm codegen` regenerates these artifacts; the generated `docs/`/`llms.txt`/OpenAPI updates are part of the diff and must be reviewed for readable, accurate agent guidance.
+
+**Human-facing.** Add `docs/folders.md` — how to create/rename/delete folders and move mail, the safe-delete behavior, and what each refusal means (so the docs and the in-UI error messages say the same thing). Link it from the docs index / quickstart. The P1.3 in-app Help entry already surfaces the docs links target, so `docs/folders.md` becomes reachable there. No `docs/keyboard.md` change in v1 (folder ops are menu-driven, not keyboard-bound); note that explicitly so a future keyboard-binding pass knows it's intentional.
+
+**Acceptance (docs):** an agent reading only the generated MCP tool description for `mailbox.delete` understands the safe-delete behavior and the refusal codes without reading the source; a human reading `docs/folders.md` can perform every operation and interpret every refusal.
 
 ## Out of scope (v1)
 
