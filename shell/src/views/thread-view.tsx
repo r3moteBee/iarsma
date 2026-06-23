@@ -53,6 +53,9 @@ import { composeStateAtom } from '../compose-state.js';
 import { selectedMailboxIdAtom, selectedThreadIdAtom } from '../mail-state.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useThreadGet } from '../generated/capabilities/thread-get.js';
+import { LabelChip } from '../components/label-chip.js';
+import type { LabelDef } from '../runtime/label-registry.js';
+import { resolveLabels } from '../runtime/label-registry.js';
 import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import { useInvoker } from '../runtime/invoker.js';
 import { sanitizeHtml } from '../runtime/sanitizer.js';
@@ -77,7 +80,7 @@ const ROLE_LABEL: Record<string, string> = {
   important: 'Important',
 };
 
-export function ThreadView() {
+export function ThreadView({ labels = [] }: { readonly labels?: readonly LabelDef[] }) {
   const threadId = useAtomValue(selectedThreadIdAtom);
   if (threadId === null) {
     return (
@@ -89,10 +92,10 @@ export function ThreadView() {
       </section>
     );
   }
-  return <ThreadViewWithThread threadId={threadId} />;
+  return <ThreadViewWithThread threadId={threadId} labels={labels} />;
 }
 
-function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
+function ThreadViewWithThread({ threadId, labels }: { readonly threadId: string; readonly labels: readonly LabelDef[] }) {
   const { data, error, isLoading, refetch } = useThreadGet({ threadId });
 
   if (isLoading) {
@@ -126,6 +129,7 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
     <ThreadViewLoaded
       emails={data.emails as ReadonlyArray<EmailFull>}
       refetch={refetch}
+      labels={labels}
     />
   );
 }
@@ -133,9 +137,11 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
 function ThreadViewLoaded({
   emails,
   refetch,
+  labels,
 }: {
   readonly emails: ReadonlyArray<EmailFull>;
   readonly refetch: () => Promise<void>;
+  readonly labels: readonly LabelDef[];
 }) {
   const tokens = useAtomValue(tokensAtom);
   const setComposeState = useSetAtom(composeStateAtom);
@@ -347,6 +353,12 @@ function ThreadViewLoaded({
 
   const subject = emails[emails.length - 1]?.subject ?? '(no subject)';
   const messageCountLabel = `${emails.length} ${emails.length === 1 ? 'message' : 'messages'}`;
+  // Task 8 — resolve labels from the latest email's keywords.
+  const latestEmail = emails[emails.length - 1];
+  const threadLabels = useMemo(
+    () => resolveLabels(latestEmail?.keywords ?? [], labels),
+    [latestEmail?.keywords, labels],
+  );
 
   return (
     // onKeyDown lives on the outer section so DOM events from any
@@ -359,6 +371,14 @@ function ThreadViewLoaded({
             {messageCountLabel}
           </span>
         </div>
+        {/* Task 8 — label chips in thread header */}
+        {threadLabels.length > 0 ? (
+          <div className={styles['labelChips']} aria-label="Labels">
+            {threadLabels.map((l) => (
+              <LabelChip key={l.key} label={l} />
+            ))}
+          </div>
+        ) : null}
         <div className={styles['actions']} aria-label="Thread actions">
           <button
             type="button"

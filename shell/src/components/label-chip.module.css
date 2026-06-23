@@ -1,0 +1,27 @@
+/* LabelChip — small colored pill for a single label. */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 2px var(--space-sm);
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: 1;
+  white-space: nowrap;
+  /* Color (border + text) is set via inline style from the label */
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  /* Background set via inline style from the label */
+}
+
+.name {
+  /* Inherits color from .chip */
+}

@@ -16,6 +16,7 @@ import {
 import { composeStateAtom } from './compose-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useMailboxList } from './generated/capabilities/mailbox-list.js';
+import { useLabelList } from './generated/capabilities/label-list.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { useBreakpoint } from './hooks/use-media-query.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
@@ -44,6 +45,8 @@ import { hiddenCalendarIdsAtom, toggleCalendarId } from './runtime/calendar-visi
 import { createSendBuffer, type SendBuffer } from './runtime/send-buffer.js';
 import { SendBufferProvider, useOutboxCount } from './runtime/send-buffer-context.js';
 import type { MailSendInput, MailSendResult, Session } from './runtime/jmap-client.js';
+import type { LabelDef } from './runtime/label-registry.js';
+import { DEFAULT_LABEL_COLOR } from './runtime/label-registry.js';
 import {
   pushGenerationAtom,
   usePushSubscription,
@@ -560,6 +563,21 @@ function SignedInShell({
     if (mailboxListResult.data === undefined) return undefined;
     return mailboxListResult.data.map(toSidebarMailboxEntry);
   }, [mailboxListResult.data]);
+
+  // Task 8 — load the label registry once at the shell level and thread
+  // it down to views that need to resolve label chips on messages.
+  // Normalize optional color/order from the generated type to the
+  // required fields in LabelDef.
+  const labelListResult = useLabelList({});
+  const labelDefs = useMemo((): readonly LabelDef[] => {
+    const raw = labelListResult.data?.labels ?? [];
+    return raw.map((l) => ({
+      key: l.key,
+      name: l.name,
+      color: l.color ?? DEFAULT_LABEL_COLOR,
+      order: l.order ?? 0,
+    }));
+  }, [labelListResult.data]);
 
   // Auto-select the Inbox the first time mailboxes load (§6.4 "no dead clicks").
   // Without this, clicking Mail in the nav leaves both panes blank because
@@ -1228,7 +1246,7 @@ function SignedInShell({
         )}
 
         {activeView === 'mail' ? (
-          <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} />
+          <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} labels={labelDefs} />
         ) : activeView === 'calendar' ? (
           <CalendarView
             events={visibleCalendarEvents}
@@ -1524,10 +1542,13 @@ function MailLayout({
   isLoading,
   error,
   layout,
+  labels,
 }: {
   readonly isLoading: boolean;
   readonly error?: { message: string } | undefined;
   readonly layout: MailLayoutType;
+  /** Task 8 — label registry for rendering chips on rows/thread. */
+  readonly labels: readonly LabelDef[];
 }) {
   // PR 3: pane structure mirrors contacts-view.module.css. Each pane
   // owns its own scroll region; no 70vh magic, no page-level scrolling
@@ -1547,13 +1568,13 @@ function MailLayout({
         {error !== undefined ? (
           <p role="alert">Session error: {error.message}</p>
         ) : null}
-        <ThreadList />
+        <ThreadList labels={labels} />
       </section>
       <section
         aria-label="Selected thread"
         className={`${mailLayoutStyles['pane']} ${mailLayoutStyles['readPane']}`}
       >
-        <ThreadView />
+        <ThreadView labels={labels} />
       </section>
     </div>
   );

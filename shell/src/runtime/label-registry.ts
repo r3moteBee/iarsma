@@ -1,4 +1,5 @@
 import { KEY_RE } from './label-key';
+import type { Keyword } from './jmap-client.js';
 
 export type LabelDef = {
   readonly key: string;
@@ -16,6 +17,37 @@ export const MAX_LABELS = 200;
 export const DEFAULT_LABEL_COLOR = '#ff6b35';
 
 export const EMPTY_REGISTRY: LabelRegistry = { version: 1, labels: [] };
+
+/**
+ * Resolve a message's keyword list against the label registry.
+ *
+ * Returns the subset of `labels` whose `key` appears in `keywords` with
+ * `value === true`, sorted by `order` ascending, then `key` alphabetically.
+ * Unknown keywords (no matching label) and system keywords (`$seen`,
+ * `$flagged`, etc.) are silently ignored. Returns `[]` when either
+ * argument is empty or undefined.
+ */
+export function resolveLabels(
+  keywords: readonly Keyword[],
+  labels: readonly LabelDef[] | undefined | null,
+): LabelDef[] {
+  if (!labels || labels.length === 0) return [];
+  if (!keywords || keywords.length === 0) return [];
+
+  // Build a fast lookup: key → LabelDef
+  const byKey = new Map<string, LabelDef>(labels.map((l) => [l.key, l]));
+
+  const resolved: LabelDef[] = [];
+  for (const kw of keywords) {
+    if (!kw.value) continue;
+    const def = byKey.get(kw.name);
+    if (def !== undefined) resolved.push(def);
+  }
+
+  return resolved.sort((a, b) =>
+    a.order !== b.order ? a.order - b.order : a.key.localeCompare(b.key),
+  );
+}
 
 /** Stable serialization: labels sorted by order then key. */
 export function serializeRegistry(r: LabelRegistry): string {
