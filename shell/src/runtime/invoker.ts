@@ -45,6 +45,7 @@ import {
   fetchMailDraftCommit,
   fetchMailModifyCommit,
   fetchMailSendCommit,
+  fetchMailboxCreateCommit,
   fetchMailboxList,
   fetchSession,
   fetchThreadGet,
@@ -70,6 +71,7 @@ import {
   type IdentityList,
   type JmapClientOptions,
   type Mailbox,
+  type MailboxCreateInput,
   type MailDeleteResult,
   type MailDraftInput,
   type MailDraftResult,
@@ -623,6 +625,11 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             contactId: params.contactId,
           });
           return result as unknown as O;
+        }
+        case 'mailbox.create': {
+          const params = _input as unknown as MailboxCreateInput;
+          const session = await getSession();
+          return (await fetchMailboxCreateCommit({ ...opts, session, params })) as unknown as O;
         }
         default:
           throw makeToolError(

@@ -4205,6 +4205,78 @@ export async function commitVacationResponse(
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Mailbox/set — create (RFC 8621 §2.5)
+// ──────────────────────────────────────────────────────────────────────
+
+export type MailboxCreateInput = { readonly name: string; readonly parentId?: string };
+export type MailboxCreateResult = { readonly mailboxId: string };
+
+export function buildMailboxCreateRequest(opts: { readonly accountId: string; readonly params: MailboxCreateInput }): string {
+  const { accountId, params } = opts;
+  const create: Record<string, unknown> = { name: params.name };
+  if (params.parentId !== undefined) create.parentId = params.parentId;
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [['Mailbox/set', { accountId, create: { n0: create } }, '0']],
+  });
+}
+
+export function parseMailboxCreateResponse(body: string): MailboxCreateResult {
+  const r = JSON.parse(body) as { methodResponses?: Array<[string, Record<string, unknown>, string]> };
+  const args = r.methodResponses?.[0]?.[1] as
+    | { created?: Record<string, { id: string }>; notCreated?: Record<string, { type: string; description?: string }> }
+    | undefined;
+  const created = args?.created?.n0;
+  if (created !== undefined) return { mailboxId: created.id };
+  const nc = args?.notCreated?.n0;
+  // invalidProperties on a duplicate name → name conflict; otherwise generic.
+  if (nc !== undefined) {
+    const desc = nc.description ?? nc.type;
+    if (/exist|already|duplicate|unique/i.test(desc)) {
+      throw makeError('mailbox_name_conflict', 'A folder with that name already exists here. Pick a different name.');
+    }
+    throw makeError('mailbox_set_failed', `Couldn't create the folder: ${desc}.`);
+  }
+  throw makeError('jmap_parse_error', 'Mailbox/set create returned no result.');
+}
+
+export async function fetchMailboxCreateCommit(
+  opts: FetchMailboxListOptions & { readonly params: MailboxCreateInput },
+): Promise<MailboxCreateResult> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildMailboxCreateRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    params: opts.params,
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Mailbox/set create returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseMailboxCreateResponse(text);
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }

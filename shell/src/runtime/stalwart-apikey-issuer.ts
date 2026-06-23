@@ -89,6 +89,11 @@ const SCOPE_PERMISSIONS: Readonly<Record<string, Record<string, boolean>>> = {
   'mail:delete': {
     jmapEmailDestroy: true,
   },
+  'mail:mailbox': {
+    jmapMailboxCreate: true,
+    jmapMailboxUpdate: true,
+    jmapMailboxDelete: true,
+  },
 };
 
 function scopesToPermissions(
