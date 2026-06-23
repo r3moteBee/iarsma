@@ -12,6 +12,19 @@ import {
 // buildMailboxCreateRequest
 // ──────────────────────────────────────────────────────────────────────
 
+describe('buildMailboxCreateRequest — blank name guard', () => {
+  it('throws mailbox_name_invalid for an empty string name', () => {
+    expect(() =>
+      buildMailboxCreateRequest({ accountId: 'c', params: { name: '' } }),
+    ).toThrow(expect.objectContaining({ code: 'mailbox_name_invalid', message: "Folder name can't be empty." }));
+  });
+  it('throws mailbox_name_invalid for a whitespace-only name', () => {
+    expect(() =>
+      buildMailboxCreateRequest({ accountId: 'c', params: { name: '   ' } }),
+    ).toThrow(expect.objectContaining({ code: 'mailbox_name_invalid', message: "Folder name can't be empty." }));
+  });
+});
+
 describe('buildMailboxCreateRequest', () => {
   it('builds a Mailbox/set create with name + parentId', () => {
     const body = buildMailboxCreateRequest({ accountId: 'c', params: { name: 'Projects', parentId: 'Mb-1' } });
@@ -187,6 +200,19 @@ describe('fetchMailboxCreateCommit', () => {
 // ──────────────────────────────────────────────────────────────────────
 // buildMailboxUpdateRequest
 // ──────────────────────────────────────────────────────────────────────
+
+describe('buildMailboxUpdateRequest — blank name guard', () => {
+  it('throws mailbox_name_invalid for an empty string name', () => {
+    expect(() =>
+      buildMailboxUpdateRequest({ accountId: 'c', params: { mailboxId: 'Mb-9', name: '' } }),
+    ).toThrow(expect.objectContaining({ code: 'mailbox_name_invalid', message: "Folder name can't be empty." }));
+  });
+  it('throws mailbox_name_invalid for a whitespace-only name', () => {
+    expect(() =>
+      buildMailboxUpdateRequest({ accountId: 'c', params: { mailboxId: 'Mb-9', name: '  \t  ' } }),
+    ).toThrow(expect.objectContaining({ code: 'mailbox_name_invalid', message: "Folder name can't be empty." }));
+  });
+});
 
 describe('buildMailboxUpdateRequest', () => {
   it('builds a Mailbox/set update for rename', () => {
