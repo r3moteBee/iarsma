@@ -16,7 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 wit-bindgen-rt.workspace = true
-pulldown-cmark = { version = "0.12", default-features = false }
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [package.metadata.component]
 package = "iarsma:markdown"
