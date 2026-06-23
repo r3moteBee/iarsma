@@ -183,6 +183,11 @@ export type MailboxEntry = {
   readonly role?: string;
   readonly unreadCount: number;
   readonly parentId?: string | null;
+  readonly myRights?: {
+    readonly mayCreateChild?: boolean;
+    readonly mayRename?: boolean;
+    readonly mayDelete?: boolean;
+  };
 };
 
 export type SidebarProps = {
@@ -191,6 +196,9 @@ export type SidebarProps = {
   readonly mailboxes?: readonly MailboxEntry[];
   readonly onMailboxSelect?: (id: string) => void;
   readonly selectedMailboxId?: string;
+  readonly onCreateFolder?: (parentId?: string) => void;
+  readonly onRenameFolder?: (id: string, currentName: string) => void;
+  readonly onDeleteFolder?: (id: string) => void;
   readonly onCompose: () => void;
   readonly userName?: string | undefined;
   readonly onSignOut: () => void;
@@ -239,6 +247,9 @@ export function Sidebar({
   mailboxes,
   onMailboxSelect,
   selectedMailboxId,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
   onCompose,
   userName,
   onSignOut,
@@ -368,10 +379,24 @@ export function Sidebar({
                   </div>
                   {activeView === 'mail' && !mailSectionCollapsed && mailboxes !== undefined ? (
                     <div className={styles.mailboxInline} id="sidebar-mailbox-tree">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px 4px' }}>
+                        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-2)', letterSpacing: '0.05em' }}>Folders</span>
+                        <button
+                          type="button"
+                          aria-label="New folder"
+                          onClick={() => onCreateFolder?.(undefined)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 'var(--text-sm)', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}
+                        >
+                          + New folder
+                        </button>
+                      </div>
                       <MailboxTreeView
                         mailboxes={mailboxes}
                         {...(selectedMailboxId !== undefined ? { selectedId: selectedMailboxId } : {})}
                         onSelect={(id) => { onMailboxSelect?.(id); onClose?.(); }}
+                        {...(onCreateFolder !== undefined ? { onCreateFolder } : {})}
+                        {...(onRenameFolder !== undefined ? { onRenameFolder } : {})}
+                        {...(onDeleteFolder !== undefined ? { onDeleteFolder } : {})}
                       />
                     </div>
                   ) : null}

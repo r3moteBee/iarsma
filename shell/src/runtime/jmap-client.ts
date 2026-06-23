@@ -4205,6 +4205,351 @@ export async function commitVacationResponse(
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Mailbox/set — create (RFC 8621 §2.5)
+// ──────────────────────────────────────────────────────────────────────
+
+export type MailboxCreateInput = { readonly name: string; readonly parentId?: string };
+export type MailboxCreateResult = { readonly mailboxId: string };
+
+export function buildMailboxCreateRequest(opts: { readonly accountId: string; readonly params: MailboxCreateInput }): string {
+  const { accountId, params } = opts;
+  if (params.name.trim() === '') {
+    throw makeError('mailbox_name_invalid', "Folder name can't be empty.");
+  }
+  const create: Record<string, unknown> = { name: params.name };
+  if (params.parentId !== undefined) create.parentId = params.parentId;
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [['Mailbox/set', { accountId, create: { n0: create } }, '0']],
+  });
+}
+
+export function parseMailboxCreateResponse(body: string): MailboxCreateResult {
+  const r = JSON.parse(body) as { methodResponses?: Array<[string, Record<string, unknown>, string]> };
+  const args = r.methodResponses?.[0]?.[1] as
+    | { created?: Record<string, { id: string }>; notCreated?: Record<string, { type: string; description?: string }> }
+    | undefined;
+  const created = args?.created?.n0;
+  if (created !== undefined) return { mailboxId: created.id };
+  const nc = args?.notCreated?.n0;
+  // invalidProperties on a duplicate name → name conflict; otherwise generic.
+  if (nc !== undefined) {
+    const desc = nc.description ?? nc.type;
+    if (/exist|already|duplicate|unique/i.test(desc)) {
+      throw makeError('mailbox_name_conflict', 'A folder with that name already exists here. Pick a different name.');
+    }
+    throw makeError('mailbox_set_failed', `Couldn't create the folder: ${desc}.`);
+  }
+  throw makeError('jmap_parse_error', 'Mailbox/set create returned no result.');
+}
+
+export async function fetchMailboxCreateCommit(
+  opts: FetchMailboxListOptions & { readonly params: MailboxCreateInput },
+): Promise<MailboxCreateResult> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildMailboxCreateRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    params: opts.params,
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Mailbox/set create returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseMailboxCreateResponse(text);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Mailbox/set — update / rename (RFC 8621 §2.5)
+// ──────────────────────────────────────────────────────────────────────
+
+export type MailboxUpdateInput = { readonly mailboxId: string; readonly name: string };
+export type MailboxUpdateResult = { readonly updated: boolean };
+
+export function buildMailboxUpdateRequest(opts: { readonly accountId: string; readonly params: MailboxUpdateInput }): string {
+  const { accountId, params } = opts;
+  if (params.name.trim() === '') {
+    throw makeError('mailbox_name_invalid', "Folder name can't be empty.");
+  }
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [['Mailbox/set', { accountId, update: { [params.mailboxId]: { name: params.name } } }, '0']],
+  });
+}
+
+export function parseMailboxUpdateResponse(body: string, mailboxId: string): MailboxUpdateResult {
+  const r = JSON.parse(body) as { methodResponses?: Array<[string, Record<string, unknown>, string]> };
+  const args = r.methodResponses?.[0]?.[1] as
+    | { updated?: Record<string, unknown>; notUpdated?: Record<string, { type: string; description?: string }> }
+    | undefined;
+  if (args?.updated !== undefined && mailboxId in args.updated) return { updated: true };
+  const nu = args?.notUpdated?.[mailboxId];
+  if (nu !== undefined) {
+    const desc = nu.description ?? nu.type;
+    if (/exist|already|duplicate|unique/i.test(desc)) {
+      throw makeError('mailbox_name_conflict', 'A folder with that name already exists here. Pick a different name.');
+    }
+    throw makeError('mailbox_set_failed', `Couldn't rename the folder: ${desc}.`);
+  }
+  throw makeError('jmap_parse_error', 'Mailbox/set update returned no result.');
+}
+
+export async function fetchMailboxUpdateCommit(
+  opts: FetchMailboxListOptions & { readonly params: MailboxUpdateInput },
+): Promise<MailboxUpdateResult> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildMailboxUpdateRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    params: opts.params,
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Mailbox/set update returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseMailboxUpdateResponse(text, opts.params.mailboxId);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Mailbox/set — delete (RFC 8621 §2.5)
+//
+// Safe delete: move all messages in the target to Trash, then destroy
+// the empty mailbox. The pure guard `assertMailboxDeletable` is exported
+// so the UI can run it synchronously before issuing the commit call.
+// ──────────────────────────────────────────────────────────────────────
+
+const SYSTEM_ROLES = new Set(['inbox', 'sent', 'drafts', 'trash', 'junk', 'archive']);
+
+/**
+ * Pure structural guard for mailbox deletion. Throws a typed ToolError for
+ * any structural refusal (system role / has children / no delete permission).
+ * Called by `fetchMailboxDeleteCommit` after loading the mailbox list.
+ */
+export function assertMailboxDeletable(target: Mailbox, all: readonly Mailbox[]): void {
+  if (target.role !== undefined && SYSTEM_ROLES.has(target.role)) {
+    throw makeError('mailbox_protected', `"${target.name}" is a system folder and can't be renamed or deleted.`);
+  }
+  if (target.myRights.mayDelete === false) {
+    throw makeError('mailbox_forbidden', `You don't have permission to delete "${target.name}".`);
+  }
+  const children = all.filter((m) => m.parentId === target.id);
+  if (children.length > 0) {
+    const n = children.length;
+    throw makeError('mailbox_has_children', `Can't delete "${target.name}" — it has ${n} subfolder${n === 1 ? '' : 's'}. Delete or move those first.`);
+  }
+}
+
+export type MailboxDeleteInput = { readonly mailboxId: string };
+export type MailboxDeleteResult = { readonly deleted: boolean; readonly movedToTrash: number };
+export type MailboxDeletePreview = { readonly affectedCount: number };
+
+export type FetchMailboxDeleteOptions = FetchMailboxListOptions & {
+  readonly params: MailboxDeleteInput;
+};
+
+/**
+ * POST a `Mailbox/set` destroy for a single mailbox id and throw on failure.
+ */
+async function postMailboxDestroy(
+  opts: FetchMailboxListOptions,
+  mailboxId: string,
+): Promise<void> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Mailbox/set',
+        {
+          accountId: opts.session.primaryAccountIdMail,
+          destroy: [mailboxId],
+        },
+        '0',
+      ],
+    ],
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Mailbox/set destroy returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError('jmap_parse_error', `Failed to parse Mailbox/set destroy response: ${describe(e)}`, e);
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Mailbox/set destroy response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError('jmap_parse_error', 'Mailbox/set destroy: no methodResponses array.');
+  }
+  const first = methodResponses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) {
+    throw makeError('jmap_parse_error', 'Mailbox/set destroy: malformed methodResponse entry.');
+  }
+  const result = first[1] as {
+    destroyed?: string[];
+    notDestroyed?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notDestroyed !== undefined) {
+    const entries = Object.entries(result.notDestroyed);
+    if (entries.length > 0) {
+      const [id, err] = entries[0]!;
+      throw makeError(
+        'mailbox_set_failed',
+        `Mailbox/set destroy rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
+        result.notDestroyed,
+      );
+    }
+  }
+}
+
+/** Maximum pages to drain when moving all messages to Trash before destroy. */
+const MAILBOX_DELETE_MAX_PAGES = 200;
+/** Batch size per page when draining a mailbox for deletion. */
+const MAILBOX_DELETE_BATCH_SIZE = 500;
+
+/**
+ * Delete a mailbox safely: move ALL its messages to Trash (paging through
+ * them in batches of up to 500), then destroy it.
+ *
+ * Sequence:
+ * 1. `Mailbox/get` — load all mailboxes, find target + Trash by role.
+ * 2. Guard: `assertMailboxDeletable` — throws on system role / children / no permission.
+ * 3. Loop: `Email/query` → `Email/set` move-to-Trash, until folder is empty.
+ *    (Moving emails out of the mailbox means each re-query returns the next
+ *    batch naturally — no position cursor needed.)
+ * 4. `Mailbox/set` destroy — delete the now-empty mailbox.
+ *
+ * A safety cap of MAILBOX_DELETE_MAX_PAGES iterations prevents an infinite
+ * loop; if hit, throws `mailbox_set_failed` BEFORE the destroy.
+ */
+export async function fetchMailboxDeleteCommit(
+  opts: FetchMailboxDeleteOptions,
+): Promise<MailboxDeleteResult> {
+  const all = await fetchMailboxList(opts);
+  const target = all.find((m) => m.id === opts.params.mailboxId);
+  if (target === undefined) throw makeError('not_found', 'That folder no longer exists.');
+  assertMailboxDeletable(target, all);
+  const trash = all.find((m) => m.role === 'trash');
+  if (trash === undefined) {
+    throw makeError('trash_not_found', `Can't delete "${target.name}" safely — no Trash folder was found on this account.`);
+  }
+
+  let movedToTrash = 0;
+  for (let page = 0; page < MAILBOX_DELETE_MAX_PAGES; page++) {
+    const ids = await fetchEmailIdsInMailbox({
+      ...opts,
+      mailboxId: target.id,
+      maxIds: MAILBOX_DELETE_BATCH_SIZE,
+    });
+    if (ids.length === 0) break;
+    await fetchMailModifyCommit({
+      ...opts,
+      params: {
+        emailIds: ids as string[],
+        patch: { mailboxIds: { [target.id]: false, [trash.id]: true } },
+      },
+    });
+    movedToTrash += ids.length;
+    if (ids.length < MAILBOX_DELETE_BATCH_SIZE) break;
+    if (page === MAILBOX_DELETE_MAX_PAGES - 1) {
+      throw makeError(
+        'mailbox_set_failed',
+        `Folder "${target.name}" has too many messages to delete in one step — empty it first.`,
+      );
+    }
+  }
+
+  await postMailboxDestroy(opts, target.id);
+  return { deleted: true, movedToTrash };
+}
+
+/**
+ * Dry-run preview for `mailbox.delete`. Loads the mailbox list, runs the
+ * structural guard, counts ALL messages — but makes no mutations.
+ *
+ * Uses `totalEmails` from the Mailbox/get response (already loaded) as the
+ * authoritative server-side count. This avoids repeated Email/query calls and
+ * correctly reflects the full message count beyond a single 500-id page.
+ */
+export async function makeMailboxDeletePreview(
+  opts: FetchMailboxDeleteOptions,
+): Promise<MailboxDeletePreview> {
+  const all = await fetchMailboxList(opts);
+  const target = all.find((m) => m.id === opts.params.mailboxId);
+  if (target === undefined) throw makeError('not_found', 'That folder no longer exists.');
+  assertMailboxDeletable(target, all);
+  // For the preview, issue one Email/query to confirm we can read the mailbox,
+  // but trust `totalEmails` from Mailbox/get for the true count (no 500-cap).
+  await fetchEmailIdsInMailbox({ ...opts, mailboxId: target.id, maxIds: 1 });
+  return { affectedCount: target.totalEmails };
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }

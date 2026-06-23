@@ -110,7 +110,7 @@ function WithSelectedMailbox({ mailboxId, children }: { mailboxId: string; child
   return <>{children}</>;
 }
 
-type MailboxFixture = { id: string; role?: string };
+type MailboxFixture = { id: string; role?: string; name?: string };
 
 function renderThreadList(opts: {
   data?: ThreadListData;
@@ -893,5 +893,61 @@ describe('ThreadList — action keyboard shortcuts', () => {
       emailIds: ['E-T3'],
       patch: { keywords: { $seen: true } },
     });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Move to… folder picker (Task 7)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadList — Move to… folder picker', () => {
+  const TWO_MAILBOXES = [
+    { id: 'Mb-inbox', role: 'inbox', name: 'Inbox' },
+    { id: 'Mb-archive', name: 'Archive' },
+  ];
+
+  it('calls mail.modify with mailboxIds patch when a target folder is picked', async () => {
+    const modifyCalls: unknown[] = [];
+    renderThreadList({
+      mailboxes: TWO_MAILBOXES,
+      mailboxId: 'Mb-inbox',
+      onModify: (input) => modifyCalls.push(input),
+    });
+    await waitForList();
+
+    // Open the "Move to…" menu for the first row (T1 / subject "Welcome").
+    const moveBtn = screen.getByLabelText('Move Welcome to…');
+    fireEvent.click(moveBtn);
+
+    // The menu should contain the Archive target but NOT the current mailbox (Mb-inbox).
+    const menu = screen.getByRole('menu', { name: 'Move Welcome to…' });
+    const items = within(menu).getAllByRole('menuitem');
+    const itemLabels = items.map((el) => el.textContent);
+    expect(itemLabels).toContain('Archive');
+    expect(itemLabels).not.toContain('Inbox');
+
+    // Click the Archive target.
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Archive' }));
+
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]).toEqual({
+      emailIds: ['E-T1'],
+      patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+    });
+  });
+
+  it('does NOT offer the current mailbox as a move target', async () => {
+    renderThreadList({
+      mailboxes: TWO_MAILBOXES,
+      mailboxId: 'Mb-inbox',
+    });
+    await waitForList();
+
+    const moveBtn = screen.getByLabelText('Move Welcome to…');
+    fireEvent.click(moveBtn);
+
+    const menu = screen.getByRole('menu', { name: 'Move Welcome to…' });
+    const items = within(menu).getAllByRole('menuitem');
+    expect(items.map((el) => el.textContent)).not.toContain('Inbox');
   });
 });

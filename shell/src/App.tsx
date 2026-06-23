@@ -51,6 +51,7 @@ import {
 import { BottomNav } from './components/bottom-nav.js';
 import { SegmentedControl, type SegmentedOption } from './components/segmented-control.js';
 import { Sidebar } from './components/sidebar.js';
+import { toSidebarMailboxEntry } from './sidebar-mailbox-entry.js';
 import { TopBar } from './components/top-bar.js';
 import { ComposeView } from './views/compose-view.js';
 import { ContactsView } from './views/contacts-view.js';
@@ -71,6 +72,7 @@ import {
 } from './runtime/approval-store.js';
 import { CalendarView, buildEventParticipants } from './views/calendar-view.js';
 import { CommandPalette, type CommandItem } from './components/command-palette.js';
+import { CreateFolderDialog, RenameFolderDialog, DeleteFolderDialog } from './components/folder-dialogs.js';
 import { SendToast } from './components/send-toast.js';
 import { DeleteToast } from './components/delete-toast.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
@@ -85,6 +87,7 @@ type Phase =
   | { kind: 'config_error'; message: string }
   | { kind: 'callback'; url: URL }
   | { kind: 'ready' };
+
 
 export function App() {
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
@@ -555,22 +558,7 @@ function SignedInShell({
   const mailboxListResult = useMailboxList({});
   const sidebarMailboxes = useMemo(() => {
     if (mailboxListResult.data === undefined) return undefined;
-    return (mailboxListResult.data as ReadonlyArray<{
-      id: string;
-      name: string;
-      role?: string;
-      unreadEmails: number;
-      parentId?: string;
-    }>).map((m) => {
-      const entry: { id: string; name: string; role?: string; unreadCount: number; parentId?: string | null } = {
-        id: m.id,
-        name: m.name,
-        unreadCount: m.unreadEmails,
-      };
-      if (m.role !== undefined) entry.role = m.role;
-      if (m.parentId !== undefined) entry.parentId = m.parentId;
-      return entry;
-    });
+    return mailboxListResult.data.map(toSidebarMailboxEntry);
   }, [mailboxListResult.data]);
 
   // Auto-select the Inbox the first time mailboxes load (§6.4 "no dead clicks").
@@ -603,6 +591,67 @@ function SignedInShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  // ── Folder management dialog state ─────────────────────────────────
+  type FolderDialog =
+    | { kind: 'none' }
+    | { kind: 'create'; parentId?: string; parentName?: string }
+    | { kind: 'rename'; mailboxId: string; currentName: string }
+    | { kind: 'delete'; mailboxId: string; affectedCount: number };
+  const [folderDialog, setFolderDialog] = useState<FolderDialog>({ kind: 'none' });
+  const [folderDialogError, setFolderDialogError] = useState<string | undefined>(undefined);
+
+  const handleCreateFolder = useCallback(
+    (parentId?: string) => {
+      const parentName =
+        parentId !== undefined
+          ? sidebarMailboxes?.find((m) => m.id === parentId)?.name
+          : undefined;
+      setFolderDialogError(undefined);
+      const state: FolderDialog =
+        parentId !== undefined
+          ? {
+              kind: 'create' as const,
+              parentId,
+              ...(parentName !== undefined ? { parentName } : {}),
+            }
+          : { kind: 'create' as const };
+      setFolderDialog(state);
+    },
+    [sidebarMailboxes],
+  );
+
+  const handleRenameFolder = useCallback((id: string, currentName: string) => {
+    setFolderDialogError(undefined);
+    setFolderDialog({ kind: 'rename', mailboxId: id, currentName });
+  }, []);
+
+  const handleDeleteFolder = useCallback(
+    (id: string) => {
+      void (async () => {
+        try {
+          const preview = await invoker.invoke<{ mailboxId: string }, { affectedCount: number }>(
+            'mailbox.delete',
+            { mailboxId: id },
+            { dryRun: true },
+          );
+          setFolderDialogError(undefined);
+          setFolderDialog({
+            kind: 'delete',
+            mailboxId: id,
+            affectedCount: (preview as { affectedCount: number }).affectedCount ?? 0,
+          });
+        } catch (e) {
+          // Dry-run threw — surface the error immediately rather than opening
+          // the confirm dialog with a misleading "0 messages" count.
+          const msg = e instanceof Error ? e.message : String(e);
+          setFolderDialogError(msg);
+          setFolderDialog({ kind: 'delete', mailboxId: id, affectedCount: 0 });
+        }
+      })();
+    },
+    [invoker],
+  );
 
   // Calendar view state
   const [calendarView, setCalendarView] = useState<'month' | 'week' | 'day'>('month');
@@ -1102,6 +1151,9 @@ function SignedInShell({
           {...(sidebarMailboxes !== undefined ? { mailboxes: sidebarMailboxes } : {})}
           onMailboxSelect={setSelectedMailboxId}
           {...(selectedMailboxId !== null ? { selectedMailboxId } : {})}
+          onCreateFolder={handleCreateFolder}
+          onRenameFolder={handleRenameFolder}
+          onDeleteFolder={handleDeleteFolder}
         />
       )}
 
@@ -1380,6 +1432,80 @@ function SignedInShell({
       <KeyboardHelpOverlay />
       <ComposeView />
       <SendToast />
+
+      {/* Folder management dialogs */}
+      <CreateFolderDialog
+        open={folderDialog.kind === 'create'}
+        onClose={() => { setFolderDialog({ kind: 'none' }); setFolderDialogError(undefined); }}
+        {...(folderDialog.kind === 'create' && folderDialog.parentId !== undefined
+          ? { parentId: folderDialog.parentId }
+          : {})}
+        {...(folderDialog.kind === 'create' && folderDialog.parentName !== undefined
+          ? { parentName: folderDialog.parentName }
+          : {})}
+        {...(folderDialogError !== undefined && folderDialog.kind === 'create'
+          ? { error: folderDialogError }
+          : {})}
+        onSubmit={(name, parentId) => {
+          void (async () => {
+            try {
+              await invoker.invoke('mailbox.create', {
+                name,
+                ...(parentId !== undefined ? { parentId } : {}),
+              });
+              bumpPushGeneration((n) => n + 1);
+              setFolderDialog({ kind: 'none' });
+              setFolderDialogError(undefined);
+            } catch (e) {
+              setFolderDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <RenameFolderDialog
+        open={folderDialog.kind === 'rename'}
+        onClose={() => { setFolderDialog({ kind: 'none' }); setFolderDialogError(undefined); }}
+        currentName={folderDialog.kind === 'rename' ? folderDialog.currentName : ''}
+        {...(folderDialogError !== undefined && folderDialog.kind === 'rename'
+          ? { error: folderDialogError }
+          : {})}
+        onSubmit={(newName) => {
+          if (folderDialog.kind !== 'rename') return;
+          const mailboxId = folderDialog.mailboxId;
+          void (async () => {
+            try {
+              await invoker.invoke('mailbox.update', { mailboxId, name: newName });
+              bumpPushGeneration((n) => n + 1);
+              setFolderDialog({ kind: 'none' });
+              setFolderDialogError(undefined);
+            } catch (e) {
+              setFolderDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <DeleteFolderDialog
+        open={folderDialog.kind === 'delete'}
+        onClose={() => { setFolderDialog({ kind: 'none' }); setFolderDialogError(undefined); }}
+        affectedCount={folderDialog.kind === 'delete' ? folderDialog.affectedCount : 0}
+        {...(folderDialogError !== undefined && folderDialog.kind === 'delete'
+          ? { error: folderDialogError }
+          : {})}
+        onConfirm={() => {
+          if (folderDialog.kind !== 'delete') return;
+          const mailboxId = folderDialog.mailboxId;
+          void (async () => {
+            try {
+              await invoker.invoke('mailbox.delete', { mailboxId });
+              bumpPushGeneration((n) => n + 1);
+              setFolderDialog({ kind: 'none' });
+              setFolderDialogError(undefined);
+            } catch (e) {
+              setFolderDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
       <DeleteToast onUndo={handleUndo} />
       <CommandPalette
         open={paletteOpen}
