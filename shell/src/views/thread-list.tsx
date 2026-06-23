@@ -42,6 +42,7 @@ import {
 import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
 import { EmptyState } from '../components/empty-state.js';
+import { MenuButton } from '../components/menu-button.js';
 import { Notice } from '../components/notice.js';
 import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
@@ -218,6 +219,13 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
     return list.find((m) => m.role === 'inbox')?.id;
   }, [mailboxes.data]);
 
+  // Task 7 — candidate mailboxes for "Move to…": all mailboxes except
+  // the current one. System roles are included (move to Trash, Archive…).
+  const moveTargets = useMemo(() => {
+    const list = (mailboxes.data ?? []) as ReadonlyArray<MailboxLike>;
+    return list.filter((m) => m.id !== mailboxId);
+  }, [mailboxes.data, mailboxId]);
+
   // Reset thread selection when the mailbox changes.
   useEffect(() => {
     setSelectedThreadId(null);
@@ -249,6 +257,7 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
       countText={countText}
       onRefresh={refetch}
       {...(inboxMailboxId !== undefined ? { inboxMailboxId } : {})}
+      moveTargets={moveTargets}
     />
   );
 }
@@ -268,6 +277,9 @@ function ThreadListBody(props: {
   readonly onRefresh: () => Promise<void> | void;
   /** U-3 — Inbox mailbox id; present so Trash rows can restore. */
   readonly inboxMailboxId?: string;
+  /** Task 7 — candidate mailboxes for "Move to…". Excludes the current
+   *  mailbox. Empty in search mode (no single current mailbox). */
+  readonly moveTargets?: ReadonlyArray<MailboxLike>;
   /** Search-mode props (PR 53 / CoWork #15). Defined only when the
    *  list is showing search results — mailbox-mode passes undefined
    *  and the body skips highlighting + pagination. */
@@ -487,6 +499,35 @@ function ThreadListBody(props: {
     },
     [invoker, refetch, bumpPushGeneration, props.inboxMailboxId, mailboxId],
   );
+
+  // Task 7 — move a message to another folder via mail.modify. The
+  // patch removes the current mailbox membership and adds the target,
+  // mirroring handleRestore but for arbitrary target mailboxes.
+  const handleMove = useCallback(
+    (emailId: string, targetMailboxId: string) => {
+      const fromId = mailboxId;
+      if (fromId === null) return;
+      void (async () => {
+        try {
+          await invoker.invoke('mail.modify', {
+            emailIds: [emailId],
+            patch: { mailboxIds: { [fromId]: false, [targetMailboxId]: true } },
+          });
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] mail.move failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch, bumpPushGeneration, mailboxId],
+  );
+
+  // Candidate mailboxes for "Move to…" come from the prop (computed in
+  // ThreadListWithMailbox, already filtered to exclude the current
+  // mailbox). Fall back to empty in search mode.
+  const moveTargets = props.moveTargets ?? [];
 
   // Track which row (if any) is awaiting purge-forever confirmation.
   // null = no confirm open; a string is the emailId being prompted.
@@ -724,6 +765,9 @@ function ThreadListBody(props: {
                 onDelete={isTrash ? handlePurgeRow : handleSoftDelete}
                 deleteMode={isTrash ? 'purge' : 'soft'}
                 {...(isTrash ? { onRestore: handleRestore } : {})}
+                {...(moveTargets.length > 0 && mailboxId !== null
+                  ? { onMove: handleMove, moveTargets }
+                  : {})}
                 {...(tokens !== undefined ? { tokens } : {})}
               />
             );
@@ -865,6 +909,11 @@ type ThreadRowProps = {
   /** U-3 — restore a trashed message to the Inbox. Present only when
    *  viewing Trash; renders a "Move to Inbox" row action. */
   readonly onRestore?: (emailId: string) => void;
+  /** Task 7 — move to another folder. Present when there are candidate
+   *  target mailboxes (non-search mode, ≥2 mailboxes). Renders a
+   *  MenuButton with one item per target. */
+  readonly onMove?: (emailId: string, targetMailboxId: string) => void;
+  readonly moveTargets?: ReadonlyArray<MailboxLike>;
   /** Tokenized search query (PR 53 / CoWork #15). When non-empty,
    *  the subject + preview are rendered through `<Highlight>` and the
    *  preview is reduced to a 120-char snippet centered on the first
@@ -886,6 +935,8 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
     onDelete,
     deleteMode,
     onRestore,
+    onMove,
+    moveTargets,
     tokens,
   } = props;
   const highlightTokens = tokens ?? EMPTY_TOKENS;
@@ -1025,6 +1076,23 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
             <InboxIcon />
           </button>
         ) : null}
+        {onMove !== undefined && moveTargets !== undefined && moveTargets.length > 0 ? (
+          // Task 7 — "Move to…" menu. The trigger carries the email
+          // subject so screen readers get per-row context. MenuItem keys
+          // are mailbox ids (stable, no display-name collisions).
+          <MenuButton
+            label={`Move ${subject} to…`}
+            items={moveTargets.map((m) => ({
+              key: m.id,
+              label: getMailboxLabel(m, m.id),
+              onSelect: () => {
+                onMove(e.id, m.id);
+              },
+            }))}
+          >
+            <MoveToFolderIcon />
+          </MenuButton>
+        ) : null}
         <button
           type="button"
           className={`${styles['iconBtn']} ${flagged ? styles['iconBtnFlagged'] : ''}`}
@@ -1126,6 +1194,17 @@ function InboxIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M22 12h-6l-2 3h-4l-2-3H2" />
       <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
+    </svg>
+  );
+}
+
+/** Task 7 — folder/move icon for the "Move to…" menu trigger. */
+function MoveToFolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+      <line x1="12" y1="11" x2="12" y2="17" />
+      <polyline points="9 14 12 17 15 14" />
     </svg>
   );
 }

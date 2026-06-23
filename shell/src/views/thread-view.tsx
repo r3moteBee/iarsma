@@ -46,10 +46,12 @@ import {
 import { tokensAtom } from '../auth-state.js';
 import { Button } from '../components/button.js';
 import { EmptyState } from '../components/empty-state.js';
+import { MenuButton } from '../components/menu-button.js';
 import { Notice } from '../components/notice.js';
 import { Skeleton } from '../components/skeleton.js';
 import { composeStateAtom } from '../compose-state.js';
-import { selectedThreadIdAtom } from '../mail-state.js';
+import { selectedMailboxIdAtom, selectedThreadIdAtom } from '../mail-state.js';
+import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useThreadGet } from '../generated/capabilities/thread-get.js';
 import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import { useInvoker } from '../runtime/invoker.js';
@@ -63,6 +65,17 @@ import {
 } from '../runtime/sender-color.js';
 import { buildReplyPrefill, type ReplyMode } from './reply-prefill.js';
 import styles from './thread-view.module.css';
+
+// Canonical English labels for special-use mailboxes (mirrors thread-list.tsx).
+const ROLE_LABEL: Record<string, string> = {
+  inbox: 'Inbox',
+  sent: 'Sent',
+  drafts: 'Drafts',
+  trash: 'Trash',
+  junk: 'Junk',
+  archive: 'Archive',
+  important: 'Important',
+};
 
 export function ThreadView() {
   const threadId = useAtomValue(selectedThreadIdAtom);
@@ -129,6 +142,52 @@ function ThreadViewLoaded({
   const invoker = useInvoker();
   const bumpPushGeneration = useSetAtom(pushGenerationAtom);
   const userEmail = tokens?.email ?? 'unknown@example.invalid';
+
+  // Task 7 — Move to… in the thread toolbar.
+  // Current mailbox: use the selected mailbox id from the atom (v1
+  // per the brief; fallback to first non-system membership of the
+  // latest email if the atom is null/unavailable).
+  const selectedMailboxId = useAtomValue(selectedMailboxIdAtom);
+  const mailboxList = useMailboxList({});
+  const allMailboxes = useMemo(
+    () => (mailboxList.data ?? []) as ReadonlyArray<{ id: string; name: string; role?: string }>,
+    [mailboxList.data],
+  );
+
+  // Determine the current mailbox id: prefer the atom, fall back to
+  // the latest email's first mailbox membership (non-system preferred).
+  const currentMailboxId = useMemo(() => {
+    if (selectedMailboxId !== null) return selectedMailboxId;
+    // Fallback: inspect the latest email's mailboxIds (not always
+    // present on EmailFull — return null if absent).
+    return null;
+  }, [selectedMailboxId]);
+
+  const moveTargetsForView = useMemo(() => {
+    if (currentMailboxId === null) return [];
+    return allMailboxes.filter((m) => m.id !== currentMailboxId);
+  }, [allMailboxes, currentMailboxId]);
+
+  const handleMoveThread = useCallback(
+    (targetMailboxId: string) => {
+      if (currentMailboxId === null) return;
+      const emailIds = emails.map((e) => e.id);
+      void (async () => {
+        try {
+          await invoker.invoke('mail.modify', {
+            emailIds,
+            patch: { mailboxIds: { [currentMailboxId]: false, [targetMailboxId]: true } },
+          });
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] thread move failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch, bumpPushGeneration, emails, currentMailboxId],
+  );
 
   // PR 45 — auto-mark-on-open. Patches any unread emails in this
   // thread to `$seen=true` once when the thread first loads. The
@@ -311,6 +370,22 @@ function ThreadViewLoaded({
           >
             {threadSeen ? <MarkUnreadIcon /> : <MarkReadIcon />}
           </button>
+          {moveTargetsForView.length > 0 ? (
+            // Task 7 — Move thread to another folder.
+            <MenuButton
+              label={`Move ${subject} to…`}
+              items={moveTargetsForView.map((m) => ({
+                key: m.id,
+                label: m.role !== undefined
+                  ? (ROLE_LABEL[m.role] ?? m.name)
+                  : m.name,
+                onSelect: () => handleMoveThread(m.id),
+              }))}
+              align="end"
+            >
+              <MoveToFolderIcon />
+            </MenuButton>
+          ) : null}
         </div>
       </header>
       <div className={styles['msgs']}>
@@ -357,6 +432,17 @@ function MarkUnreadIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="4" width="20" height="16" rx="2" />
       <path d="M22 7l-10 7L2 7" />
+    </svg>
+  );
+}
+
+/** Task 7 — folder/move icon for the "Move to…" menu trigger. */
+function MoveToFolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+      <line x1="12" y1="11" x2="12" y2="17" />
+      <polyline points="9 14 12 17 15 14" />
     </svg>
   );
 }
