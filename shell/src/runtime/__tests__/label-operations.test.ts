@@ -511,6 +511,65 @@ describe('label.delete (commit)', () => {
     // Verify total call count: 2 + 3*(1query+1set) + 2 + 1 + 1 = 2 + 6 + 4 = 12
     const mockFn = fetchFn as ReturnType<typeof vi.fn>;
     expect(mockFn.mock.calls.length).toBe(12);
+
+    // Verify each Email/set body carried the right ids and the keyword removal patch.
+    // Call layout (0-indexed): 0=fg1, 1=b1, 2=query-p1, 3=set-p1, 4=query-p2,
+    // 5=set-p2, 6=query-p3, 7=set-p3, 8=fg2, 9=b2, 10=upload, 11=filenode-set
+    const calls = mockFn.mock.calls;
+
+    for (const [setCallIndex, pageIds] of [
+      [3, page1Ids],
+      [5, page2Ids],
+      [7, page3Ids],
+    ] as [number, string[]][]) {
+      const setBodyText = await readCallBody(calls, setCallIndex);
+      const setBody = JSON.parse(setBodyText) as {
+        methodCalls: [[string, { update: Record<string, Record<string, unknown>> }, string]];
+      };
+      const update = setBody.methodCalls[0]?.[1]?.update;
+      expect(update).toBeDefined();
+      // Every id in the page must appear in the update object.
+      for (const id of pageIds) {
+        expect(update).toHaveProperty(id);
+        // The patch for the keyword removal is `{ "keywords/bulk": null }`.
+        expect((update as Record<string, Record<string, unknown>>)[id]?.['keywords/bulk']).toBeNull();
+      }
+    }
+  });
+
+  it('throws label_untag_failed when Email/set reports no-progress (zero updated)', async () => {
+    // Simulate a batch where the query returns ids but the set updates none of them.
+    const registry: LabelRegistry = {
+      version: 1,
+      labels: [{ key: 'stuck', name: 'Stuck', color: '#ff6b35', order: 0 }],
+    };
+    const stuckIds = ['E-stuck-1', 'E-stuck-2'];
+    const [fg1, b1] = filenodeWithRegistry(registry);
+
+    // Email/set response with ZERO updated and the ids in notUpdated.
+    const noProgressResponse = jsonStr({
+      methodResponses: [
+        ['Email/set', { notUpdated: { 'E-stuck-1': { type: 'serverFail' }, 'E-stuck-2': { type: 'serverFail' } } }, '0'],
+      ],
+    });
+
+    const fetchFn = makeFetchSpy([
+      fg1, b1,                            // readRegistry (delete check)
+      emailQueryResponse(stuckIds),       // query: returns stuck ids
+      noProgressResponse,                 // set: zero updated → no-progress
+    ]);
+
+    await expect(
+      labelDeleteCommit(makeCtx(fetchFn), { key: 'stuck' }),
+    ).rejects.toMatchObject({
+      code: 'label_untag_failed',
+      message: 'Could not remove the label from some messages. Please try again.',
+    });
+
+    // Registry entry must NOT be removed on failure.
+    const calls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls;
+    // Only 3 calls: readRegistry(2) + query(1) + set(1). No writeRegistry calls.
+    expect(calls.length).toBe(4);
   });
 
   it('throws label_not_found on commit when key is missing', async () => {

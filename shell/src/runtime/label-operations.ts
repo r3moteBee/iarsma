@@ -421,6 +421,9 @@ async function untagAllWithKeyword(ctx: LabelOpsCtx, keyword: string): Promise<n
   const accountId = ctx.session.primaryAccountIdMail;
 
   let totalUntagged = 0;
+  // Track whether the loop ended normally (empty query or partial page).
+  // If false after the loop, we hit the UNTAG_MAX_PAGES ceiling.
+  let drained = false;
 
   for (let page = 0; page < UNTAG_MAX_PAGES; page++) {
     // Step 1: Query for a batch of ids.
@@ -462,8 +465,11 @@ async function untagAllWithKeyword(ctx: LabelOpsCtx, keyword: string): Promise<n
     const queryText = await queryResponse.text();
     const ids = parseEmailQueryIds(queryText);
 
-    // Step 2: If no ids, we're done.
-    if (ids.length === 0) break;
+    // Step 2: If no ids, we're done — all messages untagged.
+    if (ids.length === 0) {
+      drained = true;
+      break;
+    }
 
     // Step 3: Patch keywords/{keyword}: null for this batch.
     const setBody = buildMailModifyRequest({
@@ -494,13 +500,37 @@ async function untagAllWithKeyword(ctx: LabelOpsCtx, keyword: string): Promise<n
         `JMAP Email/set (untag) returned ${setResponse.status} ${setResponse.statusText}`,
       );
     }
-    // Consume the body (we don't need the parsed result here).
-    await setResponse.text();
+    const setResponseText = await setResponse.text();
+    const updatedCount = parseEmailSetUpdatedCount(setResponseText);
 
-    totalUntagged += ids.length;
+    // Step 4: Detect no-progress — the query returned ids to untag but
+    // the set updated zero messages. Deleted messages drop out of the
+    // next hasKeyword query naturally, so genuine zero progress is a
+    // real server-side failure, not a race.
+    if (updatedCount === 0) {
+      throw makeError(
+        'label_untag_failed',
+        'Could not remove the label from some messages. Please try again.',
+      );
+    }
 
-    // Step 4: Partial page means we've drained all matching messages.
-    if (ids.length < UNTAG_BATCH_SIZE) break;
+    totalUntagged += updatedCount;
+
+    // Step 5: Partial page means we've drained all matching messages.
+    if (ids.length < UNTAG_BATCH_SIZE) {
+      drained = true;
+      break;
+    }
+  }
+
+  // If the loop exited without draining (ceiling hit with a full batch
+  // still in progress), there are still messages tagged — fail loud.
+  // Never silently report success on an incomplete untag.
+  if (!drained) {
+    throw makeError(
+      'label_untag_failed',
+      'Could not remove the label from some messages. Please try again.',
+    );
   }
 
   return totalUntagged;
@@ -523,6 +553,27 @@ function parseEmailQueryIds(body: string): readonly string[] {
   const result = first[1] as { ids?: unknown };
   if (!Array.isArray(result.ids)) return [];
   return result.ids.filter((id): id is string => typeof id === 'string');
+}
+
+/**
+ * Extract the count of ACTUALLY updated ids from an Email/set response.
+ * Returns 0 if the response is malformed or the updated map is absent.
+ * Used by the untag loop to count real progress (not just queried ids).
+ */
+function parseEmailSetUpdatedCount(body: string): number {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return 0;
+  }
+  const responses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(responses) || responses.length === 0) return 0;
+  const first = responses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2) return 0;
+  const result = first[1] as { updated?: unknown };
+  if (result.updated === null || typeof result.updated !== 'object') return 0;
+  return Object.keys(result.updated as Record<string, unknown>).length;
 }
 
 /**
