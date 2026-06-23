@@ -76,6 +76,7 @@ import {
 import { CalendarView, buildEventParticipants } from './views/calendar-view.js';
 import { CommandPalette, type CommandItem } from './components/command-palette.js';
 import { CreateFolderDialog, RenameFolderDialog, DeleteFolderDialog } from './components/folder-dialogs.js';
+import { CreateLabelDialog, RenameLabelDialog, RecolorLabelDialog, DeleteLabelDialog } from './components/label-dialogs.js';
 import { SendToast } from './components/send-toast.js';
 import { DeleteToast } from './components/delete-toast.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
@@ -650,9 +651,56 @@ function SignedInShell({
     setSelectedMailboxId(null);
   }, [setSelectedMailboxId]);
 
+  // ── Label management dialog state ──────────────────────────────────
+  type LabelDialog =
+    | { kind: 'none' }
+    | { kind: 'create' }
+    | { kind: 'rename'; key: string; currentName: string }
+    | { kind: 'recolor'; key: string; currentColor: string }
+    | { kind: 'delete'; key: string; affectedCount: number };
+  const [labelDialog, setLabelDialog] = useState<LabelDialog>({ kind: 'none' });
+  const [labelDialogError, setLabelDialogError] = useState<string | undefined>(undefined);
+
   const handleNewLabel = useCallback(() => {
-    // Stub — label creation dialog wired in a later task.
+    setLabelDialogError(undefined);
+    setLabelDialog({ kind: 'create' });
   }, []);
+
+  const handleRenameLabel = useCallback((key: string) => {
+    const label = labelDefs.find((l) => l.key === key);
+    if (label === undefined) return;
+    setLabelDialogError(undefined);
+    setLabelDialog({ kind: 'rename', key, currentName: label.name });
+  }, [labelDefs]);
+
+  const handleRecolorLabel = useCallback((key: string) => {
+    const label = labelDefs.find((l) => l.key === key);
+    if (label === undefined) return;
+    setLabelDialogError(undefined);
+    setLabelDialog({ kind: 'recolor', key, currentColor: label.color });
+  }, [labelDefs]);
+
+  const handleDeleteLabel = useCallback((key: string) => {
+    void (async () => {
+      try {
+        const preview = await invoker.invoke<{ key: string }, { affectedCount: number }>(
+          'label.delete',
+          { key },
+          { dryRun: true },
+        );
+        setLabelDialogError(undefined);
+        setLabelDialog({
+          kind: 'delete',
+          key,
+          affectedCount: (preview as { affectedCount: number }).affectedCount ?? 0,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setLabelDialogError(msg);
+        setLabelDialog({ kind: 'delete', key, affectedCount: 0 });
+      }
+    })();
+  }, [invoker]);
 
   const handleRenameFolder = useCallback((id: string, currentName: string) => {
     setFolderDialogError(undefined);
@@ -1190,6 +1238,9 @@ function SignedInShell({
           labels={labelDefs}
           onLabelSelect={handleLabelSelect}
           onNewLabel={handleNewLabel}
+          onRenameLabel={handleRenameLabel}
+          onRecolorLabel={handleRecolorLabel}
+          onDeleteLabel={handleDeleteLabel}
         />
       )}
 
@@ -1538,6 +1589,84 @@ function SignedInShell({
               setFolderDialogError(undefined);
             } catch (e) {
               setFolderDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      {/* Label management dialogs */}
+      <CreateLabelDialog
+        open={labelDialog.kind === 'create'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'create' ? { error: labelDialogError } : {})}
+        onSubmit={(name, color) => {
+          void (async () => {
+            try {
+              await invoker.invoke('label.create', { name, color });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <RenameLabelDialog
+        open={labelDialog.kind === 'rename'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        currentName={labelDialog.kind === 'rename' ? labelDialog.currentName : ''}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'rename' ? { error: labelDialogError } : {})}
+        onSubmit={(newName) => {
+          if (labelDialog.kind !== 'rename') return;
+          const key = labelDialog.key;
+          void (async () => {
+            try {
+              await invoker.invoke('label.update', { key, name: newName });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <RecolorLabelDialog
+        open={labelDialog.kind === 'recolor'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        currentColor={labelDialog.kind === 'recolor' ? labelDialog.currentColor : DEFAULT_LABEL_COLOR}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'recolor' ? { error: labelDialogError } : {})}
+        onSubmit={(color) => {
+          if (labelDialog.kind !== 'recolor') return;
+          const key = labelDialog.key;
+          void (async () => {
+            try {
+              await invoker.invoke('label.update', { key, color });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <DeleteLabelDialog
+        open={labelDialog.kind === 'delete'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        affectedCount={labelDialog.kind === 'delete' ? labelDialog.affectedCount : 0}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'delete' ? { error: labelDialogError } : {})}
+        onConfirm={() => {
+          if (labelDialog.kind !== 'delete') return;
+          const key = labelDialog.key;
+          void (async () => {
+            try {
+              await invoker.invoke('label.delete', { key });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
             }
           })();
         }}

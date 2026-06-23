@@ -100,3 +100,46 @@ describe('Sidebar Labels section', () => {
     expect(screen.getByTestId('labels-section-toggle')).toBeInTheDocument();
   });
 });
+
+// ── Label row "…" actions menu ───────────────────────────────────────
+
+describe('Sidebar Label row actions menu', () => {
+  it('renders a "…" MenuButton for each label row', () => {
+    render(<Sidebar {...makeProps()} />);
+    // Each label row should have an actions menu button
+    expect(screen.getByRole('button', { name: /actions for work/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /actions for personal/i })).toBeInTheDocument();
+  });
+
+  it('clicking "…" opens a menu with Rename, Recolor, Delete items', () => {
+    render(<Sidebar {...makeProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /actions for work/i }));
+    expect(screen.getByRole('menuitem', { name: /rename/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /recolor/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
+  });
+
+  it('clicking Rename calls onRenameLabel with the label key', () => {
+    const onRenameLabel = vi.fn();
+    render(<Sidebar {...makeProps({ onRenameLabel })} />);
+    fireEvent.click(screen.getByRole('button', { name: /actions for work/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /rename/i }));
+    expect(onRenameLabel).toHaveBeenCalledWith('lbl:work');
+  });
+
+  it('clicking Recolor calls onRecolorLabel with the label key', () => {
+    const onRecolorLabel = vi.fn();
+    render(<Sidebar {...makeProps({ onRecolorLabel })} />);
+    fireEvent.click(screen.getByRole('button', { name: /actions for work/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /recolor/i }));
+    expect(onRecolorLabel).toHaveBeenCalledWith('lbl:work');
+  });
+
+  it('clicking Delete calls onDeleteLabel with the label key', () => {
+    const onDeleteLabel = vi.fn();
+    render(<Sidebar {...makeProps({ onDeleteLabel })} />);
+    fireEvent.click(screen.getByRole('button', { name: /actions for work/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /delete/i }));
+    expect(onDeleteLabel).toHaveBeenCalledWith('lbl:work');
+  });
+});

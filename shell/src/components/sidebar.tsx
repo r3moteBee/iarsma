@@ -17,6 +17,7 @@ import type { ThemePreference } from '../runtime/theme.js';
 import { AccentPicker } from './accent-picker.js';
 import { DensitySelector } from './density-selector.js';
 import { MailboxTreeView } from './mailbox-tree-view.js';
+import { MenuButton } from './menu-button.js';
 import styles from './sidebar.module.css';
 
 const MAIL_SECTION_KEY = 'iarsma-mail-section-collapsed';
@@ -244,6 +245,12 @@ export type SidebarProps = {
   readonly onLabelSelect?: (key: string) => void;
   /** Task 9 — called when "+ New label" is clicked. */
   readonly onNewLabel?: () => void;
+  /** Task 11 — called when Rename is selected from a label row's actions menu. */
+  readonly onRenameLabel?: (key: string) => void;
+  /** Task 11 — called when Recolor is selected from a label row's actions menu. */
+  readonly onRecolorLabel?: (key: string) => void;
+  /** Task 11 — called when Delete is selected from a label row's actions menu. */
+  readonly onDeleteLabel?: (key: string) => void;
 };
 
 // ── Nav item definitions ────────────────────────────────────────
@@ -290,6 +297,9 @@ export function Sidebar({
   labels,
   onLabelSelect,
   onNewLabel,
+  onRenameLabel,
+  onRecolorLabel,
+  onDeleteLabel,
 }: SidebarProps) {
   const hasMailboxes = mailboxes !== undefined && mailboxes.length > 0;
 
@@ -463,38 +473,51 @@ export function Sidebar({
             {!labelsSectionCollapsed && (
               <>
                 {labels.map((label) => (
-                  <button
+                  <div
                     key={label.key}
-                    type="button"
-                    onClick={() => { onLabelSelect?.(label.key); onClose?.(); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 'var(--space-sm)',
-                      width: '100%',
-                      padding: '4px var(--space-sm)',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      borderRadius: 'var(--radius-sm)',
-                      color: 'var(--text-2)',
-                      fontSize: 'var(--text-sm)',
-                      textAlign: 'left',
-                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}
                   >
-                    <span
-                      data-testid="label-dot"
-                      aria-hidden="true"
+                    <button
+                      type="button"
+                      onClick={() => { onLabelSelect?.(label.key); onClose?.(); }}
                       style={{
-                        width: '10px',
-                        height: '10px',
-                        borderRadius: '50%',
-                        background: label.color,
-                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-sm)',
+                        flex: '1 1 auto',
+                        padding: '4px var(--space-sm)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-2)',
+                        fontSize: 'var(--text-sm)',
+                        textAlign: 'left',
                       }}
+                    >
+                      <span
+                        data-testid="label-dot"
+                        aria-hidden="true"
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          background: label.color,
+                          flexShrink: 0,
+                        }}
+                      />
+                      {label.name}
+                    </button>
+                    <MenuButton
+                      label={`Actions for ${label.name}`}
+                      align="end"
+                      items={[
+                        { label: 'Rename', onSelect: () => { onRenameLabel?.(label.key); } },
+                        { label: 'Recolor', onSelect: () => { onRecolorLabel?.(label.key); } },
+                        { label: 'Delete', onSelect: () => { onDeleteLabel?.(label.key); } },
+                      ]}
                     />
-                    {label.name}
-                  </button>
+                  </div>
                 ))}
                 <div style={{ padding: '2px var(--space-sm)' }}>
                   <button

@@ -15,6 +15,15 @@ export type LabelRegistry = {
 
 export const MAX_LABELS = 200;
 export const DEFAULT_LABEL_COLOR = '#ff6b35';
+export const LABEL_PALETTE: readonly string[] = [
+  '#ff6b35',
+  '#f59e0b',
+  '#10b981',
+  '#3b82f6',
+  '#8b5cf6',
+  '#ec4899',
+  '#6b7280',
+];
 
 export const EMPTY_REGISTRY: LabelRegistry = { version: 1, labels: [] };
 
