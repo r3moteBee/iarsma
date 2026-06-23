@@ -256,3 +256,148 @@ describe('stalwartApiKeyIssuer.introspectToken', () => {
     expect(await issuer.introspectToken('whatever')).toBeNull();
   });
 });
+
+// ── Scope→permission map assertions (Task 6) ─────────────────────────
+
+/** Helper: issue a token with given scopes and return the permissions
+ *  that were sent to Stalwart on the wire. */
+async function permissionsForScopes(scopes: readonly string[]): Promise<Record<string, boolean>> {
+  let received: ReturnType<typeof bodyOf> | undefined;
+  const fetchFn = makeFetch((init) => {
+    received = bodyOf(init);
+    return jsonRes({
+      methodResponses: [
+        ['x:ApiKey/set', {
+          created: {
+            c0: {
+              id: 'apikey-test',
+              description: 'test',
+              createdAt: '2026-06-06T12:00:00Z',
+              expiresAt: '2027-06-06T12:00:00Z',
+              permissions: { '@type': 'Replace', permissions: {} },
+              secret: 'API_test_secret',
+            },
+          },
+        }, '0'],
+      ],
+    });
+  });
+  const issuer = stalwartApiKeyIssuer({
+    jmapUrl: JMAP_URL,
+    userToken: USER,
+    accountId: ACCT,
+    fetch: fetchFn,
+    now: () => FIXED_NOW,
+  });
+  await issuer.issueToken({ name: 'test', scopes, lifetimeSec: 3600 });
+  const [, args] = received!.methodCalls[0]!;
+  const created = (args.create as Record<string, Record<string, unknown>>).c0!;
+  return (created.permissions as { permissions: Record<string, boolean> }).permissions;
+}
+
+describe('SCOPE_PERMISSIONS map — mail:label scopes (Task 6)', () => {
+  it('mail:label:read maps to jmapFileNodeGet + jmapBlobGet only (FileNode perms)', async () => {
+    const perms = await permissionsForScopes(['mail:label:read']);
+    expect(perms.jmapFileNodeGet).toBe(true);
+    expect(perms.jmapBlobGet).toBe(true);
+    // write perms absent
+    expect(perms.jmapFileNodeCreate).toBeUndefined();
+    expect(perms.jmapFileNodeUpdate).toBeUndefined();
+    expect(perms.jmapBlobUpload).toBeUndefined();
+    expect(perms.jmapFileNodeDestroy).toBeUndefined();
+  });
+
+  it('mail:label:write maps to FileNodeGet/Create/Update + BlobUpload/Get', async () => {
+    const perms = await permissionsForScopes(['mail:label:write']);
+    expect(perms.jmapFileNodeGet).toBe(true);
+    expect(perms.jmapFileNodeCreate).toBe(true);
+    expect(perms.jmapFileNodeUpdate).toBe(true);
+    expect(perms.jmapBlobUpload).toBe(true);
+    expect(perms.jmapBlobGet).toBe(true);
+    // destroy absent — labels are never destroyed via the registry node
+    expect(perms.jmapFileNodeDestroy).toBeUndefined();
+  });
+
+  it('mail:label:write does not include jmapEmailUpdate (comes from mail:modify)', async () => {
+    const perms = await permissionsForScopes(['mail:label:write']);
+    expect(perms.jmapEmailUpdate).toBeUndefined();
+  });
+
+  it('listTokens reverse-maps mail:label:read from Replace permissions', async () => {
+    const fetchFn = makeFetch(() => jsonRes({
+      methodResponses: [
+        ['x:ApiKey/query', { ids: ['k-label-r'] }, '0'],
+        ['x:ApiKey/get', {
+          list: [
+            {
+              id: 'k-label-r',
+              description: 'label-reader',
+              createdAt: '2026-06-06T12:00:00Z',
+              expiresAt: '2027-06-06T12:00:00Z',
+              permissions: {
+                '@type': 'Replace',
+                permissions: {
+                  authenticate: true,
+                  jmapCoreEcho: true,
+                  jmapFileNodeGet: true,
+                  jmapBlobGet: true,
+                },
+              },
+            },
+          ],
+        }, '1'],
+      ],
+    }));
+    const issuer = stalwartApiKeyIssuer({
+      jmapUrl: JMAP_URL,
+      userToken: USER,
+      accountId: ACCT,
+      fetch: fetchFn,
+      now: () => FIXED_NOW,
+    });
+    const list = await issuer.listTokens();
+    const token = list.find((t) => t.tokenId === 'k-label-r')!;
+    expect(token.scopes).toContain('mail:label:read');
+    expect(token.scopes).not.toContain('mail:label:write');
+  });
+
+  it('listTokens reverse-maps mail:label:write from Replace permissions', async () => {
+    const fetchFn = makeFetch(() => jsonRes({
+      methodResponses: [
+        ['x:ApiKey/query', { ids: ['k-label-w'] }, '0'],
+        ['x:ApiKey/get', {
+          list: [
+            {
+              id: 'k-label-w',
+              description: 'label-writer',
+              createdAt: '2026-06-06T12:00:00Z',
+              expiresAt: '2027-06-06T12:00:00Z',
+              permissions: {
+                '@type': 'Replace',
+                permissions: {
+                  authenticate: true,
+                  jmapCoreEcho: true,
+                  jmapFileNodeGet: true,
+                  jmapFileNodeCreate: true,
+                  jmapFileNodeUpdate: true,
+                  jmapBlobUpload: true,
+                  jmapBlobGet: true,
+                },
+              },
+            },
+          ],
+        }, '1'],
+      ],
+    }));
+    const issuer = stalwartApiKeyIssuer({
+      jmapUrl: JMAP_URL,
+      userToken: USER,
+      accountId: ACCT,
+      fetch: fetchFn,
+      now: () => FIXED_NOW,
+    });
+    const list = await issuer.listTokens();
+    const token = list.find((t) => t.tokenId === 'k-label-w')!;
+    expect(token.scopes).toContain('mail:label:write');
+  });
+});

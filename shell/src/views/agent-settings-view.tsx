@@ -42,6 +42,8 @@ const ALL_SCOPES = [
   'mail:modify',
   'mail:delete',
   'mail:mailbox',
+  'mail:label:read',
+  'mail:label:write',
 ] as const;
 
 // ── Lifetime options (label → seconds) ─────────────────────────────
