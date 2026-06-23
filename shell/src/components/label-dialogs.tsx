@@ -250,7 +250,7 @@ export type DeleteLabelDialogProps = {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onConfirm: () => void;
-  readonly affectedCount: number;
+  readonly affectedCount?: number;
   readonly error?: string;
 };
 
@@ -278,7 +278,9 @@ export function DeleteLabelDialog({
       }
     >
       <p style={{ margin: '0 0 var(--space-sm)' }}>
-        {`This will remove the label from ${affectedCount} message(s).`}
+        {affectedCount !== undefined
+          ? `This will remove the label from ${affectedCount} message(s).`
+          : 'This will delete the label and remove it from any tagged messages.'}
       </p>
       {error !== undefined && (
         <p

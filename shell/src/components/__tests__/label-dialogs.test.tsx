@@ -3,6 +3,8 @@
  *
  * Tests for CreateLabelDialog, RenameLabelDialog, RecolorLabelDialog,
  * and DeleteLabelDialog (Task 11).
+ *
+ * Also tests resolveLabelDeleteDialogState (pure helper, Task 11 fix pass).
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -13,6 +15,7 @@ import {
   RecolorLabelDialog,
   RenameLabelDialog,
 } from '../label-dialogs.js';
+import { resolveLabelDeleteDialogState } from '../../label-delete-helpers.js';
 
 // jsdom does not implement HTMLDialogElement.showModal() natively.
 beforeEach(() => {
@@ -224,7 +227,7 @@ describe('DeleteLabelDialog', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows "0 message(s)" when there are no affected messages', () => {
+  it('shows "0 message(s)" when dry-run reports zero tagged messages', () => {
     render(
       <DeleteLabelDialog
         open
@@ -236,6 +239,20 @@ describe('DeleteLabelDialog', () => {
     expect(
       screen.getByText(/this will remove the label from 0 message\(s\)\./i),
     ).toBeInTheDocument();
+  });
+
+  it('shows neutral line when affectedCount is undefined (dry-run error path)', () => {
+    render(
+      <DeleteLabelDialog
+        open
+        onClose={() => {}}
+        onConfirm={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText(/this will delete the label and remove it from any tagged messages\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/message\(s\)/i)).not.toBeInTheDocument();
   });
 
   it('calls onConfirm when Delete button is clicked', () => {
@@ -277,5 +294,33 @@ describe('DeleteLabelDialog', () => {
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Cannot delete: label is in use.');
+  });
+});
+
+// ── resolveLabelDeleteDialogState (App.tsx pure helper) ───────────────
+
+describe('resolveLabelDeleteDialogState', () => {
+  it('returns affectedCount from preview on the happy path', () => {
+    const result = resolveLabelDeleteDialogState({ affectedCount: 7 }, null);
+    expect(result.affectedCount).toBe(7);
+    expect(result.errorMsg).toBeUndefined();
+  });
+
+  it('returns affectedCount=0 when preview reports zero tagged messages', () => {
+    const result = resolveLabelDeleteDialogState({ affectedCount: 0 }, null);
+    expect(result.affectedCount).toBe(0);
+    expect(result.errorMsg).toBeUndefined();
+  });
+
+  it('returns affectedCount=undefined and errorMsg on the error path', () => {
+    const result = resolveLabelDeleteDialogState(null, 'Label is protected.');
+    expect(result.affectedCount).toBeUndefined();
+    expect(result.errorMsg).toBe('Label is protected.');
+  });
+
+  it('error path preserves the verbatim error message', () => {
+    const msg = 'Cannot delete: label is system-reserved.';
+    const result = resolveLabelDeleteDialogState(null, msg);
+    expect(result.errorMsg).toBe(msg);
   });
 });

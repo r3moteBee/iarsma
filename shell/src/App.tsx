@@ -657,7 +657,7 @@ function SignedInShell({
     | { kind: 'create' }
     | { kind: 'rename'; key: string; currentName: string }
     | { kind: 'recolor'; key: string; currentColor: string }
-    | { kind: 'delete'; key: string; affectedCount: number };
+    | { kind: 'delete'; key: string; affectedCount?: number };
   const [labelDialog, setLabelDialog] = useState<LabelDialog>({ kind: 'none' });
   const [labelDialogError, setLabelDialogError] = useState<string | undefined>(undefined);
 
@@ -687,17 +687,17 @@ function SignedInShell({
           'label.delete',
           { key },
           { dryRun: true },
-        );
+        ) as { affectedCount: number };
         setLabelDialogError(undefined);
         setLabelDialog({
           kind: 'delete',
           key,
-          affectedCount: (preview as { affectedCount: number }).affectedCount ?? 0,
+          affectedCount: preview.affectedCount,
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setLabelDialogError(msg);
-        setLabelDialog({ kind: 'delete', key, affectedCount: 0 });
+        setLabelDialog({ kind: 'delete', key });
       }
     })();
   }, [invoker]);
@@ -1654,7 +1654,9 @@ function SignedInShell({
       <DeleteLabelDialog
         open={labelDialog.kind === 'delete'}
         onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
-        affectedCount={labelDialog.kind === 'delete' ? labelDialog.affectedCount : 0}
+        {...(labelDialog.kind === 'delete' && labelDialog.affectedCount !== undefined
+          ? { affectedCount: labelDialog.affectedCount }
+          : {})}
         {...(labelDialogError !== undefined && labelDialog.kind === 'delete' ? { error: labelDialogError } : {})}
         onConfirm={() => {
           if (labelDialog.kind !== 'delete') return;
