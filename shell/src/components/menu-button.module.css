@@ -1,0 +1,86 @@
+/* MenuButton — accessible popover menu (Task 5 / feat/folder-management).
+ *
+ * Trigger button + floating <ul role="menu"> with keyboard navigation.
+ * ArrowUp/Down move focus among enabled items; Escape closes and returns
+ * focus to the trigger.
+ */
+
+.wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-xs);
+  height: 28px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.trigger:hover {
+  background-color: var(--surface-3);
+  color: var(--text-1);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 100;
+  min-width: 160px;
+  margin: 0;
+  padding: var(--space-xs) 0;
+  list-style: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.menu.alignStart {
+  left: 0;
+}
+
+.menu.alignEnd {
+  right: 0;
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-xs) var(--space-md);
+  text-align: left;
+  font-size: var(--text-md);
+  color: var(--text-1);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.menuItem:hover:not([aria-disabled='true']) {
+  background-color: var(--surface-3);
+}
+
+.menuItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background-color: var(--surface-2);
+}
+
+.menuItem[aria-disabled='true'] {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
