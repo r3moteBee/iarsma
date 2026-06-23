@@ -18,9 +18,12 @@ import type { LabelRegistry } from '../label-registry.js';
 
 type FetchSpy = ReturnType<typeof vi.fn<typeof fetch>>;
 
+const SESSION_API_URL = 'https://sw-mail.r3motely.net/jmap/';
+
 function makeCtx(fetchImpl: FetchSpy) {
   return {
     baseUrl: 'https://sw-mail.r3motely.net',
+    apiUrl: SESSION_API_URL,
     getAuthToken: () => 'tok',
     accountId: 'b',
     fetch: fetchImpl,
@@ -197,6 +200,11 @@ describe('readRegistry', () => {
     expect(result.state).toBe('saa');
     // Only one fetch call (FileNode/get) — no blob download needed
     expect(spy).toHaveBeenCalledTimes(1);
+    // REGRESSION: FileNode/get must POST to session apiUrl, NOT /jmap/api
+    const getCall = spy.mock.calls[0]!;
+    const getUrl = typeof getCall[0] === 'string' ? getCall[0] : (getCall[0] as URL).toString();
+    expect(getUrl).toBe(SESSION_API_URL);
+    expect(getUrl).not.toContain('/jmap/api');
   });
 
   it('returns the parsed registry and nodeId when the label doc node exists', async () => {
@@ -209,6 +217,11 @@ describe('readRegistry', () => {
     expect(result.registry.labels[0]!.key).toBe('lbl_existing');
     // Two fetches: FileNode/get + blob download
     expect(spy).toHaveBeenCalledTimes(2);
+    // REGRESSION: FileNode/get must POST to session apiUrl, NOT /jmap/api
+    const getCall = spy.mock.calls[0]!;
+    const getUrl = typeof getCall[0] === 'string' ? getCall[0] : (getCall[0] as URL).toString();
+    expect(getUrl).toBe(SESSION_API_URL);
+    expect(getUrl).not.toContain('/jmap/api');
   });
 });
 
@@ -239,6 +252,15 @@ describe('writeRegistry', () => {
     const uploadedText = await uploadBody.text();
     const expectedMutated = addLabel(EMPTY_REGISTRY);
     expect(JSON.parse(uploadedText)).toEqual(JSON.parse(serializeRegistry(expectedMutated)));
+
+    // REGRESSION: FileNode/get (call 0) and FileNode/set (call 2) must POST to
+    // session apiUrl, NOT the hard-coded /jmap/api path.
+    for (const callIdx of [0, 2]) {
+      const call = spy.mock.calls[callIdx]!;
+      const url = typeof call[0] === 'string' ? call[0] : (call[0] as URL).toString();
+      expect(url).toBe(SESSION_API_URL);
+      expect(url).not.toContain('/jmap/api');
+    }
   });
 
   it('(c) updates the existing FileNode when a node already exists', async () => {

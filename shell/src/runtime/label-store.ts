@@ -35,8 +35,12 @@ export const LABEL_DOC_NAME = '.iarsma-labels.json';
 
 // ─── Context type ─────────────────────────────────────────────────────────────
 
-/** JMAP call context: the base JmapClientOptions plus the resolved account ID. */
-export type LabelStoreCtx = JmapClientOptions & { readonly accountId: string };
+/** JMAP call context: the base JmapClientOptions plus the resolved account ID and session apiUrl. */
+export type LabelStoreCtx = JmapClientOptions & {
+  readonly accountId: string;
+  /** The JMAP API endpoint URL from the session (e.g. `https://host/jmap/`). */
+  readonly apiUrl: string;
+};
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -60,7 +64,7 @@ export async function readRegistry(
 
   let response: Response;
   try {
-    response = await fetchImpl(`${ctx.baseUrl.replace(/\/$/, '')}/jmap/api`, {
+    response = await fetchImpl(ctx.apiUrl, {
       method: 'POST',
       headers: {
         accept: 'application/json',
@@ -199,7 +203,7 @@ async function uploadAndSet(
 
   let response: Response;
   try {
-    response = await fetchImpl(`${ctx.baseUrl.replace(/\/$/, '')}/jmap/api`, {
+    response = await fetchImpl(ctx.apiUrl, {
       method: 'POST',
       headers: {
         accept: 'application/json',

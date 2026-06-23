@@ -41,6 +41,7 @@ export async function labelList(ctx: LabelOpsCtx): Promise<LabelListResult> {
   const { registry } = await readRegistry({
     ...ctx,
     accountId: ctx.session.primaryAccountIdMail,
+    apiUrl: ctx.session.apiUrl,
   });
   return { labels: registry.labels };
 }
@@ -58,7 +59,7 @@ export async function labelCreate(
   ctx: LabelOpsCtx,
   params: LabelCreateParams,
 ): Promise<LabelCreateResult> {
-  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail };
+  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail, apiUrl: ctx.session.apiUrl };
   const { registry } = await readRegistry(storeCtx);
 
   if (registry.labels.length >= MAX_LABELS) {
@@ -119,7 +120,7 @@ export async function labelUpdate(
   ctx: LabelOpsCtx,
   params: LabelUpdateParams,
 ): Promise<LabelUpdateResult> {
-  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail };
+  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail, apiUrl: ctx.session.apiUrl };
   const { registry } = await readRegistry(storeCtx);
 
   const existing = registry.labels.find((l) => l.key === params.key);
@@ -168,7 +169,7 @@ export async function labelDeletePreview(
   ctx: LabelOpsCtx,
   params: { readonly key: string },
 ): Promise<LabelDeletePreview> {
-  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail };
+  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail, apiUrl: ctx.session.apiUrl };
   const { registry } = await readRegistry(storeCtx);
 
   const existing = registry.labels.find((l) => l.key === params.key);
@@ -192,7 +193,7 @@ export async function labelDeleteCommit(
   ctx: LabelOpsCtx,
   params: { readonly key: string },
 ): Promise<LabelDeleteResult> {
-  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail };
+  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail, apiUrl: ctx.session.apiUrl };
   const { registry } = await readRegistry(storeCtx);
 
   const existing = registry.labels.find((l) => l.key === params.key);
@@ -234,7 +235,7 @@ export async function labelApplyPreview(
   ctx: LabelOpsCtx,
   params: LabelApplyParams,
 ): Promise<LabelApplyPreview> {
-  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail };
+  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail, apiUrl: ctx.session.apiUrl };
   const { registry } = await readRegistry(storeCtx);
 
   resolveLabels(registry.labels, params.add ?? [], params.remove ?? []);
@@ -249,7 +250,7 @@ export async function labelApplyCommit(
   ctx: LabelOpsCtx,
   params: LabelApplyParams,
 ): Promise<LabelApplyResult> {
-  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail };
+  const storeCtx = { ...ctx, accountId: ctx.session.primaryAccountIdMail, apiUrl: ctx.session.apiUrl };
   const { registry } = await readRegistry(storeCtx);
 
   const { addKeys, removeKeys } = resolveLabels(

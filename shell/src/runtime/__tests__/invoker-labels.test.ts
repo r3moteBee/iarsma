@@ -11,12 +11,12 @@
  *   label.delete  — destructive; dryRun=true → preview, false → commit
  *   label.apply   — destructive; dryRun=true → preview, false → commit
  *
- * The label-store makes FileNode calls to `{baseUrl}/jmap/api`.
- * Label-operations makes Email/query + Email/set calls to `session.apiUrl`
- * (from the fixture: https://sw-mail.example.net/jmap/).
+ * All JMAP API calls (FileNode/get, FileNode/set, Email/query, Email/set) go
+ * to `session.apiUrl` (from the fixture: https://sw-mail.example.net/jmap/).
  * Blob uploads go to `session.uploadUrl` (https://sw-mail.example.net/jmap/upload/{accountId}/).
  *
- * The mock fetch routes all of these by URL pattern.
+ * The mock fetch only accepts the real session apiUrl for API calls — any
+ * request to /jmap/api (or any other unexpected URL) throws immediately.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -120,17 +120,21 @@ function emailSetUpdateOk(ids: string[]): string {
 // ─── Fetch mock factory ───────────────────────────────────────────────────────
 
 /**
+ * The session fixture's apiUrl — all JMAP API POSTs (FileNode/get,
+ * FileNode/set, Email/query, Email/set) must go here.  Any request to
+ * `/jmap/api` (the old wrong path) will throw so the bug is caught.
+ */
+const SESSION_API_URL = 'https://sw-mail.example.net/jmap/';
+
+/**
  * Build a sequenced fetch mock that:
  *   - Always answers /.well-known/jmap with the session fixture.
  *   - Routes blob downloads (URL matches /jmap/download/) to the next blobBody
  *     in the blobDownloads queue.
  *   - Routes blob uploads (URL matches /jmap/upload/) to blobUploadBody.
- *   - Routes all other POST calls (FileNode/get via /jmap/api, and JMAP API
- *     calls via /jmap/) to the next apiBody in the apiBodies queue.
- *
- * Because label-store POSTs to `/jmap/api` and label-operations POSTs JMAP
- * queries to `session.apiUrl` (= `/jmap/`), both go through the same apiBody
- * sequence — which matches how the existing invoker tests work.
+ *   - Routes POST calls to session apiUrl (SESSION_API_URL) to the apiBody queue.
+ *   - Throws on any other URL — in particular /jmap/api — so a wrong endpoint
+ *     fails the test rather than silently succeeding.
  */
 function makeFetch(opts: {
   apiBodies: string[];
@@ -161,14 +165,19 @@ function makeFetch(opts: {
     if (url.includes('/jmap/upload/')) {
       return new Response(opts.blobUploadBody ?? BLOB_UPLOAD_OK, { status: 200 });
     }
-    // All other POST requests go to the api sequence.
-    const body = String(init?.body ?? '');
-    apiCalls.push(body);
-    const next = opts.apiBodies[apiIdx++];
-    if (next === undefined) {
-      throw new Error(`Unexpected API call #${apiIdx}: ${body.slice(0, 200)}`);
+    // Only accept the real session apiUrl — reject /jmap/api or any other path.
+    if (url === SESSION_API_URL) {
+      const body = String(init?.body ?? '');
+      apiCalls.push(body);
+      const next = opts.apiBodies[apiIdx++];
+      if (next === undefined) {
+        throw new Error(`Unexpected API call #${apiIdx}: ${body.slice(0, 200)}`);
+      }
+      return new Response(next, { status: 200 });
     }
-    return new Response(next, { status: 200 });
+    throw new Error(
+      `fetch mock: unexpected URL "${url}" — all JMAP API calls must go to session apiUrl (${SESSION_API_URL})`,
+    );
   });
   return { fetch: fetchMock, apiCalls };
 }

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { capability } from '../src/index.js';
 
 const Label = z.object({
-  key: z.string().describe('Stable server-issued identifier for the label. Use this key in label.update, label.delete, and label.apply.'),
+  key: z.string().describe('Stable human-readable slug for the label (e.g. `work`, `read_later`), derived from the label name at creation and immutable thereafter. This is the literal JMAP keyword stored on tagged messages. Use this key in label.update, label.delete, and label.apply.'),
   name: z.string().describe('Display name of the label.'),
   color: z.string().optional().describe('Optional display color, as a CSS hex string (e.g. "#ff6b35"). Absent when not set.'),
   order: z.number().int().optional().describe('Display sort order — lower comes first. Absent when not set.'),
@@ -30,8 +30,8 @@ export const labelList = capability({
       input: {},
       output: {
         labels: [
-          { key: 'Lbl-01', name: 'Work', color: '#4a90d9', order: 0 },
-          { key: 'Lbl-02', name: 'Personal', color: '#7ed321', order: 1 },
+          { key: 'work', name: 'Work', color: '#4a90d9', order: 0 },
+          { key: 'personal', name: 'Personal', color: '#7ed321', order: 1 },
         ],
       },
     },

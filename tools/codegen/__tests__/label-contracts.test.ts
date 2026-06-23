@@ -126,6 +126,15 @@ describe('label.delete', () => {
     expect(labelDelete.ast.description).toContain('label_not_found');
   });
 
+  it('description names label_untag_failed refusal code', () => {
+    expect(labelDelete.ast.description).toContain('label_untag_failed');
+  });
+
+  it('errors array includes label_untag_failed', () => {
+    const codes = labelDelete.ast.errors?.map((e) => e.code) ?? [];
+    expect(codes).toContain('label_untag_failed');
+  });
+
   it('description names label_registry_conflict refusal code', () => {
     expect(labelDelete.ast.description).toContain('label_registry_conflict');
   });

@@ -7,7 +7,8 @@ export const labelUpdate = capability({
   scopes: ['mail:label:write'],
   description:
     'Update an existing label — rename it, change its color, or adjust its ' +
-    'display order (JMAP Keyword registry update). Resolve the `key` with ' +
+    'display order. Edits the FileNode registry document; the label `key` ' +
+    '(slug) is immutable and never changes. Resolve the `key` with ' +
     'label.list first. At least one of `name`, `color`, or `order` must be ' +
     'provided; all are optional individually. Refusals (stable codes you can ' +
     'branch on): `label_not_found` (no label exists for that key), ' +
@@ -30,7 +31,7 @@ export const labelUpdate = capability({
     { code: 'label_registry_conflict', description: 'Concurrent modification detected; retry once.' },
   ],
   examples: [
-    { title: 'Rename a label', input: { key: 'Lbl-10', name: 'Critical' }, output: { updated: true } },
-    { title: 'Change color and order', input: { key: 'Lbl-11', color: '#7ed321', order: 0 }, output: { updated: true } },
+    { title: 'Rename a label', input: { key: 'urgent', name: 'Critical' }, output: { updated: true } },
+    { title: 'Change color and order', input: { key: 'read_later', color: '#7ed321', order: 0 }, output: { updated: true } },
   ],
 });

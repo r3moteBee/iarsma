@@ -38,7 +38,7 @@ export const labelApply = capability({
   examples: [
     {
       title: 'Add a label to two messages by key',
-      input: { emailIds: ['Em-01', 'Em-02'], add: ['Lbl-10'] },
+      input: { emailIds: ['Em-01', 'Em-02'], add: ['work'] },
       output: { modifiedCount: 2 },
     },
     {
@@ -48,7 +48,7 @@ export const labelApply = capability({
     },
     {
       title: 'Add one label and remove another in one call',
-      input: { emailIds: ['Em-03'], add: ['Lbl-11'], remove: ['Lbl-10'] },
+      input: { emailIds: ['Em-03'], add: ['read_later'], remove: ['work'] },
       output: { modifiedCount: 1 },
     },
   ],
