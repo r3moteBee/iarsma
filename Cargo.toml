@@ -25,7 +25,7 @@ thiserror = "1.0"
 # `wit-bindgen-rt` is the runtime crate that cargo-component-generated
 # bindings depend on. Compile-time binding generation is performed by
 # cargo-component itself; the older `wit-bindgen` macro is unused here.
-wit-bindgen-rt = { version = "0.36", features = ["bitflags"] }
+wit-bindgen-rt = { version = "0.44", features = ["bitflags"] }
 
 [profile.release]
 opt-level = "s"
