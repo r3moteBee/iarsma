@@ -410,48 +410,6 @@ function ThreadListBody(props: {
     [threads, setSelectedThreadId, isDrafts, invoker, setComposeState],
   );
 
-  const onKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLUListElement>) => {
-      // `focusedIndex` starts null and is set to 0 by the
-      // selection-sync useEffect. A keystroke that arrives *between*
-      // the initial render and the effect commit would otherwise be a
-      // silent no-op — manifests as a CI race and as a real-user UX
-      // glitch (press j on a freshly-loaded mailbox, nothing happens).
-      // Treat null as "before the cursor" so j/ArrowDown moves to 0
-      // and k/ArrowUp / Home behave consistently.
-      const i = focusedIndex ?? -1;
-      switch (event.key) {
-        case 'j':
-        case 'ArrowDown':
-          event.preventDefault();
-          moveFocus(i + 1);
-          break;
-        case 'k':
-        case 'ArrowUp':
-          event.preventDefault();
-          moveFocus(i - 1);
-          break;
-        case 'Home':
-          event.preventDefault();
-          moveFocus(0);
-          break;
-        case 'End':
-          event.preventDefault();
-          moveFocus(threads.length - 1);
-          break;
-        case 'Enter':
-        case ' ':
-          event.preventDefault();
-          // Activation requires a real focus position — null means the
-          // user never moved the cursor, so Enter is a no-op (matches
-          // a fresh-load listbox with no row highlighted).
-          if (i >= 0) onSelect(i);
-          break;
-      }
-    },
-    [focusedIndex, moveFocus, onSelect, threads.length],
-  );
-
   // Per-row mail.modify wire-up (PR 4.5). `refetch()` runs after a
   // successful mutate so the row's $seen/$flagged reflects the new
   // state without waiting for a push subscription (Phase 7+). The
@@ -556,6 +514,68 @@ function ThreadListBody(props: {
       setPurgingRow(false);
     }
   }, [invoker, purgeConfirmEmailId, refetch]);
+
+  // Keyboard: navigation (j/k/Home/End/Enter) + row actions (U-7).
+  // Defined after the action handlers so it can call them. `focusedIndex`
+  // starts null and is set to 0 by the selection-sync effect; treat null
+  // as "before the cursor" so j/ArrowDown lands on row 0.
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLUListElement>) => {
+      const i = focusedIndex ?? -1;
+      const focusedEmailId = i >= 0 ? threads[i]?.latestEmail.id : undefined;
+      switch (event.key) {
+        case 'j':
+        case 'ArrowDown':
+          event.preventDefault();
+          moveFocus(i + 1);
+          break;
+        case 'k':
+        case 'ArrowUp':
+          event.preventDefault();
+          moveFocus(i - 1);
+          break;
+        case 'Home':
+          event.preventDefault();
+          moveFocus(0);
+          break;
+        case 'End':
+          event.preventDefault();
+          moveFocus(threads.length - 1);
+          break;
+        case 'Enter':
+        case ' ':
+          event.preventDefault();
+          if (i >= 0) onSelect(i);
+          break;
+        // U-7 — Gmail-style row actions on the focused thread.
+        case '#': // delete (in Trash this opens the purge confirm)
+          if (focusedEmailId === undefined) break;
+          event.preventDefault();
+          (isTrash ? handlePurgeRow : handleSoftDelete)(focusedEmailId);
+          break;
+        case 'I': // Shift+i — mark read
+          if (focusedEmailId === undefined) break;
+          event.preventDefault();
+          toggleKeyword(focusedEmailId, '$seen', true);
+          break;
+        case 'U': // Shift+u — mark unread
+          if (focusedEmailId === undefined) break;
+          event.preventDefault();
+          toggleKeyword(focusedEmailId, '$seen', false);
+          break;
+      }
+    },
+    [
+      focusedIndex,
+      moveFocus,
+      onSelect,
+      threads,
+      isTrash,
+      handlePurgeRow,
+      handleSoftDelete,
+      toggleKeyword,
+    ],
+  );
 
   const items = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
