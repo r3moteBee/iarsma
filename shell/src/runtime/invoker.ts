@@ -91,6 +91,18 @@ import {
   type ThreadList,
 } from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
+import {
+  labelList,
+  labelCreate,
+  labelUpdate,
+  labelDeletePreview,
+  labelDeleteCommit,
+  labelApplyPreview,
+  labelApplyCommit,
+  type LabelCreateParams,
+  type LabelUpdateParams,
+  type LabelApplyParams,
+} from './label-operations.js';
 
 export type InvocationOptions = {
   /** True if the caller wants a dry-run preview, not a commit. */
@@ -649,6 +661,36 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           }
           const session = await getSession();
           return (await fetchMailboxDeleteCommit({ ...opts, session, params })) as unknown as O;
+        }
+        case 'label.list': {
+          const session = await getSession();
+          return (await labelList({ ...opts, session })) as unknown as O;
+        }
+        case 'label.create': {
+          const params = _input as unknown as LabelCreateParams;
+          const session = await getSession();
+          return (await labelCreate({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'label.update': {
+          const params = _input as unknown as LabelUpdateParams;
+          const session = await getSession();
+          return (await labelUpdate({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'label.delete': {
+          const params = _input as unknown as { key: string };
+          const session = await getSession();
+          if (_options.dryRun === true) {
+            return (await labelDeletePreview({ ...opts, session }, params)) as unknown as O | DryRunPreview<O>;
+          }
+          return (await labelDeleteCommit({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'label.apply': {
+          const params = _input as unknown as LabelApplyParams;
+          const session = await getSession();
+          if (_options.dryRun === true) {
+            return (await labelApplyPreview({ ...opts, session }, params)) as unknown as O | DryRunPreview<O>;
+          }
+          return (await labelApplyCommit({ ...opts, session }, params)) as unknown as O;
         }
         default:
           throw makeToolError(
