@@ -4277,6 +4277,74 @@ export async function fetchMailboxCreateCommit(
   return parseMailboxCreateResponse(text);
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Mailbox/set — update / rename (RFC 8621 §2.5)
+// ──────────────────────────────────────────────────────────────────────
+
+export type MailboxUpdateInput = { readonly mailboxId: string; readonly name: string };
+export type MailboxUpdateResult = { readonly updated: boolean };
+
+export function buildMailboxUpdateRequest(opts: { readonly accountId: string; readonly params: MailboxUpdateInput }): string {
+  const { accountId, params } = opts;
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [['Mailbox/set', { accountId, update: { [params.mailboxId]: { name: params.name } } }, '0']],
+  });
+}
+
+export function parseMailboxUpdateResponse(body: string, mailboxId: string): MailboxUpdateResult {
+  const r = JSON.parse(body) as { methodResponses?: Array<[string, Record<string, unknown>, string]> };
+  const args = r.methodResponses?.[0]?.[1] as
+    | { updated?: Record<string, unknown>; notUpdated?: Record<string, { type: string; description?: string }> }
+    | undefined;
+  if (args?.updated !== undefined && mailboxId in args.updated) return { updated: true };
+  const nu = args?.notUpdated?.[mailboxId];
+  if (nu !== undefined) {
+    const desc = nu.description ?? nu.type;
+    if (/exist|already|duplicate|unique/i.test(desc)) {
+      throw makeError('mailbox_name_conflict', 'A folder with that name already exists here. Pick a different name.');
+    }
+    throw makeError('mailbox_set_failed', `Couldn't rename the folder: ${desc}.`);
+  }
+  throw makeError('jmap_parse_error', 'Mailbox/set update returned no result.');
+}
+
+export async function fetchMailboxUpdateCommit(
+  opts: FetchMailboxListOptions & { readonly params: MailboxUpdateInput },
+): Promise<MailboxUpdateResult> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const body = buildMailboxUpdateRequest({
+    accountId: opts.session.primaryAccountIdMail,
+    params: opts.params,
+  });
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Mailbox/set update returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseMailboxUpdateResponse(text, opts.params.mailboxId);
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }
