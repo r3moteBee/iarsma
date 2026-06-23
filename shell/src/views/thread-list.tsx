@@ -136,7 +136,7 @@ const ROW_HEIGHT_PX = 72;
  *  identity on every render (PR 53 / CoWork #15). */
 const EMPTY_TOKENS: readonly string[] = [];
 
-export function ThreadList({ labels = [] }: { readonly labels?: readonly LabelDef[] }) {
+export function ThreadList({ labels = [], labelFilterKey = null }: { readonly labels?: readonly LabelDef[]; readonly labelFilterKey?: string | null }) {
   const mailboxId = useAtomValue(selectedMailboxIdAtom);
   const searchQuery = useAtomValue(searchQueryAtom);
   // Search mode wins over mailbox selection — when the user types in
@@ -144,6 +144,10 @@ export function ThreadList({ labels = [] }: { readonly labels?: readonly LabelDe
   // which mailbox they had open.
   if (searchQuery.trim() !== '') {
     return <ThreadListSearchMode query={searchQuery.trim()} labels={labels} />;
+  }
+  // Label filter mode — show threads matching the selected label keyword.
+  if (labelFilterKey !== null) {
+    return <ThreadListWithLabel hasKeyword={labelFilterKey} labels={labels} />;
   }
   if (mailboxId === null) {
     // After the auto-select effect in App.tsx, this state should be rare
@@ -159,6 +163,35 @@ export function ThreadList({ labels = [] }: { readonly labels?: readonly LabelDe
     );
   }
   return <ThreadListWithMailbox mailboxId={mailboxId} labels={labels} />;
+}
+
+function ThreadListWithLabel({ hasKeyword, labels }: { readonly hasKeyword: string; readonly labels: readonly LabelDef[] }) {
+  const { data, error, isLoading, refetch } = useThreadList({ hasKeyword });
+  const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
+
+  useEffect(() => {
+    setSelectedThreadId(null);
+  }, [hasKeyword, setSelectedThreadId]);
+
+  const threadsLen = data?.threads.length ?? 0;
+  const total = data?.total;
+  const countText = total !== undefined ? `1–${threadsLen} of ${total}` : null;
+
+  return (
+    <ThreadListBody
+      data={data}
+      error={error}
+      isLoading={isLoading}
+      isDrafts={false}
+      isTrash={false}
+      emptyMessage="No threads with this label."
+      mailboxId={null}
+      title={`Label: ${hasKeyword}`}
+      countText={countText}
+      onRefresh={refetch}
+      labels={labels}
+    />
+  );
 }
 
 function ThreadListSearchMode({ query, labels }: { readonly query: string; readonly labels: readonly LabelDef[] }) {

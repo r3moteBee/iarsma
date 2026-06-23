@@ -556,6 +556,7 @@ function SignedInShell({
     onStateChange: () => bumpPushGeneration((n) => n + 1),
   });
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
+  const [labelFilterKey, setLabelFilterKey] = useState<string | null>(null);
   const [mailLayout, setMailLayout] = useAtom(mailLayoutAtom);
   const [selectedMailboxId, setSelectedMailboxId] = useAtom(selectedMailboxIdAtom);
   const mailboxListResult = useMailboxList({});
@@ -638,6 +639,20 @@ function SignedInShell({
     },
     [sidebarMailboxes],
   );
+
+  const handleMailboxSelect = useCallback((id: string) => {
+    setSelectedMailboxId(id);
+    setLabelFilterKey(null);
+  }, [setSelectedMailboxId]);
+
+  const handleLabelSelect = useCallback((key: string) => {
+    setLabelFilterKey(key);
+    setSelectedMailboxId(null);
+  }, [setSelectedMailboxId]);
+
+  const handleNewLabel = useCallback(() => {
+    // Stub — label creation dialog wired in a later task.
+  }, []);
 
   const handleRenameFolder = useCallback((id: string, currentName: string) => {
     setFolderDialogError(undefined);
@@ -1167,11 +1182,14 @@ function SignedInShell({
           outboxCount={outboxCount}
           inboxUnreadCount={inboxUnreadCount}
           {...(sidebarMailboxes !== undefined ? { mailboxes: sidebarMailboxes } : {})}
-          onMailboxSelect={setSelectedMailboxId}
+          onMailboxSelect={handleMailboxSelect}
           {...(selectedMailboxId !== null ? { selectedMailboxId } : {})}
           onCreateFolder={handleCreateFolder}
           onRenameFolder={handleRenameFolder}
           onDeleteFolder={handleDeleteFolder}
+          labels={labelDefs}
+          onLabelSelect={handleLabelSelect}
+          onNewLabel={handleNewLabel}
         />
       )}
 
@@ -1246,7 +1264,7 @@ function SignedInShell({
         )}
 
         {activeView === 'mail' ? (
-          <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} labels={labelDefs} />
+          <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} labels={labelDefs} labelFilterKey={labelFilterKey} {...((): { selectedLabelName?: string } => { const n = labelFilterKey !== null ? labelDefs.find(l => l.key === labelFilterKey)?.name : undefined; return n !== undefined ? { selectedLabelName: n } : {}; })()} />
         ) : activeView === 'calendar' ? (
           <CalendarView
             events={visibleCalendarEvents}
@@ -1543,12 +1561,15 @@ function MailLayout({
   error,
   layout,
   labels,
+  labelFilterKey,
 }: {
   readonly isLoading: boolean;
   readonly error?: { message: string } | undefined;
   readonly layout: MailLayoutType;
   /** Task 8 — label registry for rendering chips on rows/thread. */
   readonly labels: readonly LabelDef[];
+  readonly labelFilterKey?: string | null;
+  readonly selectedLabelName?: string;
 }) {
   // PR 3: pane structure mirrors contacts-view.module.css. Each pane
   // owns its own scroll region; no 70vh magic, no page-level scrolling
@@ -1568,7 +1589,7 @@ function MailLayout({
         {error !== undefined ? (
           <p role="alert">Session error: {error.message}</p>
         ) : null}
-        <ThreadList labels={labels} />
+        <ThreadList labels={labels} labelFilterKey={labelFilterKey ?? null} />
       </section>
       <section
         aria-label="Selected thread"

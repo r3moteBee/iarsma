@@ -458,7 +458,8 @@ export type ThreadList = {
 
 export type FetchThreadListOptions = JmapClientOptions & {
   readonly session: Session;
-  readonly mailboxId: string;
+  readonly mailboxId?: string;
+  readonly hasKeyword?: string;
   /** Zero-indexed offset. Defaults to 0. */
   readonly position?: number;
   /** Page size. Defaults to 50; capped server-side at 200. */
@@ -481,6 +482,64 @@ const EMAIL_LIST_PROPERTIES = [
   'size',
 ];
 
+export type BuildThreadListRequestOptions = {
+  readonly accountId: string;
+  readonly mailboxId?: string;
+  readonly hasKeyword?: string;
+  readonly position?: number;
+  readonly limit?: number;
+};
+
+/**
+ * Build the JMAP Email/query + Email/get chain for thread.list.
+ * Pure function — testable without I/O.
+ *
+ * Exactly one of `mailboxId` or `hasKeyword` must be provided:
+ *   - `mailboxId` → `filter: { inMailbox }` (normal folder view)
+ *   - `hasKeyword` → `filter: { hasKeyword }` (label-filtered view)
+ */
+export function buildThreadListRequest(opts: BuildThreadListRequestOptions): string {
+  const hasMbx = opts.mailboxId !== undefined;
+  const hasKw = opts.hasKeyword !== undefined;
+  if ((!hasMbx && !hasKw) || (hasMbx && hasKw)) {
+    throw new Error(
+      'buildThreadListRequest: provide exactly one of mailboxId or hasKeyword.',
+    );
+  }
+  const position = opts.position ?? 0;
+  const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+  const filter: Record<string, unknown> = hasMbx
+    ? { inMailbox: opts.mailboxId }
+    : { hasKeyword: opts.hasKeyword };
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      [
+        'Email/query',
+        {
+          accountId: opts.accountId,
+          filter,
+          sort: [{ property: 'receivedAt', isAscending: false }],
+          collapseThreads: true,
+          position,
+          limit,
+          calculateTotal: true,
+        },
+        '0',
+      ],
+      [
+        'Email/get',
+        {
+          accountId: opts.accountId,
+          '#ids': { resultOf: '0', name: 'Email/query', path: '/ids' },
+          properties: EMAIL_LIST_PROPERTIES,
+        },
+        '1',
+      ],
+    ],
+  });
+}
+
 /**
  * POST a chained `Email/query` + `Email/get` JMAP request and parse the
  * response into a thread list. The two methodCalls share a single
@@ -495,38 +554,14 @@ export async function fetchThreadList(
     throw makeError('unauthorized', 'No auth token available.');
   }
   const fetchImpl = opts.fetch ?? fetch;
-  const position = opts.position ?? 0;
-  const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
   const accountId = opts.session.primaryAccountIdMail;
 
-  const body = JSON.stringify({
-    using: JMAP_USING_MAIL,
-    methodCalls: [
-      [
-        'Email/query',
-        {
-          accountId,
-          filter: { inMailbox: opts.mailboxId },
-          sort: [{ property: 'receivedAt', isAscending: false }],
-          collapseThreads: true,
-          position,
-          limit,
-          calculateTotal: true,
-        },
-        '0',
-      ],
-      [
-        'Email/get',
-        {
-          accountId,
-          // JMAP back-reference: pulls ids from the prior Email/query
-          // result, no client-side roundtrip.
-          '#ids': { resultOf: '0', name: 'Email/query', path: '/ids' },
-          properties: EMAIL_LIST_PROPERTIES,
-        },
-        '1',
-      ],
-    ],
+  const body = buildThreadListRequest({
+    accountId,
+    ...(opts.mailboxId !== undefined ? { mailboxId: opts.mailboxId } : {}),
+    ...(opts.hasKeyword !== undefined ? { hasKeyword: opts.hasKeyword } : {}),
+    ...(opts.position !== undefined ? { position: opts.position } : {}),
+    ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
   });
 
   let response: Response;

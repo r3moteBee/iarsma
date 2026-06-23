@@ -72,14 +72,15 @@ const ThreadSummary = z.object({
 
 export const threadList = capability({
   name: 'thread.list',
-  version: '0.0.1',
+  version: '0.1.0',
   scopes: ['mail:read.metadata'],
   description:
     'List threads in a mailbox, most recent first, paginated by position+limit ' +
     '(D-041). One thread per row — JMAP collapses the thread server-side. JMAP ' +
     'methods: Email/query + Email/get (chained via back-reference, one roundtrip).',
   input: z.object({
-    mailboxId: z.string().describe('JMAP mailbox id from `mailbox.list`.'),
+    mailboxId: z.string().optional().describe('JMAP mailbox id from `mailbox.list`. Provide exactly one of mailboxId or hasKeyword.'),
+    hasKeyword: z.string().optional().describe('JMAP keyword filter — returns threads where the latest email has this keyword set (value: true). Used for label-filtered views. Provide exactly one of mailboxId or hasKeyword.'),
     position: z
       .number()
       .int()
