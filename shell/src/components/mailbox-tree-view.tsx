@@ -34,6 +34,7 @@ import {
   foldMailboxTree,
   type MailboxTreeNode,
 } from '../views/mailbox-tree.js';
+import { MenuButton, type MenuItem } from './menu-button.js';
 import styles from './sidebar.module.css';
 
 export type MailboxRow = {
@@ -43,6 +44,11 @@ export type MailboxRow = {
   readonly unreadCount: number;
   readonly parentId?: string | null;
   readonly sortOrder?: number;
+  readonly myRights?: {
+    readonly mayCreateChild?: boolean;
+    readonly mayRename?: boolean;
+    readonly mayDelete?: boolean;
+  };
 };
 
 export type MailboxTreeViewProps = {
@@ -53,6 +59,9 @@ export type MailboxTreeViewProps = {
    *  the single-user shell; surface a key parameter for tests + future
    *  multi-account variants. */
   readonly storageKey?: string;
+  readonly onCreateFolder?: (parentId?: string) => void;
+  readonly onRenameFolder?: (id: string, currentName: string) => void;
+  readonly onDeleteFolder?: (id: string) => void;
 };
 
 const ROLE_LABEL: Record<string, string> = {
@@ -101,6 +110,9 @@ export function MailboxTreeView({
   selectedId,
   onSelect,
   storageKey = DEFAULT_STORAGE_KEY,
+  onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
 }: MailboxTreeViewProps) {
   // Collapsed-set model (not expanded-set): default is expand-all,
   // explicit collapses are persisted. Sidebar trees are shallow and a
@@ -258,6 +270,9 @@ export function MailboxTreeView({
           onSelect={handleSelect}
           focusedId={focusedId}
           onFocusChange={setFocusedId}
+          {...(onCreateFolder !== undefined ? { onCreateFolder } : {})}
+          {...(onRenameFolder !== undefined ? { onRenameFolder } : {})}
+          {...(onDeleteFolder !== undefined ? { onDeleteFolder } : {})}
         />
       ))}
     </ul>
@@ -274,6 +289,9 @@ function TreeRow<T extends MailboxRow>(props: {
   readonly onSelect: (id: string) => void;
   readonly focusedId: string | null;
   readonly onFocusChange: (id: string) => void;
+  readonly onCreateFolder?: (parentId?: string) => void;
+  readonly onRenameFolder?: (id: string, currentName: string) => void;
+  readonly onDeleteFolder?: (id: string) => void;
 }) {
   const {
     node,
@@ -285,12 +303,46 @@ function TreeRow<T extends MailboxRow>(props: {
     onSelect,
     focusedId,
     onFocusChange,
+    onCreateFolder,
+    onRenameFolder,
+    onDeleteFolder,
   } = props;
   const { mailbox, depth, children } = node;
   const hasChildren = children.length > 0;
   const expanded = hasChildren ? isExpanded(mailbox.id) : undefined;
   const isSelected = mailbox.id === selectedId;
   const isFocusable = focusedId === null ? isSelected : focusedId === mailbox.id;
+
+  const menuWrapperRef = useRef<HTMLDivElement>(null);
+
+  const menuItems = useMemo<MenuItem[]>(() => {
+    const items: MenuItem[] = [];
+    if (mailbox.myRights?.mayCreateChild === true) {
+      items.push({
+        key: 'new-subfolder',
+        label: 'New subfolder',
+        onSelect: () => onCreateFolder?.(mailbox.id),
+      });
+    }
+    if (mailbox.role === undefined && mailbox.myRights?.mayRename === true) {
+      items.push({
+        key: 'rename',
+        label: 'Rename',
+        onSelect: () => onRenameFolder?.(mailbox.id, mailbox.name),
+      });
+    }
+    if (mailbox.role === undefined && mailbox.myRights?.mayDelete === true) {
+      items.push({
+        key: 'delete',
+        label: 'Delete',
+        onSelect: () => onDeleteFolder?.(mailbox.id),
+        ...(hasChildren
+          ? { disabled: true, disabledReason: 'Has subfolders — delete those first' }
+          : {}),
+      });
+    }
+    return items;
+  }, [mailbox, hasChildren, onCreateFolder, onRenameFolder, onDeleteFolder]);
 
   return (
     <li
@@ -313,6 +365,14 @@ function TreeRow<T extends MailboxRow>(props: {
         // a stale focusedId and acts on the wrong row.
         e.stopPropagation();
         onFocusChange(mailbox.id);
+      }}
+      onContextMenu={(e) => {
+        if (menuItems.length === 0) return;
+        e.preventDefault();
+        const trigger = menuWrapperRef.current?.querySelector<HTMLButtonElement>(
+          'button[aria-haspopup="menu"]',
+        );
+        trigger?.click();
       }}
       // Outline inherits so the focus ring lives on the visible row span
       // below, not the bare <li>.
@@ -364,6 +424,19 @@ function TreeRow<T extends MailboxRow>(props: {
         {mailbox.unreadCount > 0 && mailbox.role !== 'drafts' ? (
           <span style={visuallyHidden}>{`, ${mailbox.unreadCount} unread`}</span>
         ) : null}
+        {menuItems.length > 0 ? (
+          <div
+            ref={menuWrapperRef}
+            onClick={(e) => e.stopPropagation()}
+            style={{ marginLeft: 'auto', flexShrink: 0 }}
+          >
+            <MenuButton
+              label={`Actions for ${labelFor(mailbox)}`}
+              items={menuItems}
+              align="end"
+            />
+          </div>
+        ) : null}
       </span>
       {hasChildren && expanded === true ? (
         <ul role="group" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -379,6 +452,9 @@ function TreeRow<T extends MailboxRow>(props: {
               onSelect={onSelect}
               focusedId={focusedId}
               onFocusChange={onFocusChange}
+              {...(onCreateFolder !== undefined ? { onCreateFolder } : {})}
+              {...(onRenameFolder !== undefined ? { onRenameFolder } : {})}
+              {...(onDeleteFolder !== undefined ? { onDeleteFolder } : {})}
             />
           ))}
         </ul>
