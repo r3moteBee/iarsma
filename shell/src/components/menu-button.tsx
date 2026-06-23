@@ -18,6 +18,7 @@ import styles from './menu-button.module.css';
 
 export type MenuItem = {
   readonly label: string;
+  readonly key?: string;
   readonly onSelect: () => void;
   readonly disabled?: boolean;
   readonly disabledReason?: string;
@@ -114,10 +115,11 @@ export function MenuButton({
           aria-label={label}
         >
           {items.map((item) => (
-            <li key={item.label} role="none">
+            <li key={item.key ?? item.label} role="none">
               <button
                 type="button"
                 role="menuitem"
+                tabIndex={-1}
                 className={styles['menuItem']}
                 aria-disabled={item.disabled === true ? 'true' : undefined}
                 title={item.disabled === true ? item.disabledReason : undefined}

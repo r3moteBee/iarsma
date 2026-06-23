@@ -29,4 +29,34 @@ describe('MenuButton', () => {
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
     expect(screen.queryByRole('menu')).toBeNull();
   });
+  it('menu items have tabIndex=-1 (roving tabindex, not in Tab order)', () => {
+    render(
+      <MenuButton
+        label="Folder actions"
+        items={[
+          { label: 'Rename', onSelect: () => {} },
+          { label: 'Delete', onSelect: () => {}, disabled: true, disabledReason: 'in use' },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Folder actions' }));
+    const menuItems = screen.getAllByRole('menuitem');
+    for (const item of menuItems) {
+      expect(item).toHaveAttribute('tabindex', '-1');
+    }
+  });
+  it('renders two items with identical labels when distinct key props are provided', () => {
+    render(
+      <MenuButton
+        label="Move to"
+        items={[
+          { label: 'Inbox', key: 'mailbox-1', onSelect: () => {} },
+          { label: 'Inbox', key: 'mailbox-2', onSelect: () => {} },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Move to' }));
+    const menuItems = screen.getAllByRole('menuitem', { name: 'Inbox' });
+    expect(menuItems).toHaveLength(2);
+  });
 });
