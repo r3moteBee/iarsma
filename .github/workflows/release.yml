@@ -151,7 +151,7 @@ jobs:
 
       - name: Create Release + upload all variants (tag-driven only)
         if: ${{ steps.trig.outputs.tag != '' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.trig.outputs.tag }}
           name: ${{ steps.trig.outputs.tag }}
