@@ -11,7 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { readRegistry, writeRegistry, LABEL_DOC_NAME } from '../label-store.js';
-import { EMPTY_REGISTRY } from '../label-registry.js';
+import { EMPTY_REGISTRY, serializeRegistry } from '../label-registry.js';
 import type { LabelRegistry } from '../label-registry.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -139,6 +139,45 @@ const FILENODE_SET_CREATE_MISMATCH = JSON.stringify({
   ],
 });
 
+/**
+ * A concurrent writer created the node while our create was in-flight.
+ * The re-read now returns a node with a different id.
+ */
+const CONCURRENT_NODE_ID = 'node-concurrent-abc';
+const CONCURRENT_BLOB_ID = 'dcrqakfj0w3nu1orhjhnduve02iir7zoi3pw2zzhyae1ndet32sw7bcnxy';
+const FILENODE_GET_WITH_CONCURRENT_NODE = JSON.stringify({
+  methodResponses: [
+    [
+      'FileNode/get',
+      {
+        accountId: 'b',
+        state: 'saf',
+        list: [
+          {
+            id: CONCURRENT_NODE_ID,
+            name: LABEL_DOC_NAME,
+            parentId: null,
+            blobId: CONCURRENT_BLOB_ID,
+            size: 2,
+          },
+        ],
+        notFound: [],
+      },
+      'c1',
+    ],
+  ],
+});
+
+/** Blob content served from the concurrent node (empty registry — concurrent writer created but left it empty). */
+const CONCURRENT_REGISTRY_JSON = JSON.stringify({ version: 1, labels: [] });
+
+/** FileNode/set update-success response for the concurrent node. */
+const FILENODE_SET_CONCURRENT_UPDATE_OK = JSON.stringify({
+  methodResponses: [
+    ['FileNode/set', { accountId: 'b', newState: 'sag', updated: { [CONCURRENT_NODE_ID]: null } }, 'c1'],
+  ],
+});
+
 // ── LABEL_DOC_NAME ────────────────────────────────────────────────────────────
 
 describe('LABEL_DOC_NAME', () => {
@@ -191,6 +230,15 @@ describe('writeRegistry', () => {
     expect(result.labels).toHaveLength(1);
     expect(result.labels[0]!.key).toBe('lbl_new');
     expect(spy).toHaveBeenCalledTimes(3);
+
+    // The blob upload (call index 1) must carry the POST body equal to the
+    // serialized MUTATED registry — not the pre-mutation EMPTY_REGISTRY.
+    const uploadCall = spy.mock.calls[1]!;
+    const uploadBody = uploadCall[1]?.body as Blob;
+    expect(uploadBody).toBeInstanceOf(Blob);
+    const uploadedText = await uploadBody.text();
+    const expectedMutated = addLabel(EMPTY_REGISTRY);
+    expect(JSON.parse(uploadedText)).toEqual(JSON.parse(serializeRegistry(expectedMutated)));
   });
 
   it('(c) updates the existing FileNode when a node already exists', async () => {
@@ -239,6 +287,35 @@ describe('writeRegistry', () => {
     expect(spy).toHaveBeenCalledTimes(6);
   });
 
+  it('(d) create→update flip: create mismatch then re-read finds concurrent node → retry issues update', async () => {
+    // First attempt: no node → create → stateMismatch.
+    // Re-read: a concurrent writer created the node in the meantime.
+    // Retry MUST issue an update (not another create) for the now-existing nodeId.
+    const spy = makeSequenceFetch(
+      FILENODE_GET_EMPTY,                 // initial read (no node)
+      BLOB_UPLOAD_RESPONSE,               // initial upload
+      FILENODE_SET_CREATE_MISMATCH,       // first create → mismatch
+      FILENODE_GET_WITH_CONCURRENT_NODE,  // re-read → node now exists (concurrent writer)
+      CONCURRENT_REGISTRY_JSON,           // re-read blob download (concurrent node's content)
+      BLOB_UPLOAD_RESPONSE,               // retry upload
+      FILENODE_SET_CONCURRENT_UPDATE_OK,  // retry set → ok (update, NOT create)
+    );
+    const result = await writeRegistry(makeCtx(spy), addLabel);
+    expect(result.labels).toHaveLength(1);
+    expect(spy).toHaveBeenCalledTimes(7);
+
+    // The retry's FileNode/set call (index 6) must carry `update` for the
+    // concurrent node id, NOT `create` — proving the flip path is exercised.
+    const retrySetCall = spy.mock.calls[6]!;
+    const retrySetBody = JSON.parse(retrySetCall[1]?.body as string) as {
+      methodCalls: Array<[string, Record<string, unknown>, string]>;
+    };
+    const retrySetArgs = retrySetBody.methodCalls[0]![1];
+    expect(retrySetArgs).not.toHaveProperty('create');
+    expect(retrySetArgs).toHaveProperty('update');
+    expect(retrySetArgs['update']).toHaveProperty(CONCURRENT_NODE_ID);
+  });
+
   it('(e) throws label_registry_conflict on two consecutive stateMismatches', async () => {
     const spy = makeSequenceFetch(
       FILENODE_GET_WITH_NODE,       // initial read
@@ -252,6 +329,7 @@ describe('writeRegistry', () => {
     );
     await expect(writeRegistry(makeCtx(spy), addLabel)).rejects.toMatchObject({
       code: 'label_registry_conflict',
+      message: 'Labels were changed elsewhere just now. Reopen and try again.',
     });
     expect(spy).toHaveBeenCalledTimes(8);
   });
