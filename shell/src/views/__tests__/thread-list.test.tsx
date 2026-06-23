@@ -119,6 +119,7 @@ function renderThreadList(opts: {
   mailboxes?: ReadonlyArray<MailboxFixture>;
   threadGet?: (input: { threadId: string }) => unknown;
   onModify?: (input: unknown) => void;
+  onDelete?: (input: unknown) => void;
 } = {}) {
   const data = opts.data ?? FIXTURES;
   const mailboxId = opts.mailboxId === undefined ? 'Mb01' : opts.mailboxId;
@@ -141,6 +142,10 @@ function renderThreadList(opts: {
     'mail.modify': async (input) => {
       opts.onModify?.(input);
       return { modifiedCount: 1 };
+    },
+    'mail.delete': async (input) => {
+      opts.onDelete?.(input);
+      return { deletedCount: 1 };
     },
   });
   return render(
@@ -845,6 +850,48 @@ describe('ThreadList — restore from Trash', () => {
     expect(modifyCalls[0]).toEqual({
       emailIds: ['E-T3'],
       patch: { mailboxIds: { 'Mb-trash': false, 'Mb-inbox': true } },
+    });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Keyboard shortcuts: # delete, Shift+I mark read, Shift+U mark unread (U-7)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadList — action keyboard shortcuts', () => {
+  it('deletes the focused thread on "#"', async () => {
+    const deleteCalls: unknown[] = [];
+    renderThreadList({ onDelete: (i) => deleteCalls.push(i) });
+    await waitForList(); // first row (T1) auto-focused
+    fireEvent.keyDown(screen.getByRole('list', { name: 'Threads' }), { key: '#' });
+    await waitFor(() => expect(deleteCalls).toHaveLength(1));
+    expect(deleteCalls[0]).toEqual({ emailIds: ['E-T1'] });
+  });
+
+  it('marks the focused thread unread on Shift+U', async () => {
+    const modifyCalls: unknown[] = [];
+    renderThreadList({ onModify: (i) => modifyCalls.push(i) });
+    await waitForList();
+    fireEvent.keyDown(screen.getByRole('list', { name: 'Threads' }), { key: 'U' });
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]).toEqual({
+      emailIds: ['E-T1'],
+      patch: { keywords: { $seen: null } },
+    });
+  });
+
+  it('marks the focused thread read on Shift+I', async () => {
+    const modifyCalls: unknown[] = [];
+    // T3 is unread; focus it by pressing End (last row) then mark read.
+    renderThreadList({ onModify: (i) => modifyCalls.push(i) });
+    await waitForList();
+    const list = screen.getByRole('list', { name: 'Threads' });
+    fireEvent.keyDown(list, { key: 'End' }); // focus T3
+    fireEvent.keyDown(list, { key: 'I' });
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(modifyCalls[0]).toEqual({
+      emailIds: ['E-T3'],
+      patch: { keywords: { $seen: true } },
     });
   });
 });
