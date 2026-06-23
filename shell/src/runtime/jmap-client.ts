@@ -4550,6 +4550,298 @@ export async function makeMailboxDeletePreview(
   return { affectedCount: target.totalEmails };
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// FileNode + Blob JMAP wire layer (Task 3 — Labels feature)
+// ──────────────────────────────────────────────────────────────────────
+//
+// Stalwart exposes a `FileNode` object type under the
+// `urn:ietf:params:jmap:filenode` capability. Labels are stored as a
+// JSON file (`blobId`-linked FileNode) so the label registry persists
+// across clients without a mail message carrier.
+//
+// Blob upload/download use the same side-channel as attachment uploads
+// (RFC 8620 §6.1) — `POST /jmap/upload/{accountId}/` and
+// `GET /jmap/download/{accountId}/{blobId}/{name}`.
+
+export const JMAP_USING_FILES = [
+  'urn:ietf:params:jmap:core',
+  'urn:ietf:params:jmap:filenode',
+  'urn:ietf:params:jmap:blob',
+] as const;
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type FileNode = {
+  readonly id: string;
+  readonly name: string;
+  readonly blobId?: string;
+  readonly parentId?: string | null;
+  readonly size?: number;
+};
+
+export type FileNodeList = {
+  readonly state: string;
+  readonly nodes: ReadonlyArray<FileNode>;
+};
+
+export type FileNodeSetResult = {
+  readonly newState?: string;
+  readonly created?: Record<string, { id: string }>;
+  readonly updated?: Record<string, unknown>;
+  readonly destroyed?: string[];
+  readonly notCreated?: Record<string, { type: string }>;
+  readonly notUpdated?: Record<string, { type: string }>;
+};
+
+export type BlobUploadResult = {
+  readonly blobId: string;
+};
+
+// ─── Builders ─────────────────────────────────────────────────────────────────
+
+/**
+ * Build a `FileNode/get` JMAP request that lists all nodes with the
+ * explicit properties array required to get blobId back.
+ *
+ * IMPORTANT: Stalwart does NOT return `blobId` unless it is explicitly
+ * listed in `properties` (confirmed in live probe, 2026-06-23).
+ */
+export function buildFileNodeGetRequest(opts: { readonly accountId: string }): string {
+  return JSON.stringify({
+    using: JMAP_USING_FILES,
+    methodCalls: [
+      [
+        'FileNode/get',
+        {
+          accountId: opts.accountId,
+          ids: null,
+          properties: ['id', 'name', 'parentId', 'blobId', 'size', 'type'],
+        },
+        'c1',
+      ],
+    ],
+  });
+}
+
+/**
+ * Build a `FileNode/set` JMAP request. Supports create, update, destroy,
+ * and the optional `ifInState` optimistic-concurrency token.
+ *
+ * Note: Stalwart (2026-06-23) does not enforce `ifInState`, so last-write-wins
+ * in practice — but we send it defensively for when future servers enforce it.
+ */
+export function buildFileNodeSetRequest(opts: {
+  readonly accountId: string;
+  readonly create?: Record<string, Record<string, unknown>>;
+  readonly update?: Record<string, Record<string, unknown>>;
+  readonly destroy?: string[];
+  readonly ifInState?: string;
+}): string {
+  const args: Record<string, unknown> = { accountId: opts.accountId };
+  if (opts.ifInState !== undefined) args.ifInState = opts.ifInState;
+  if (opts.create !== undefined) args.create = opts.create;
+  if (opts.update !== undefined) args.update = opts.update;
+  if (opts.destroy !== undefined) args.destroy = opts.destroy;
+  return JSON.stringify({
+    using: JMAP_USING_FILES,
+    methodCalls: [['FileNode/set', args, 'c1']],
+  });
+}
+
+// ─── Parsers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Parse a JMAP response body containing a `FileNode/get` method response.
+ * Exposed for tests; production callers use a higher-level fetch function.
+ */
+export function parseFileNodeList(body: string): FileNodeList {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError('jmap_parse_error', `Failed to parse FileNode/get response: ${describe(e)}`, e);
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'FileNode/get response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError('jmap_parse_error', 'FileNode/get response has no methodResponses array.');
+  }
+  const first = methodResponses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'FileNode/get') {
+    throw makeError('jmap_parse_error', 'First methodResponse is not FileNode/get.');
+  }
+  const result = first[1] as { state?: unknown; list?: unknown };
+  if (typeof result.state !== 'string') {
+    throw makeError('jmap_parse_error', 'FileNode/get response is missing state.');
+  }
+  const list = Array.isArray(result.list) ? result.list : [];
+  const nodes: FileNode[] = list.map((raw: unknown) => {
+    if (raw === null || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    if (typeof r.id !== 'string' || typeof r.name !== 'string') return null;
+    return {
+      id: r.id,
+      name: r.name,
+      ...(r.blobId !== undefined && r.blobId !== null ? { blobId: String(r.blobId) } : {}),
+      // parentId can be null (root) or a string (parent node id) — preserve both
+      ...(r.parentId !== undefined ? { parentId: r.parentId as string | null } : {}),
+      ...(typeof r.size === 'number' ? { size: r.size } : {}),
+    };
+  }).filter((n): n is FileNode => n !== null);
+  return { state: result.state, nodes };
+}
+
+/**
+ * Parse a JMAP response body containing a `FileNode/set` method response.
+ * Surfaces `notUpdated`/`notCreated` entries whose `type` is `"stateMismatch"`
+ * distinctly so Task 4 can detect and retry.
+ */
+export function parseFileNodeSet(body: string): FileNodeSetResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError('jmap_parse_error', `Failed to parse FileNode/set response: ${describe(e)}`, e);
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'FileNode/set response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError('jmap_parse_error', 'FileNode/set response has no methodResponses array.');
+  }
+  const first = methodResponses[0] as unknown;
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'FileNode/set') {
+    throw makeError('jmap_parse_error', 'First methodResponse is not FileNode/set.');
+  }
+  const r = first[1] as {
+    newState?: string;
+    created?: Record<string, { id: string }>;
+    updated?: Record<string, unknown>;
+    destroyed?: string[];
+    notCreated?: Record<string, { type: string }>;
+    notUpdated?: Record<string, { type: string }>;
+  };
+  const out: FileNodeSetResult = {};
+  if (typeof r.newState === 'string') (out as Record<string, unknown>).newState = r.newState;
+  if (r.created !== undefined) (out as Record<string, unknown>).created = r.created;
+  if (r.updated !== undefined) (out as Record<string, unknown>).updated = r.updated;
+  if (Array.isArray(r.destroyed)) (out as Record<string, unknown>).destroyed = r.destroyed;
+  // Surface notCreated/notUpdated as-is so Task 4 can inspect `type` values
+  // (especially "stateMismatch") without further processing here.
+  if (r.notCreated !== undefined) (out as Record<string, unknown>).notCreated = r.notCreated;
+  if (r.notUpdated !== undefined) (out as Record<string, unknown>).notUpdated = r.notUpdated;
+  return out;
+}
+
+/**
+ * Parse a JMAP blob upload response and return `{ blobId }`.
+ * The upload blobId (staging) differs from the node's persisted blobId —
+ * always read `blobId` from FileNode/get for downloads.
+ */
+export function parseBlobUpload(body: string): BlobUploadResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError('jmap_parse_error', `Failed to parse blob upload response: ${describe(e)}`, e);
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Blob upload response is not an object.');
+  }
+  const r = parsed as Record<string, unknown>;
+  if (typeof r.blobId !== 'string') {
+    throw makeError('jmap_parse_error', 'Blob upload response is missing blobId.');
+  }
+  return { blobId: r.blobId };
+}
+
+// ─── Fetch helpers ────────────────────────────────────────────────────────────
+
+export type FetchBlobUploadOptions = JmapClientOptions & {
+  readonly accountId: string;
+  /** Raw bytes to upload (e.g. encoded registry JSON). */
+  readonly bytes: Uint8Array;
+  /** MIME type of the content (e.g. 'application/json'). */
+  readonly contentType: string;
+};
+
+/**
+ * POST raw bytes to `POST /jmap/upload/{accountId}/` (RFC 8620 §6.1 side-channel).
+ * Returns `{ blobId }` — the staging blobId to use in a subsequent `FileNode/set`.
+ */
+export async function fetchBlobUpload(opts: FetchBlobUploadOptions): Promise<BlobUploadResult> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const url = `${opts.baseUrl.replace(/\/$/, '')}/jmap/upload/${opts.accountId}/`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': opts.contentType,
+        authorization: `Bearer ${token}`,
+      },
+      body: opts.bytes,
+    });
+  } catch (e) {
+    throw makeError('network_error', `Blob upload failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `Blob upload returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseBlobUpload(text);
+}
+
+export type FetchBlobTextOptions = JmapClientOptions & {
+  readonly accountId: string;
+  readonly blobId: string;
+  /** Filename for the download URL path component. */
+  readonly filename: string;
+};
+
+/**
+ * GET `GET /jmap/download/{accountId}/{blobId}/{filename}` and return the
+ * response body as a string. Use the node's `blobId` from FileNode/get
+ * (NOT the staging blobId from upload) for reads.
+ */
+export async function fetchBlobText(opts: FetchBlobTextOptions): Promise<string> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const url = `${opts.baseUrl.replace(/\/$/, '')}/jmap/download/${opts.accountId}/${opts.blobId}/${opts.filename}`;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'GET',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    });
+  } catch (e) {
+    throw makeError('network_error', `Blob download failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `Blob download returned ${response.status} ${response.statusText}`,
+    );
+  }
+  return response.text();
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }
