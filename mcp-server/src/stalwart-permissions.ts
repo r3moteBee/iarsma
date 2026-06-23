@@ -53,7 +53,7 @@ const SCOPE_PERMISSIONS: Readonly<Record<string, Record<string, boolean>>> = {
   'mail:mailbox': {
     jmapMailboxCreate: true,
     jmapMailboxUpdate: true,
-    jmapMailboxDelete: true,
+    jmapMailboxDestroy: true,
   },
 };
 
