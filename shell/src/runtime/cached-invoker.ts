@@ -34,7 +34,7 @@
 
 import { canonicalize } from './canonical.js';
 import type { CacheStorage } from './cache-storage.js';
-import { purposeFor } from './cache-policy.js';
+import { cacheInvalidationsFor, purposeFor } from './cache-policy.js';
 import type { InvocationOptions, Invoker } from './invoker.js';
 import type { DryRunPreview } from './types.js';
 
@@ -75,7 +75,26 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
       const isCacheable = purpose !== null && options.dryRun !== true;
 
       if (!isCacheable) {
-        return opts.inner.invoke<I, O>(name, input, options);
+        const result = await opts.inner.invoke<I, O>(name, input, options);
+        // v0.13.1 — a successful write may invalidate cached reads for
+        // mailboxes/keyword-views the user isn't currently viewing (a
+        // move into an unmounted folder, a delete, a label apply). The
+        // push-generation bump only refreshes MOUNTED hooks, so without
+        // this the destination serves a stale `threads` list on first
+        // navigation. Drop the affected stores so the next read is a
+        // clean miss. Dry-run never mutates → never invalidates.
+        if (options.dryRun !== true) {
+          for (const purpose of cacheInvalidationsFor(name, input)) {
+            try {
+              await opts.store.invalidate(purpose);
+            } catch {
+              // Best-effort — a cache-clear failure must not fail the
+              // user's write. The stale entry self-heals on the next
+              // push tick / manual refresh.
+            }
+          }
+        }
+        return result;
       }
 
       const cacheKey = canonicalize(input);

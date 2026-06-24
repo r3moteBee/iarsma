@@ -168,6 +168,110 @@ describe('cachedInvoker — pass-through', () => {
   });
 });
 
+describe('cachedInvoker — write invalidation (v0.13.1)', () => {
+  it('a move (mail.modify with a mailboxIds patch) clears threads + searchResults + mailboxes', async () => {
+    // Seed a destination mailbox list, a label-filtered list, the
+    // mailbox tree, and an unrelated thread body in the cache.
+    await cache.put('threads', '{"mailboxId":"dest"}', { threads: [], position: 0, total: 0 });
+    await cache.put('searchResults', '{"q":"x"}', { threads: [] });
+    await cache.put('mailboxes', '{}', [{ id: 'dest', totalEmails: 0 }]);
+    await cache.put('threadBodies', '{"id":"t1"}', { id: 't1' });
+
+    const { invoker } = inner({ 'mail.modify': () => ({ modifiedCount: 1 }) });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke('mail.modify', {
+      emailIds: ['e1'],
+      patch: { mailboxIds: { src: false, dest: true } },
+    });
+
+    expect(await cache.get('threads', '{"mailboxId":"dest"}')).toBeNull();
+    expect(await cache.get('searchResults', '{"q":"x"}')).toBeNull();
+    expect(await cache.get('mailboxes', '{}')).toBeNull();
+    // threadBodies is NOT in a move's invalidation set — left intact.
+    expect(await cache.get('threadBodies', '{"id":"t1"}')).not.toBeNull();
+  });
+
+  it('a keyword-only mail.modify (flag / mark-read) does NOT clear the cache', async () => {
+    await cache.put('threads', '{"mailboxId":"mb1"}', { threads: [], position: 0, total: 0 });
+    const { invoker } = inner({ 'mail.modify': () => ({ modifiedCount: 1 }) });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke('mail.modify', {
+      emailIds: ['e1'],
+      patch: { keywords: { $seen: true } },
+    });
+
+    // Hot mark-read-on-open path must keep the cache warm.
+    expect(await cache.get('threads', '{"mailboxId":"mb1"}')).not.toBeNull();
+  });
+
+  it('mail.delete clears threads, threadBodies, searchResults, and mailboxes', async () => {
+    await cache.put('threads', '{"mailboxId":"mb1"}', { threads: [] });
+    await cache.put('threadBodies', '{"id":"t1"}', { id: 't1' });
+    await cache.put('searchResults', '{"q":"x"}', { threads: [] });
+    await cache.put('mailboxes', '{}', []);
+    const { invoker } = inner({ 'mail.delete': () => ({ deleted: 1 }) });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke('mail.delete', { emailIds: ['e1'] });
+
+    expect(await cache.get('threads', '{"mailboxId":"mb1"}')).toBeNull();
+    expect(await cache.get('threadBodies', '{"id":"t1"}')).toBeNull();
+    expect(await cache.get('searchResults', '{"q":"x"}')).toBeNull();
+    expect(await cache.get('mailboxes', '{}')).toBeNull();
+  });
+
+  it('label.apply clears threads + searchResults but not mailboxes', async () => {
+    await cache.put('threads', '{"hasKeyword":"work"}', { threads: [] });
+    await cache.put('searchResults', '{"q":"x"}', { threads: [] });
+    await cache.put('mailboxes', '{}', []);
+    const { invoker } = inner({ 'label.apply': () => ({ modifiedCount: 1 }) });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke('label.apply', { emailIds: ['e1'], add: ['work'] });
+
+    expect(await cache.get('threads', '{"hasKeyword":"work"}')).toBeNull();
+    expect(await cache.get('searchResults', '{"q":"x"}')).toBeNull();
+    expect(await cache.get('mailboxes', '{}')).not.toBeNull();
+  });
+
+  it('a dry-run mutation never invalidates the cache', async () => {
+    await cache.put('threads', '{"mailboxId":"dest"}', { threads: [], position: 0, total: 0 });
+    const { invoker } = inner({
+      'mail.modify': () => ({ mode: 'preview', plan: { affectedCount: 1 } }),
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await wrapped.invoke(
+      'mail.modify',
+      { emailIds: ['e1'], patch: { mailboxIds: { src: false, dest: true } } },
+      { dryRun: true },
+    );
+
+    expect(await cache.get('threads', '{"mailboxId":"dest"}')).not.toBeNull();
+  });
+
+  it('a failed write propagates and does not invalidate', async () => {
+    await cache.put('threads', '{"mailboxId":"dest"}', { threads: [], position: 0, total: 0 });
+    const { invoker } = inner({
+      'mail.modify': () => {
+        throw new Error('boom');
+      },
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache });
+
+    await expect(
+      wrapped.invoke('mail.modify', {
+        emailIds: ['e1'],
+        patch: { mailboxIds: { src: false, dest: true } },
+      }),
+    ).rejects.toThrow('boom');
+    // Write failed → cache untouched.
+    expect(await cache.get('threads', '{"mailboxId":"dest"}')).not.toBeNull();
+  });
+});
+
 describe('cachedInvoker — cache key canonicalization', () => {
   it('treats inputs differing only by key order as the same cache key', async () => {
     // Pre-populate with a sentinel under the canonicalized key

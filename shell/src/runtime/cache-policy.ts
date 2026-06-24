@@ -35,3 +35,63 @@ export const CACHEABLE_TOOLS: Readonly<Record<string, CachePurposeKey>> = {
 export function purposeFor(toolName: string): CachePurposeKey | null {
   return CACHEABLE_TOOLS[toolName] ?? null;
 }
+
+/**
+ * Which cache purposes a successful WRITE invalidates (D-051 follow-up,
+ * v0.13.1). `cachedInvoker` calls this after a non-dry-run mutation and
+ * clears each returned purpose so a later read — even for a mailbox the
+ * user isn't currently viewing — sees fresh data instead of the
+ * stale-while-revalidate cache.
+ *
+ * Why this is needed: the push-generation bump only forces a refetch on
+ * hooks that are currently MOUNTED. A message moved into a folder the
+ * user then navigates to was unmounted at move time, so its cached
+ * `threads` list (without the moved message) is served on arrival. The
+ * fix is to drop the affected stores on the write itself.
+ *
+ * Scoped deliberately:
+ *   - Mailbox-membership changes (`mail.modify` with a `mailboxIds`
+ *     patch, restore, `mail.delete`, `mail.purge`) shift which messages
+ *     a per-mailbox `threads` list and `searchResults` return, and the
+ *     unread/total counts in `mailboxes` — invalidate all three.
+ *   - Keyword-membership changes (`label.apply`, `label.delete`) shift
+ *     keyword-filtered `threads`/`searchResults` views but not mailbox
+ *     counts — invalidate those two.
+ *   - A keyword-only `mail.modify` (flag / mark-read) changes NO query
+ *     membership; the mounted view already refreshes via the generation
+ *     bump. Returning `[]` here preserves the cache on the very hot
+ *     mark-read-on-open path (don't regress it).
+ */
+export function cacheInvalidationsFor(
+  toolName: string,
+  input: unknown,
+): readonly CachePurposeKey[] {
+  switch (toolName) {
+    case 'mail.delete':
+    case 'mail.purge':
+      return ['threads', 'threadBodies', 'searchResults', 'mailboxes'];
+    case 'mail.modify':
+      return patchTouchesMailbox(input)
+        ? ['threads', 'searchResults', 'mailboxes']
+        : [];
+    case 'label.apply':
+    case 'label.delete':
+      return ['threads', 'searchResults'];
+    default:
+      return [];
+  }
+}
+
+/** True when a `mail.modify` patch changes mailbox membership (a move /
+ *  restore), as opposed to a keyword-only patch (flag, seen). */
+function patchTouchesMailbox(input: unknown): boolean {
+  if (typeof input !== 'object' || input === null) return false;
+  const patch = (input as { patch?: unknown }).patch;
+  if (typeof patch !== 'object' || patch === null) return false;
+  const mailboxIds = (patch as { mailboxIds?: unknown }).mailboxIds;
+  return (
+    typeof mailboxIds === 'object' &&
+    mailboxIds !== null &&
+    Object.keys(mailboxIds).length > 0
+  );
+}
