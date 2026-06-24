@@ -833,7 +833,7 @@ function SignedInShell({
       kind: 'edit',
       calendarId: id,
       name: cal.name,
-      color: cal.color ?? '#3b82f6',
+      color: cal.color ?? DEFAULT_LABEL_COLOR,
     });
   }, [calendars]);
 

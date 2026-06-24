@@ -205,12 +205,18 @@ describe('jmapInvoker — calendar.create', () => {
 describe('jmapInvoker — calendar.update', () => {
   it('issues a Calendar/set update with name and returns { updated: true }', async () => {
     const { fetch: fetchMock, apiCalls } = makeFetch({
-      apiBodies: [calendarSetUpdateOk('cal-1')],
+      apiBodies: [
+        // First: Calendar/get for the existence pre-check
+        calendarGetResponse([{ id: 'cal-1', name: 'Work', isDefault: false }]),
+        // Second: Calendar/set update
+        calendarSetUpdateOk('cal-1'),
+      ],
     });
     const inv = makeInvoker(fetchMock);
     const result = await inv.invoke('calendar.update', { calendarId: 'cal-1', name: 'Work Renamed' });
     expect(result).toEqual({ updated: true });
-    const body = JSON.parse(apiCalls[0]!);
+    // apiCalls[0] is Calendar/get; apiCalls[1] is Calendar/set update
+    const body = JSON.parse(apiCalls[1]!);
     const [method, args] = body.methodCalls[0];
     expect(method).toBe('Calendar/set');
     expect(args.update['cal-1'].name).toBe('Work Renamed');
@@ -218,15 +224,36 @@ describe('jmapInvoker — calendar.update', () => {
 
   it('includes color in Calendar/set update when provided', async () => {
     const { fetch: fetchMock, apiCalls } = makeFetch({
-      apiBodies: [calendarSetUpdateOk('cal-1')],
+      apiBodies: [
+        // First: Calendar/get for the existence pre-check
+        calendarGetResponse([{ id: 'cal-1', name: 'Work', isDefault: false }]),
+        // Second: Calendar/set update
+        calendarSetUpdateOk('cal-1'),
+      ],
     });
     const inv = makeInvoker(fetchMock);
     await inv.invoke('calendar.update', { calendarId: 'cal-1', color: '#ff9d23' });
-    const body = JSON.parse(apiCalls[0]!);
+    // apiCalls[1] is Calendar/set update
+    const body = JSON.parse(apiCalls[1]!);
     const [, args] = body.methodCalls[0];
     expect(args.update['cal-1'].color).toBe('#ff9d23');
     // name not sent since not provided
     expect(args.update['cal-1'].name).toBeUndefined();
+  });
+
+  it('rejects with calendar_not_found and does NOT issue Calendar/set update when id not in list', async () => {
+    const { fetch: fetchMock, apiCalls } = makeFetch({
+      apiBodies: [
+        // Only Calendar/get is expected — no update should follow
+        calendarGetResponse([{ id: 'cal-other', name: 'Other', isDefault: false }]),
+      ],
+    });
+    const inv = makeInvoker(fetchMock);
+    await expect(
+      inv.invoke('calendar.update', { calendarId: 'cal-missing', name: 'New Name' }),
+    ).rejects.toMatchObject({ code: 'calendar_not_found' });
+    // Confirm no Calendar/set update was issued
+    expect(apiCalls.some((c) => c.includes('"update"'))).toBe(false);
   });
 });
 
@@ -328,6 +355,23 @@ describe('jmapInvoker — calendar.delete', () => {
       inv.invoke('calendar.delete', { calendarId: 'cal-default' }),
     ).rejects.toMatchObject({ code: 'calendar_is_default' });
     // Confirm no Calendar/set destroy was issued
+    expect(apiCalls.some((c) => c.includes('"destroy"'))).toBe(false);
+  });
+
+  it('commit returns { deleted: true } idempotently when calendar id is not in list (already gone)', async () => {
+    const { fetch: fetchMock, apiCalls } = makeFetch({
+      apiBodies: [
+        // Only Calendar/get is expected — no destroy should follow
+        calendarGetResponse([
+          { id: 'cal-other', name: 'Other', isDefault: false },
+        ]),
+      ],
+    });
+    const inv = makeInvoker(fetchMock);
+    const result = await inv.invoke('calendar.delete', { calendarId: 'cal-missing' });
+    expect(result).toEqual({ deleted: true });
+    // Only the Calendar/get (list lookup) should have been sent — no Calendar/set destroy
+    expect(apiCalls).toHaveLength(1);
     expect(apiCalls.some((c) => c.includes('"destroy"'))).toBe(false);
   });
 });

@@ -8,11 +8,12 @@ export const calendarDelete = capability({
   description:
     'Delete a calendar (JMAP Calendar/set destroy). Refuses the default ' +
     'calendar. A non-empty calendar is refused unless `removeEvents:true`, ' +
-    'which cascade-deletes its events. No undo. Dry-run returns whether the ' +
-    'target is the default calendar. Refusals (stable codes you can branch ' +
-    'on): `calendar_not_found` (no calendar exists for that id), ' +
-    '`calendar_is_default` (the default calendar cannot be deleted), ' +
-    '`calendar_not_empty` (calendar has events and removeEvents was not set).',
+    'which cascade-deletes its events. No undo. Idempotent: deleting an ' +
+    'already-gone calendar returns `{deleted:true}` without error. Dry-run ' +
+    'returns whether the target is the default calendar. Refusals (stable ' +
+    'codes you can branch on): `calendar_is_default` (the default calendar ' +
+    'cannot be deleted), `calendar_not_empty` (calendar has events and ' +
+    'removeEvents was not set).',
   isDestructive: true,
   input: z.object({
     calendarId: z.string().describe('Calendar to delete.'),
@@ -27,7 +28,6 @@ export const calendarDelete = capability({
     }),
   },
   errors: [
-    { code: 'calendar_not_found', description: 'No calendar exists for the provided id.' },
     { code: 'calendar_is_default', description: 'The default calendar cannot be deleted.' },
     { code: 'calendar_not_empty', description: 'Calendar has events; pass removeEvents:true to cascade-delete.' },
   ],
