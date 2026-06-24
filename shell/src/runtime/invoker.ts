@@ -729,6 +729,13 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             const target = cals.find((c) => c.id === p.calendarId);
             return { isDefault: target?.isDefault === true } as unknown as O | DryRunPreview<O>;
           }
+          // Defense-in-depth: guard against deleting the default calendar even
+          // when the UI hides the Delete action. Mirrors the dry-run lookup.
+          const cals = await fetchCalendarList({ ...opts, session });
+          const target = cals.find((c) => c.id === p.calendarId);
+          if (target?.isDefault === true) {
+            throw makeToolError('calendar_is_default', 'The default calendar cannot be deleted.');
+          }
           return (await fetchCalendarDeleteCommit({ ...opts, session, calendarId: p.calendarId, removeEvents: p.removeEvents === true })) as unknown as O;
         }
         default:

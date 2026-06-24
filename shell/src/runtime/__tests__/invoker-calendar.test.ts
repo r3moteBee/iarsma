@@ -277,12 +277,18 @@ describe('jmapInvoker — calendar.delete', () => {
 
   it('commit (dryRun=false) calls Calendar/set destroy without onDestroyRemoveEvents when removeEvents=false', async () => {
     const { fetch: fetchMock, apiCalls } = makeFetch({
-      apiBodies: [calendarSetDestroyOk('cal-1')],
+      apiBodies: [
+        // First: Calendar/get for the default-calendar guard
+        calendarGetResponse([{ id: 'cal-1', name: 'Work', isDefault: false }]),
+        // Second: Calendar/set destroy
+        calendarSetDestroyOk('cal-1'),
+      ],
     });
     const inv = makeInvoker(fetchMock);
     const result = await inv.invoke('calendar.delete', { calendarId: 'cal-1', removeEvents: false });
     expect(result).toEqual({ deleted: true });
-    const body = JSON.parse(apiCalls[0]!);
+    // apiCalls[0] is the Calendar/get; apiCalls[1] is the Calendar/set destroy
+    const body = JSON.parse(apiCalls[1]!);
     const [method, args] = body.methodCalls[0];
     expect(method).toBe('Calendar/set');
     expect(args.destroy).toContain('cal-1');
@@ -292,14 +298,36 @@ describe('jmapInvoker — calendar.delete', () => {
 
   it('commit sends onDestroyRemoveEvents=true when removeEvents=true', async () => {
     const { fetch: fetchMock, apiCalls } = makeFetch({
-      apiBodies: [calendarSetDestroyOk('cal-1')],
+      apiBodies: [
+        // First: Calendar/get for the default-calendar guard
+        calendarGetResponse([{ id: 'cal-1', name: 'Work', isDefault: false }]),
+        // Second: Calendar/set destroy
+        calendarSetDestroyOk('cal-1'),
+      ],
     });
     const inv = makeInvoker(fetchMock);
     const result = await inv.invoke('calendar.delete', { calendarId: 'cal-1', removeEvents: true });
     expect(result).toEqual({ deleted: true });
-    const body = JSON.parse(apiCalls[0]!);
+    const body = JSON.parse(apiCalls[1]!);
     const [, args] = body.methodCalls[0];
     expect(args.destroy).toContain('cal-1');
     expect(args.onDestroyRemoveEvents).toBe(true);
+  });
+
+  it('commit rejects with calendar_is_default and does NOT issue Calendar/set destroy for a default calendar', async () => {
+    const { fetch: fetchMock, apiCalls } = makeFetch({
+      apiBodies: [
+        // Only Calendar/get is expected — no destroy should follow
+        calendarGetResponse([
+          { id: 'cal-default', name: 'Default Calendar', isDefault: true },
+        ]),
+      ],
+    });
+    const inv = makeInvoker(fetchMock);
+    await expect(
+      inv.invoke('calendar.delete', { calendarId: 'cal-default' }),
+    ).rejects.toMatchObject({ code: 'calendar_is_default' });
+    // Confirm no Calendar/set destroy was issued
+    expect(apiCalls.some((c) => c.includes('"destroy"'))).toBe(false);
   });
 });
