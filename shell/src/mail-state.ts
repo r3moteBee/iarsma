@@ -41,6 +41,20 @@ export const mailboxScrollPositionsAtom = atom<Readonly<Record<string, number>>>
 export const selectedThreadIdAtom = atom<string | null>(null);
 
 /**
+ * Multi-select set for bulk actions (#5). Holds `thread.id`s. Cleared by
+ * the same effects that clear `selectedThreadIdAtom` (mailbox / label /
+ * search context change) — selection never survives a context switch.
+ */
+export const selectedThreadIdsAtom = atom<ReadonlySet<string>>(new Set<string>());
+
+/**
+ * Anchor row index for Shift-click range selection. Set on each plain
+ * checkbox toggle / plain row click; consumed by Shift-click. `null`
+ * means "no anchor yet" (a Shift-click then anchors on itself).
+ */
+export const selectionAnchorIndexAtom = atom<number | null>(null);
+
+/**
  * Pending delete-undo (U-4). Set by the loggingInvoker's
  * `onUndoRegistered` hook the moment a UI `mail.delete` commits and its
  * inverse is registered. `DeleteToast` reads it to show an act-then-undo

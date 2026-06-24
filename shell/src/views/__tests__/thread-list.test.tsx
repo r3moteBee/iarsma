@@ -1080,3 +1080,61 @@ describe('ThreadList — label picker', () => {
     expect(calls[0]!.input).toEqual({ emailIds: ['E-TL1'], remove: ['label_work'] });
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Multi-select checkbox (Task 4)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('multi-select checkbox', () => {
+  it('shows a selection checkbox per row and selects on click', async () => {
+    renderThreadList({});
+    await waitForList();
+    const checkboxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    expect(checkboxes.length).toBeGreaterThan(0);
+    fireEvent.click(checkboxes[0]!);
+    expect(checkboxes[0]).toBeChecked();
+  });
+
+  it('clicking a checkbox does not open the thread', async () => {
+    /** Probe component that reads selectedThreadIdAtom so the test can
+     *  assert it was NOT set by a checkbox click. */
+    function ThreadOpenProbe() {
+      const selectedThread = useAtomValue(selectedThreadIdAtom);
+      return (
+        <div
+          data-testid="thread-open-probe"
+          data-selected-thread={selectedThread ?? ''}
+        />
+      );
+    }
+
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList />
+            <ThreadOpenProbe />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    const checkbox = screen.getAllByRole('checkbox', { name: /select conversation/i })[0]!;
+    fireEvent.click(checkbox);
+    // Give any async effects time to run.
+    await new Promise((r) => setTimeout(r, 10));
+    // selectedThreadIdAtom must remain unset — a checkbox click selects
+    // the row for bulk actions, it does NOT open the thread view.
+    expect(screen.getByTestId('thread-open-probe')).toHaveAttribute(
+      'data-selected-thread',
+      '',
+    );
+    // The checkbox itself must be checked (multi-select state updated).
+    expect(checkbox).toBeChecked();
+  });
+});
