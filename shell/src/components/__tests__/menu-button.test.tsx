@@ -96,6 +96,24 @@ describe('MenuButton', () => {
     expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
+  // ── Trigger size variant (v0.13.1 regression fix) ──────────────────
+
+  it('applies the triggerSmall class when size="sm" is passed', () => {
+    render(
+      <MenuButton label="Move to…" size="sm" items={[{ label: 'Inbox', onSelect: () => {} }]} />,
+    );
+    const trigger = screen.getByRole('button', { name: 'Move to…' });
+    expect(trigger.className).toContain('triggerSmall');
+  });
+
+  it('does NOT apply the triggerSmall class by default (no size prop)', () => {
+    render(
+      <MenuButton label="Move to…" items={[{ label: 'Inbox', onSelect: () => {} }]} />,
+    );
+    const trigger = screen.getByRole('button', { name: 'Move to…' });
+    expect(trigger.className).not.toContain('triggerSmall');
+  });
+
   it('a normal (non-checkbox) item still closes the menu on select', () => {
     const onSelect = vi.fn();
     render(

@@ -951,6 +951,19 @@ describe('ThreadList — Move to… folder picker', () => {
     const items = within(menu).getAllByRole('menuitem');
     expect(items.map((el) => el.textContent)).not.toContain('Inbox');
   });
+
+  it('renders the move trigger with the small (flat icon) variant', async () => {
+    renderThreadList({
+      mailboxes: TWO_MAILBOXES,
+      mailboxId: 'Mb-inbox',
+    });
+    await waitForList();
+
+    // The small size variant adds the hashed `triggerSmall` module class so
+    // the menu trigger matches the flat 28×28 row-action icon buttons.
+    const moveBtn = screen.getByLabelText('Move Welcome to…');
+    expect(moveBtn.className).toContain('triggerSmall');
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────

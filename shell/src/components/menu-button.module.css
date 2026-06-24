@@ -35,6 +35,20 @@
   outline-offset: 2px;
 }
 
+/* Small variant — matches the raw .iconBtn row-action buttons (28×28 flat
+ * square with a 15px icon) so the "Move to…" / "Label…" menu triggers sit
+ * flush with Flag / Mark-read / Trash in the message-list row actions. */
+.triggerSmall {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.triggerSmall svg {
+  width: 15px;
+  height: 15px;
+}
+
 .menu {
   position: absolute;
   top: calc(100% + 4px);
