@@ -210,6 +210,12 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
             opts.inner.uploadAttachment!(blob, uploadOpts),
         }
       : {}),
+    ...(opts.inner.resolveThreadEmailIds !== undefined
+      ? {
+          resolveThreadEmailIds: (threadIds: readonly string[]) =>
+            opts.inner.resolveThreadEmailIds!(threadIds),
+        }
+      : {}),
   };
 }
 
