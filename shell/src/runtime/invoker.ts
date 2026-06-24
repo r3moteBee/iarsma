@@ -24,6 +24,9 @@ import {
   buildMailDraftRequest,
   buildMailSendRequest,
   fetchAttachmentUpload,
+  fetchCalendarCreateCommit,
+  fetchCalendarUpdateCommit,
+  fetchCalendarDeleteCommit,
   fetchCalendarList,
   fetchContactCreateCommit,
   fetchContactDeleteCommit,
@@ -707,6 +710,26 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             return (await labelApplyPreview({ ...opts, session }, params)) as unknown as O | DryRunPreview<O>;
           }
           return (await labelApplyCommit({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'calendar.create': {
+          const p = _input as unknown as { name: string; color?: string };
+          const session = await getSession();
+          return (await fetchCalendarCreateCommit({ ...opts, session, name: p.name, ...(p.color !== undefined ? { color: p.color } : {}) })) as unknown as O;
+        }
+        case 'calendar.update': {
+          const p = _input as unknown as { calendarId: string; name?: string; color?: string };
+          const session = await getSession();
+          return (await fetchCalendarUpdateCommit({ ...opts, session, calendarId: p.calendarId, ...(p.name !== undefined ? { name: p.name } : {}), ...(p.color !== undefined ? { color: p.color } : {}) })) as unknown as O;
+        }
+        case 'calendar.delete': {
+          const p = _input as unknown as { calendarId: string; removeEvents?: boolean };
+          const session = await getSession();
+          if (_options.dryRun === true) {
+            const cals = await fetchCalendarList({ ...opts, session });
+            const target = cals.find((c) => c.id === p.calendarId);
+            return { isDefault: target?.isDefault === true } as unknown as O | DryRunPreview<O>;
+          }
+          return (await fetchCalendarDeleteCommit({ ...opts, session, calendarId: p.calendarId, removeEvents: p.removeEvents === true })) as unknown as O;
         }
         default:
           throw makeToolError(
