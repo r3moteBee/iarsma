@@ -76,14 +76,15 @@ export function KeyboardHelpOverlay() {
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: 'white',
-          color: 'black',
+          background: 'var(--surface-1)',
+          color: 'var(--text-1)',
           maxWidth: '40em',
           maxHeight: '85vh',
           overflow: 'auto',
           padding: '1.25em',
           borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
+          border: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-md)',
         }}
       >
         <header
@@ -103,7 +104,8 @@ export function KeyboardHelpOverlay() {
             aria-label="Close keyboard shortcuts"
             style={{
               background: 'none',
-              border: '1px solid rgba(0,0,0,0.2)',
+              color: 'var(--text-1)',
+              border: '1px solid var(--border)',
               borderRadius: 4,
               padding: '0.25em 0.5em',
               cursor: 'pointer',
@@ -119,7 +121,7 @@ export function KeyboardHelpOverlay() {
             bindings={grouped.get(scope) ?? []}
           />
         ))}
-        <p style={{ marginTop: '1em', opacity: 0.75, fontSize: '0.9em' }}>
+        <p style={{ marginTop: '1em', color: 'var(--text-2)', fontSize: '0.9em' }}>
           See <code>docs/keyboard.md</code> for the full reference, including
           reserved bindings for future capabilities.
         </p>
@@ -145,7 +147,7 @@ function BindingGroup(props: {
           {props.bindings.map((b) => (
             <tr
               key={`${b.keys}|${b.action}`}
-              style={{ borderTop: '1px solid rgba(0,0,0,0.06)' }}
+              style={{ borderTop: '1px solid var(--border)' }}
             >
               <th
                 scope="row"
@@ -160,7 +162,9 @@ function BindingGroup(props: {
               >
                 <kbd>{b.keys}</kbd>
               </th>
-              <td style={{ padding: '0.25em 0' }}>{b.action}</td>
+              <td style={{ padding: '0.25em 0', color: 'var(--text-1)' }}>
+                {b.action}
+              </td>
             </tr>
           ))}
         </tbody>
