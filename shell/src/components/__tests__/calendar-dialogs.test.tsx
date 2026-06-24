@@ -8,6 +8,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CalendarDialog, DeleteCalendarDialog } from '../calendar-dialogs.js';
+import { runAxe } from '../../__tests__/util/axe.js';
 
 // jsdom does not implement HTMLDialogElement.showModal() natively.
 beforeEach(() => {
@@ -399,5 +400,45 @@ describe('DeleteCalendarDialog — light mode', () => {
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Cannot delete.');
+  });
+});
+
+// ── Accessibility ────────────────────────────────────────────────────
+
+describe('CalendarDialog — a11y (axe WCAG 2.1 AA)', () => {
+  it('CalendarDialog create mode has zero axe violations', async () => {
+    const { container } = render(
+      <CalendarDialog open mode="create" onClose={() => {}} onSubmit={vi.fn()} />,
+    );
+    const violations = await runAxe(container);
+    expect(violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it('DeleteCalendarDialog typed mode has zero axe violations', async () => {
+    const { container } = render(
+      <DeleteCalendarDialog
+        open
+        mode="typed"
+        calendarName="Work"
+        onClose={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const violations = await runAxe(container);
+    expect(violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it('DeleteCalendarDialog light mode has zero axe violations', async () => {
+    const { container } = render(
+      <DeleteCalendarDialog
+        open
+        mode="light"
+        calendarName="Work"
+        onClose={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    const violations = await runAxe(container);
+    expect(violations.map((v) => v.id)).toEqual([]);
   });
 });

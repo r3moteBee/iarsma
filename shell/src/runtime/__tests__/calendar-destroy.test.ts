@@ -28,6 +28,15 @@ describe('Calendar/set destroy', () => {
     })).rejects.toMatchObject({ code: 'calendar_not_empty' });
   });
 
+  it('maps non-calendarHasEvent notDestroyed type to jmap_set_error', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ methodResponses: [['Calendar/set', { notDestroyed: { c: { type: 'forbidden', description: 'Not allowed.' } } }, '0']] }));
+    await expect(fetchCalendarDeleteCommit({
+      baseUrl: 'x', getAuthToken: () => 'tok', fetch: fetchImpl as unknown as typeof fetch,
+      session: fakeSession(), calendarId: 'c', removeEvents: false,
+    })).rejects.toMatchObject({ code: 'jmap_set_error' });
+  });
+
   it('resolves on successful destroy', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       jsonResponse({ methodResponses: [['Calendar/set', { destroyed: ['c'] }, '0']] }));

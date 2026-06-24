@@ -15,7 +15,7 @@ export const calendarUpdate = capability({
   input: z.object({
     calendarId: z.string().describe('Calendar to update.'),
     name: z.string().min(1).optional().describe('New display name. Non-empty if provided.'),
-    color: z.string().optional().describe('New CSS color (e.g. "#ff9d23"). Pass null or omit to leave unchanged.'),
+    color: z.string().optional().describe('New CSS color (e.g. "#ff9d23"). Omit to leave unchanged.'),
   }),
   output: z.object({
     updated: z.boolean().describe('True when the calendar was updated.'),
