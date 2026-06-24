@@ -5220,6 +5220,149 @@ export async function fetchCalendarUpdateCommit(
   return parseCalendarSetUpdateResponse(text, opts.calendarId);
 }
 
+// ---------------------------------------------------------------------------
+// Calendar/set — calendar.delete
+// ---------------------------------------------------------------------------
+
+export type FetchCalendarDeleteOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly calendarId: string;
+  readonly removeEvents: boolean;
+};
+
+/**
+ * Build the JMAP `Calendar/set` destroy payload.
+ * When `removeEvents` is true, includes `onDestroyRemoveEvents: true` so
+ * Stalwart cascade-deletes all events in the calendar. When false (the
+ * default), the flag is omitted and the server will refuse with
+ * `calendarHasEvent` if the calendar is non-empty.
+ */
+export function buildCalendarDeleteRequest(opts: {
+  readonly accountId: string;
+  readonly calendarId: string;
+  readonly removeEvents: boolean;
+}): string {
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [['Calendar/set', {
+      accountId: opts.accountId,
+      ...(opts.removeEvents ? { onDestroyRemoveEvents: true } : {}),
+      destroy: [opts.calendarId],
+    }, '0']],
+  });
+}
+
+/**
+ * POST a JMAP `Calendar/set` destroy and parse the response.
+ * - Throws `calendar_not_empty` when the server refuses with `calendarHasEvent`.
+ * - Throws `jmap_set_error` for any other `notDestroyed` refusal.
+ * - Returns `{ deleted: true }` on success.
+ */
+export async function fetchCalendarDeleteCommit(
+  opts: FetchCalendarDeleteOptions,
+): Promise<{ deleted: true }> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildCalendarDeleteRequest({
+    accountId,
+    calendarId: opts.calendarId,
+    removeEvents: opts.removeEvents,
+  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Calendar/set destroy returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseCalendarSetDestroyResponse(text, opts.calendarId);
+}
+
+/**
+ * Parse a JMAP `Calendar/set` destroy response.
+ * Surfaces `calendar_not_empty` when the server returns
+ * `notDestroyed[calendarId].type === 'calendarHasEvent'`; maps all other
+ * `notDestroyed` entries to `jmap_set_error`.
+ */
+export function parseCalendarSetDestroyResponse(
+  body: string,
+  calendarId: string,
+): { deleted: true } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Calendar/set destroy response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Calendar/set destroy response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Calendar/set destroy response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'Calendar/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Calendar/set.',
+    );
+  }
+  const result = first[1] as {
+    destroyed?: unknown[];
+    notDestroyed?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notDestroyed !== undefined && Object.keys(result.notDestroyed).length > 0) {
+    const entry = result.notDestroyed[calendarId];
+    if (entry?.type === 'calendarHasEvent') {
+      throw makeError(
+        'calendar_not_empty',
+        'Calendar is not empty.',
+        result.notDestroyed,
+      );
+    }
+    // Any other notDestroyed reason → generic set error
+    const ids = Object.keys(result.notDestroyed);
+    const details = ids
+      .map((id) => {
+        const e = result.notDestroyed![id]!;
+        return `${id}: ${e.type ?? 'unknown'}${e.description !== undefined ? ` — ${e.description}` : ''}`;
+      })
+      .join('; ');
+    throw makeError(
+      'jmap_set_error',
+      `Calendar/set notDestroyed: ${details}`,
+      result.notDestroyed,
+    );
+  }
+  return { deleted: true };
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }
