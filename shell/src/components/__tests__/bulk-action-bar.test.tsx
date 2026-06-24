@@ -3,6 +3,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 afterEach(cleanup);
 import { BulkActionBar } from '../bulk-action-bar.js';
+import { runAxe } from '../../__tests__/util/axe.js';
 
 function setup(overrides: Partial<Parameters<typeof BulkActionBar>[0]> = {}) {
   const props = {
@@ -41,5 +42,23 @@ describe('BulkActionBar', () => {
     const props = setup();
     fireEvent.click(screen.getByRole('button', { name: /clear selection/i }));
     expect(props.onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('has zero axe-core violations against WCAG 2.1 AA', async () => {
+    const { container } = render(
+      <BulkActionBar
+        count={2}
+        moveTargets={[{ id: 'mb-archive', label: 'Archive' }]}
+        labels={[{ key: 'work', name: 'Work' }]}
+        onMarkRead={vi.fn()}
+        onMarkUnread={vi.fn()}
+        onMove={vi.fn()}
+        onLabelToggle={vi.fn()}
+        onDelete={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+    const violations = await runAxe(container);
+    expect(violations.map((v) => v.id)).toEqual([]);
   });
 });

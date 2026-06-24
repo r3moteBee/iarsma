@@ -30,14 +30,14 @@
 
 .titleRow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-sm);
 }
 
 .selectAll {
   width: 18px;
   height: 18px;
-  margin: 0 var(--space-sm) 0 0;
+  margin: 0;
   accent-color: var(--accent);
   cursor: pointer;
 }

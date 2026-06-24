@@ -715,6 +715,8 @@ function ThreadListBody(props: {
     () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $seen: true } } })),
     [runBulk, invoker],
   );
+  // { $seen: null } intentionally mirrors toggleKeyword's `set ? true : null`
+  // convention — null means "remove the keyword" in the JMAP patch dialect.
   const handleBulkMarkUnread = useCallback(
     () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $seen: null } } })),
     [runBulk, invoker],

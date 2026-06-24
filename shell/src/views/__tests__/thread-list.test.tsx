@@ -1271,4 +1271,156 @@ describe('bulk actions dispatch', () => {
       expect(screen.queryByText(/1 selected/i)).not.toBeInTheDocument(),
     );
   });
+
+  it('does NOT clear the selection when the bulk action invoke rejects', async () => {
+    // When the mutator invoke rejects, runBulk catches the error and leaves
+    // the selection intact so the user can retry.
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async () => {
+          throw new Error('network error');
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    // The "1 selected" bulk bar should be visible.
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /mark read/i }));
+    // After the failed action, the selection should remain (still "1 selected").
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+  });
+
+  it('does NOT call the mutator invoke when resolveThreadEmailIds returns an empty Map, but DOES clear the selection', async () => {
+    // When no email ids can be resolved (e.g. all selected threads have
+    // no emails), runBulk skips the mutator and clears the selection.
+    const invokeCalls: string[] = [];
+    renderThreadList({
+      invokerOverrides: {
+        // Return empty Map — no thread ids map to any email ids.
+        resolveThreadEmailIds: async (_ids: readonly string[]) => new Map(),
+        invoke: async (name: string) => {
+          invokeCalls.push(name);
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /mark read/i }));
+    // Selection should be cleared even though invoke was skipped.
+    await waitFor(() =>
+      expect(screen.queryByText(/1 selected/i)).not.toBeInTheDocument(),
+    );
+    // Mutator invoke must NOT have been called.
+    expect(invokeCalls).toHaveLength(0);
+  });
+
+  it('bulk Move issues one mail.modify with mailboxIds patch', async () => {
+    // Verify the shape of the bulk-move invoke against a known from+target pair.
+    const invokeCalls: Array<{ name: string; input: unknown }> = [];
+    renderThreadList({
+      mailboxes: [
+        { id: 'Mb-inbox', role: 'inbox', name: 'Inbox' },
+        { id: 'Mb-archive', name: 'Archive' },
+      ],
+      mailboxId: 'Mb-inbox',
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async (name: string, input: unknown) => {
+          invokeCalls.push({ name, input });
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    // Open the Move menu and pick Archive.
+    const moveMenu = within(bulkBar).getByRole('button', { name: /move selected to/i });
+    fireEvent.click(moveMenu);
+    const archiveItem = screen.getByRole('menuitem', { name: /archive/i });
+    fireEvent.click(archiveItem);
+    await waitFor(() => expect(invokeCalls).toHaveLength(1));
+    expect(invokeCalls[0]!.name).toBe('mail.modify');
+    const input = invokeCalls[0]!.input as {
+      emailIds: string[];
+      patch: { mailboxIds: Record<string, boolean> };
+    };
+    expect(input.emailIds).toEqual([`${FIXTURES.threads[0]!.id}-e1`]);
+    expect(input.patch.mailboxIds).toEqual({ 'Mb-inbox': false, 'Mb-archive': true });
+  });
+
+  it('bulk Label issues one label.apply with add array', async () => {
+    // Render with a labels prop so the BulkActionBar shows the Label menu.
+    const invokeCalls: Array<{ name: string; input: unknown }> = [];
+    const LABELS = [{ key: 'label_work', name: 'Work', color: '#ff6b35', order: 1 }];
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+      'label.apply': async (input) => {
+        invokeCalls.push({ name: 'label.apply', input });
+        return { modifiedCount: 1 };
+      },
+    }, {
+      resolveThreadEmailIds: async (ids: readonly string[]) =>
+        new Map(ids.map((id) => [id, [`${id}-e1`]])),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList labels={LABELS} />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    // Open the Label menu (uses aria-label "Label selected").
+    const labelMenu = within(bulkBar).getByRole('button', { name: /label selected/i });
+    fireEvent.click(labelMenu);
+    const workItem = screen.getByRole('menuitem', { name: /work/i });
+    fireEvent.click(workItem);
+    await waitFor(() => expect(invokeCalls.find((c) => c.name === 'label.apply')).toBeDefined());
+    const lc = invokeCalls.find((c) => c.name === 'label.apply')!;
+    expect((lc.input as { emailIds: string[]; add: string[] }).add).toEqual(['label_work']);
+    expect((lc.input as { emailIds: string[]; add: string[] }).emailIds).toEqual([`${FIXTURES.threads[0]!.id}-e1`]);
+  });
+
+  it('bulk Delete issues one mail.delete with emailIds', async () => {
+    const invokeCalls: Array<{ name: string; input: unknown }> = [];
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async (name: string, input: unknown) => {
+          invokeCalls.push({ name, input });
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /delete/i }));
+    await waitFor(() => expect(invokeCalls).toHaveLength(1));
+    expect(invokeCalls[0]!.name).toBe('mail.delete');
+    const input = invokeCalls[0]!.input as { emailIds: string[] };
+    expect(input.emailIds).toEqual([`${FIXTURES.threads[0]!.id}-e1`]);
+  });
 });
