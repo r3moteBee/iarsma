@@ -4972,6 +4972,249 @@ export async function fetchBlobText(opts: FetchBlobTextOptions): Promise<string>
   return response.text();
 }
 
+// ---------------------------------------------------------------------------
+// Calendar/set — calendar.create / calendar.update
+// ---------------------------------------------------------------------------
+
+export type FetchCalendarCreateOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly name: string;
+  readonly color?: string;
+};
+
+export type FetchCalendarUpdateOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly calendarId: string;
+  readonly name?: string;
+  readonly color?: string;
+};
+
+/**
+ * Build the JMAP `Calendar/set` create payload. Pure function — no I/O.
+ */
+export function buildCalendarCreateRequest(opts: {
+  readonly accountId: string;
+  readonly name: string;
+  readonly color?: string;
+}): string {
+  const cal: Record<string, unknown> = { name: opts.name };
+  if (opts.color !== undefined) cal.color = opts.color;
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [['Calendar/set', { accountId: opts.accountId, create: { c0: cal } }, '0']],
+  });
+}
+
+/**
+ * Build the JMAP `Calendar/set` update payload. Only includes fields
+ * present in the input — JMAP patch semantics.
+ */
+export function buildCalendarUpdateRequest(opts: {
+  readonly accountId: string;
+  readonly calendarId: string;
+  readonly name?: string;
+  readonly color?: string;
+}): string {
+  const patch: Record<string, unknown> = {};
+  if (opts.name !== undefined) patch.name = opts.name;
+  if (opts.color !== undefined) patch.color = opts.color;
+  return JSON.stringify({
+    using: JMAP_USING_CALENDARS,
+    methodCalls: [
+      ['Calendar/set', { accountId: opts.accountId, update: { [opts.calendarId]: patch } }, '0'],
+    ],
+  });
+}
+
+/**
+ * Parse a JMAP `Calendar/set` create response.
+ */
+export function parseCalendarSetCreateResponse(body: string): { calendarId: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Calendar/set response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Calendar/set response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Calendar/set response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'Calendar/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Calendar/set.',
+    );
+  }
+  const result = first[1] as {
+    created?: Record<string, unknown>;
+    notCreated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notCreated !== undefined) {
+    const c0 = result.notCreated['c0'];
+    if (c0 !== undefined) {
+      throw makeError(
+        'jmap_set_error',
+        `Calendar/set rejected: ${c0.type ?? 'unknown'}${c0.description !== undefined ? ` — ${c0.description}` : ''}`,
+        c0,
+      );
+    }
+  }
+  const created = result.created?.['c0'] as { id?: string } | undefined;
+  if (created === undefined || typeof created.id !== 'string') {
+    throw makeError(
+      'jmap_parse_error',
+      'Calendar/set response has no created["c0"] entry.',
+    );
+  }
+  return { calendarId: created.id };
+}
+
+/**
+ * Parse a JMAP `Calendar/set` update response.
+ */
+export function parseCalendarSetUpdateResponse(
+  body: string,
+  calendarId: string,
+): { updated: true } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Calendar/set update response: ${describe(e)}`,
+    );
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    throw makeError('jmap_parse_error', 'Calendar/set update response is not an object.');
+  }
+  const methodResponses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(methodResponses) || methodResponses.length === 0) {
+    throw makeError(
+      'jmap_parse_error',
+      'Calendar/set update response has no methodResponses array.',
+    );
+  }
+  const first = methodResponses[0];
+  if (!Array.isArray(first) || first.length < 2 || first[0] !== 'Calendar/set') {
+    throw makeError(
+      'jmap_parse_error',
+      'First methodResponse is not Calendar/set.',
+    );
+  }
+  const result = first[1] as {
+    updated?: Record<string, unknown>;
+    notUpdated?: Record<string, { type?: string; description?: string }>;
+  };
+  if (result.notUpdated !== undefined) {
+    const err = result.notUpdated[calendarId];
+    if (err !== undefined) {
+      throw makeError(
+        'jmap_set_error',
+        `Calendar/set update rejected for ${calendarId}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
+        result.notUpdated,
+      );
+    }
+  }
+  return { updated: true };
+}
+
+/**
+ * POST a JMAP `Calendar/set` create and parse the response.
+ */
+export async function fetchCalendarCreateCommit(
+  opts: FetchCalendarCreateOptions,
+): Promise<{ calendarId: string }> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildCalendarCreateRequest({
+    accountId,
+    name: opts.name,
+    ...(opts.color !== undefined ? { color: opts.color } : {}),
+  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Calendar/set create returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseCalendarSetCreateResponse(text);
+}
+
+/**
+ * POST a JMAP `Calendar/set` update and parse the response.
+ */
+export async function fetchCalendarUpdateCommit(
+  opts: FetchCalendarUpdateOptions,
+): Promise<{ updated: true }> {
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = buildCalendarUpdateRequest({
+    accountId,
+    calendarId: opts.calendarId,
+    ...(opts.name !== undefined ? { name: opts.name } : {}),
+    ...(opts.color !== undefined ? { color: opts.color } : {}),
+  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Calendar/set update returned ${response.status} ${response.statusText}`,
+    );
+  }
+  const text = await response.text();
+  return parseCalendarSetUpdateResponse(text, opts.calendarId);
+}
+
 function makeError(code: string, message: string, payload?: unknown): ToolError {
   return payload === undefined ? { code, message } : { code, message, payload };
 }
