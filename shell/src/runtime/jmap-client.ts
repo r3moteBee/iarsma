@@ -5118,11 +5118,16 @@ export function parseCalendarSetUpdateResponse(
     notUpdated?: Record<string, { type?: string; description?: string }>;
   };
   if (result.notUpdated !== undefined) {
-    const err = result.notUpdated[calendarId];
-    if (err !== undefined) {
+    const entries = Object.entries(result.notUpdated);
+    if (entries.length > 0) {
+      // Prefer the entry keyed by the requested calendarId; fall back to first entry.
+      const preferredEntry = result.notUpdated[calendarId];
+      const [id, err] = preferredEntry !== undefined
+        ? [calendarId, preferredEntry]
+        : entries[0]!;
       throw makeError(
         'jmap_set_error',
-        `Calendar/set update rejected for ${calendarId}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
+        `Calendar/set update rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
         result.notUpdated,
       );
     }
