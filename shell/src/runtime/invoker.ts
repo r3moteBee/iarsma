@@ -91,6 +91,18 @@ import {
   type ThreadList,
 } from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
+import {
+  labelList,
+  labelCreate,
+  labelUpdate,
+  labelDeletePreview,
+  labelDeleteCommit,
+  labelApplyPreview,
+  labelApplyCommit,
+  type LabelCreateParams,
+  type LabelUpdateParams,
+  type LabelApplyParams,
+} from './label-operations.js';
 
 export type InvocationOptions = {
   /** True if the caller wants a dry-run preview, not a commit. */
@@ -249,19 +261,22 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
         }
         case 'thread.list': {
           const session = await getSession();
-          // The contract input is `{mailboxId, position?, limit?}`. Cast
-          // through `unknown` because the invoker's surface is typed
-          // generically; the per-tool shape is enforced by the
-          // capability contract + codegen at the call site.
+          // The contract input is `{mailboxId?, hasKeyword?, position?, limit?}`.
+          // Exactly one of mailboxId or hasKeyword must be provided; this mirrors
+          // the constraint in buildThreadListRequest. Cast through `unknown`
+          // because the invoker's surface is typed generically; the per-tool
+          // shape is enforced by the capability contract + codegen at the call site.
           const params = _input as unknown as {
-            mailboxId: string;
+            mailboxId?: string;
+            hasKeyword?: string;
             position?: number;
             limit?: number;
           };
           const result: ThreadList = await fetchThreadList({
             ...opts,
             session,
-            mailboxId: params.mailboxId,
+            ...(params.mailboxId !== undefined ? { mailboxId: params.mailboxId } : {}),
+            ...(params.hasKeyword !== undefined ? { hasKeyword: params.hasKeyword } : {}),
             ...(params.position !== undefined ? { position: params.position } : {}),
             ...(params.limit !== undefined ? { limit: params.limit } : {}),
           });
@@ -649,6 +664,36 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           }
           const session = await getSession();
           return (await fetchMailboxDeleteCommit({ ...opts, session, params })) as unknown as O;
+        }
+        case 'label.list': {
+          const session = await getSession();
+          return (await labelList({ ...opts, session })) as unknown as O;
+        }
+        case 'label.create': {
+          const params = _input as unknown as LabelCreateParams;
+          const session = await getSession();
+          return (await labelCreate({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'label.update': {
+          const params = _input as unknown as LabelUpdateParams;
+          const session = await getSession();
+          return (await labelUpdate({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'label.delete': {
+          const params = _input as unknown as { key: string };
+          const session = await getSession();
+          if (_options.dryRun === true) {
+            return (await labelDeletePreview({ ...opts, session }, params)) as unknown as O | DryRunPreview<O>;
+          }
+          return (await labelDeleteCommit({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'label.apply': {
+          const params = _input as unknown as LabelApplyParams;
+          const session = await getSession();
+          if (_options.dryRun === true) {
+            return (await labelApplyPreview({ ...opts, session }, params)) as unknown as O | DryRunPreview<O>;
+          }
+          return (await labelApplyCommit({ ...opts, session }, params)) as unknown as O;
         }
         default:
           throw makeToolError(

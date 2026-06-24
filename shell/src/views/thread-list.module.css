@@ -412,3 +412,13 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Task 8 — label chips row: a flex container that wraps chips
+ * below the preview snippet. The gap matches --space-xs so the
+ * chips don't crowd each other in a multi-label row. */
+.labelChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-top: 2px;
+}

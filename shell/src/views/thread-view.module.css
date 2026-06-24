@@ -302,3 +302,11 @@
   padding: var(--space-md);
   color: var(--destructive);
 }
+
+/* Task 8 — label chips in thread header */
+.labelChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding-top: var(--space-xs);
+}

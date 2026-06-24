@@ -59,4 +59,54 @@ describe('MenuButton', () => {
     const menuItems = screen.getAllByRole('menuitem', { name: 'Inbox' });
     expect(menuItems).toHaveLength(2);
   });
+
+  // ── Checkbox variant (Task 10) ──────────────────────────────────────
+
+  it('a checkbox item renders role="menuitemcheckbox" with correct aria-checked', () => {
+    render(
+      <MenuButton
+        label="Label actions"
+        items={[
+          { label: 'Work', key: 'work', checked: true, onSelect: () => {} },
+          { label: 'Personal', key: 'personal', checked: false, onSelect: () => {} },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Label actions' }));
+    const workItem = screen.getByRole('menuitemcheckbox', { name: /Work/i });
+    const personalItem = screen.getByRole('menuitemcheckbox', { name: /Personal/i });
+    expect(workItem).toHaveAttribute('aria-checked', 'true');
+    expect(personalItem).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('activating a checkbox item calls onSelect but the menu stays open', () => {
+    const onSelect = vi.fn();
+    render(
+      <MenuButton
+        label="Label actions"
+        items={[
+          { label: 'Work', key: 'work', checked: false, onSelect },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Label actions' }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /Work/i }));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    // Menu must still be open
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+  });
+
+  it('a normal (non-checkbox) item still closes the menu on select', () => {
+    const onSelect = vi.fn();
+    render(
+      <MenuButton
+        label="Folder actions"
+        items={[{ label: 'Rename', onSelect }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Folder actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
 });

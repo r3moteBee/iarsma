@@ -94,6 +94,17 @@ const SCOPE_PERMISSIONS: Readonly<Record<string, Record<string, boolean>>> = {
     jmapMailboxUpdate: true,
     jmapMailboxDestroy: true,
   },
+  'mail:label:read': {
+    jmapFileNodeGet: true,
+    jmapBlobGet: true,
+  },
+  'mail:label:write': {
+    jmapFileNodeGet: true,
+    jmapFileNodeCreate: true,
+    jmapFileNodeUpdate: true,
+    jmapBlobUpload: true,
+    jmapBlobGet: true,
+  },
 };
 
 function scopesToPermissions(

@@ -53,6 +53,10 @@ import { composeStateAtom } from '../compose-state.js';
 import { selectedMailboxIdAtom, selectedThreadIdAtom } from '../mail-state.js';
 import { useMailboxList } from '../generated/capabilities/mailbox-list.js';
 import { useThreadGet } from '../generated/capabilities/thread-get.js';
+import { LabelTagIcon, MoveToFolderIcon } from '../components/icons.js';
+import { LabelChip } from '../components/label-chip.js';
+import type { LabelDef } from '../runtime/label-registry.js';
+import { resolveLabels } from '../runtime/label-registry.js';
 import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import { useInvoker } from '../runtime/invoker.js';
 import { sanitizeHtml } from '../runtime/sanitizer.js';
@@ -77,7 +81,7 @@ const ROLE_LABEL: Record<string, string> = {
   important: 'Important',
 };
 
-export function ThreadView() {
+export function ThreadView({ labels = [] }: { readonly labels?: readonly LabelDef[] }) {
   const threadId = useAtomValue(selectedThreadIdAtom);
   if (threadId === null) {
     return (
@@ -89,10 +93,10 @@ export function ThreadView() {
       </section>
     );
   }
-  return <ThreadViewWithThread threadId={threadId} />;
+  return <ThreadViewWithThread threadId={threadId} labels={labels} />;
 }
 
-function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
+function ThreadViewWithThread({ threadId, labels }: { readonly threadId: string; readonly labels: readonly LabelDef[] }) {
   const { data, error, isLoading, refetch } = useThreadGet({ threadId });
 
   if (isLoading) {
@@ -126,6 +130,7 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
     <ThreadViewLoaded
       emails={data.emails as ReadonlyArray<EmailFull>}
       refetch={refetch}
+      labels={labels}
     />
   );
 }
@@ -133,9 +138,11 @@ function ThreadViewWithThread({ threadId }: { readonly threadId: string }) {
 function ThreadViewLoaded({
   emails,
   refetch,
+  labels,
 }: {
   readonly emails: ReadonlyArray<EmailFull>;
   readonly refetch: () => Promise<void>;
+  readonly labels: readonly LabelDef[];
 }) {
   const tokens = useAtomValue(tokensAtom);
   const setComposeState = useSetAtom(composeStateAtom);
@@ -345,8 +352,35 @@ function ThreadViewLoaded({
     })();
   }, [invoker, refetch, emails, threadSeen, bumpPushGeneration]);
 
+  // Task 10 — toggle a label on the latest email in this thread.
+  const latestEmail = emails[emails.length - 1];
+  const handleLabelToggle = useCallback(
+    (labelKey: string, add: boolean) => {
+      if (latestEmail === undefined) return;
+      void (async () => {
+        try {
+          await invoker.invoke('label.apply', {
+            emailIds: [latestEmail.id],
+            ...(add ? { add: [labelKey] } : { remove: [labelKey] }),
+          });
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] label.apply failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch, bumpPushGeneration, latestEmail],
+  );
+
   const subject = emails[emails.length - 1]?.subject ?? '(no subject)';
   const messageCountLabel = `${emails.length} ${emails.length === 1 ? 'message' : 'messages'}`;
+  // Task 8 — resolve labels from the latest email's keywords.
+  const threadLabels = useMemo(
+    () => resolveLabels(latestEmail?.keywords ?? [], labels),
+    [latestEmail?.keywords, labels],
+  );
 
   return (
     // onKeyDown lives on the outer section so DOM events from any
@@ -359,6 +393,14 @@ function ThreadViewLoaded({
             {messageCountLabel}
           </span>
         </div>
+        {/* Task 8 — label chips in thread header */}
+        {threadLabels.length > 0 ? (
+          <div className={styles['labelChips']} aria-label="Labels">
+            {threadLabels.map((l) => (
+              <LabelChip key={l.key} label={l} />
+            ))}
+          </div>
+        ) : null}
         <div className={styles['actions']} aria-label="Thread actions">
           <button
             type="button"
@@ -384,6 +426,24 @@ function ThreadViewLoaded({
               align="end"
             >
               <MoveToFolderIcon />
+            </MenuButton>
+          ) : null}
+          {labels.length > 0 ? (
+            // Task 10 — Label picker for the thread.
+            <MenuButton
+              label={`Label ${subject}`}
+              items={labels.map((lbl) => {
+                const isChecked = latestEmail?.keywords.find((k) => k.name === lbl.key)?.value === true;
+                return {
+                  key: lbl.key,
+                  label: lbl.name,
+                  checked: isChecked,
+                  onSelect: () => { handleLabelToggle(lbl.key, !isChecked); },
+                };
+              })}
+              align="end"
+            >
+              <LabelTagIcon />
             </MenuButton>
           ) : null}
         </div>
@@ -432,17 +492,6 @@ function MarkUnreadIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="2" y="4" width="20" height="16" rx="2" />
       <path d="M22 7l-10 7L2 7" />
-    </svg>
-  );
-}
-
-/** Task 7 — folder/move icon for the "Move to…" menu trigger. */
-function MoveToFolderIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-      <line x1="12" y1="11" x2="12" y2="17" />
-      <polyline points="9 14 12 17 15 14" />
     </svg>
   );
 }

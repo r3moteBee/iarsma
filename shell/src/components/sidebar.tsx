@@ -12,10 +12,12 @@
 
 import React, { useEffect, useState } from 'react';
 import type { ActiveView } from '../nav-state.js';
+import type { LabelDef } from '../runtime/label-registry.js';
 import type { ThemePreference } from '../runtime/theme.js';
 import { AccentPicker } from './accent-picker.js';
 import { DensitySelector } from './density-selector.js';
 import { MailboxTreeView } from './mailbox-tree-view.js';
+import { MenuButton } from './menu-button.js';
 import styles from './sidebar.module.css';
 
 const MAIL_SECTION_KEY = 'iarsma-mail-section-collapsed';
@@ -33,6 +35,26 @@ function saveMailSectionCollapsed(value: boolean): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(MAIL_SECTION_KEY, value ? '1' : '0');
+  } catch {
+    // Quota / private mode — non-fatal.
+  }
+}
+
+const LABELS_SECTION_KEY = 'iarsma-labels-collapsed';
+
+function loadLabelsSectionCollapsed(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    return localStorage.getItem(LABELS_SECTION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveLabelsSectionCollapsed(value: boolean): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(LABELS_SECTION_KEY, value ? '1' : '0');
   } catch {
     // Quota / private mode — non-fatal.
   }
@@ -217,6 +239,18 @@ export type SidebarProps = {
    *  next to "Mail" when > 0; lifted out of the per-folder tree so
    *  the user sees new mail without expanding the section. */
   readonly inboxUnreadCount?: number;
+  /** Task 9 — labels for the collapsible Labels section. */
+  readonly labels?: readonly LabelDef[];
+  /** Task 9 — called when a label row is clicked. */
+  readonly onLabelSelect?: (key: string) => void;
+  /** Task 9 — called when "+ New label" is clicked. */
+  readonly onNewLabel?: () => void;
+  /** Task 11 — called when Rename is selected from a label row's actions menu. */
+  readonly onRenameLabel?: (key: string) => void;
+  /** Task 11 — called when Recolor is selected from a label row's actions menu. */
+  readonly onRecolorLabel?: (key: string) => void;
+  /** Task 11 — called when Delete is selected from a label row's actions menu. */
+  readonly onDeleteLabel?: (key: string) => void;
 };
 
 // ── Nav item definitions ────────────────────────────────────────
@@ -260,6 +294,12 @@ export function Sidebar({
   onClose,
   outboxCount,
   inboxUnreadCount,
+  labels,
+  onLabelSelect,
+  onNewLabel,
+  onRenameLabel,
+  onRecolorLabel,
+  onDeleteLabel,
 }: SidebarProps) {
   const hasMailboxes = mailboxes !== undefined && mailboxes.length > 0;
 
@@ -271,6 +311,13 @@ export function Sidebar({
   useEffect(() => {
     saveMailSectionCollapsed(mailSectionCollapsed);
   }, [mailSectionCollapsed]);
+
+  const [labelsSectionCollapsed, setLabelsSectionCollapsed] = useState<boolean>(
+    () => loadLabelsSectionCollapsed(),
+  );
+  useEffect(() => {
+    saveLabelsSectionCollapsed(labelsSectionCollapsed);
+  }, [labelsSectionCollapsed]);
 
   const handleNavClick = (view: ActiveView) => {
     onNavigate(view);
@@ -406,6 +453,85 @@ export function Sidebar({
             return <React.Fragment key={view}>{navButton}</React.Fragment>;
           })}
         </nav>
+
+        {/* Labels section — collapsible, below the mailbox tree */}
+        {labels !== undefined && (
+          <div style={{ borderTop: '1px solid var(--surface-3)', paddingTop: 'var(--space-sm)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 var(--space-sm) var(--space-xs)' }}>
+              <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-2)', letterSpacing: '0.05em' }}>Labels</span>
+              <button
+                type="button"
+                data-testid="labels-section-toggle"
+                aria-expanded={!labelsSectionCollapsed}
+                aria-label={labelsSectionCollapsed ? 'Show labels' : 'Hide labels'}
+                onClick={() => setLabelsSectionCollapsed((c) => !c)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: '11px', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}
+              >
+                {labelsSectionCollapsed ? '▸' : '▾'}
+              </button>
+            </div>
+            {!labelsSectionCollapsed && (
+              <>
+                {labels.map((label) => (
+                  <div
+                    key={label.key}
+                    style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => { onLabelSelect?.(label.key); onClose?.(); }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 'var(--space-sm)',
+                        flex: '1 1 auto',
+                        padding: '4px var(--space-sm)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        borderRadius: 'var(--radius-sm)',
+                        color: 'var(--text-2)',
+                        fontSize: 'var(--text-sm)',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <span
+                        data-testid="label-dot"
+                        aria-hidden="true"
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          background: label.color,
+                          flexShrink: 0,
+                        }}
+                      />
+                      {label.name}
+                    </button>
+                    <MenuButton
+                      label={`Actions for ${label.name}`}
+                      align="end"
+                      items={[
+                        { label: 'Rename', onSelect: () => { onRenameLabel?.(label.key); } },
+                        { label: 'Recolor', onSelect: () => { onRecolorLabel?.(label.key); } },
+                        { label: 'Delete', onSelect: () => { onDeleteLabel?.(label.key); } },
+                      ]}
+                    />
+                  </div>
+                ))}
+                <div style={{ padding: '2px var(--space-sm)' }}>
+                  <button
+                    type="button"
+                    onClick={() => onNewLabel?.()}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 'var(--text-sm)', padding: '2px 4px', borderRadius: 'var(--radius-sm)' }}
+                  >
+                    + New label
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Footer: user info + theme */}
         <div style={{ flex: '1 1 auto' }} />

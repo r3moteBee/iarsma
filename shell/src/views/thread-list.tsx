@@ -42,6 +42,8 @@ import {
 import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
 import { EmptyState } from '../components/empty-state.js';
+import { LabelTagIcon, MoveToFolderIcon } from '../components/icons.js';
+import { LabelChip } from '../components/label-chip.js';
 import { MenuButton } from '../components/menu-button.js';
 import { Notice } from '../components/notice.js';
 import { Skeleton } from '../components/skeleton.js';
@@ -66,6 +68,8 @@ import {
   kindLabel,
   type SenderKind,
 } from '../runtime/sender-color.js';
+import type { LabelDef } from '../runtime/label-registry.js';
+import { resolveLabels } from '../runtime/label-registry.js';
 import type { ToolError } from '../runtime/types.js';
 import { buildDraftPrefill } from './draft-prefill.js';
 import styles from './thread-list.module.css';
@@ -133,14 +137,18 @@ const ROW_HEIGHT_PX = 72;
  *  identity on every render (PR 53 / CoWork #15). */
 const EMPTY_TOKENS: readonly string[] = [];
 
-export function ThreadList() {
+export function ThreadList({ labels = [], labelFilterKey = null, selectedLabelName }: { readonly labels?: readonly LabelDef[]; readonly labelFilterKey?: string | null; readonly selectedLabelName?: string }) {
   const mailboxId = useAtomValue(selectedMailboxIdAtom);
   const searchQuery = useAtomValue(searchQueryAtom);
   // Search mode wins over mailbox selection — when the user types in
   // the header search, results stream into ThreadList regardless of
   // which mailbox they had open.
   if (searchQuery.trim() !== '') {
-    return <ThreadListSearchMode query={searchQuery.trim()} />;
+    return <ThreadListSearchMode query={searchQuery.trim()} labels={labels} />;
+  }
+  // Label filter mode — show threads matching the selected label keyword.
+  if (labelFilterKey !== null) {
+    return <ThreadListWithLabel hasKeyword={labelFilterKey} {...(selectedLabelName !== undefined ? { labelName: selectedLabelName } : {})} labels={labels} />;
   }
   if (mailboxId === null) {
     // After the auto-select effect in App.tsx, this state should be rare
@@ -155,10 +163,39 @@ export function ThreadList() {
       </section>
     );
   }
-  return <ThreadListWithMailbox mailboxId={mailboxId} />;
+  return <ThreadListWithMailbox mailboxId={mailboxId} labels={labels} />;
 }
 
-function ThreadListSearchMode({ query }: { readonly query: string }) {
+function ThreadListWithLabel({ hasKeyword, labelName, labels }: { readonly hasKeyword: string; readonly labelName?: string; readonly labels: readonly LabelDef[] }) {
+  const { data, error, isLoading, refetch } = useThreadList({ hasKeyword });
+  const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
+
+  useEffect(() => {
+    setSelectedThreadId(null);
+  }, [hasKeyword, setSelectedThreadId]);
+
+  const threadsLen = data?.threads.length ?? 0;
+  const total = data?.total;
+  const countText = total !== undefined ? `1–${threadsLen} of ${total}` : null;
+
+  return (
+    <ThreadListBody
+      data={data}
+      error={error}
+      isLoading={isLoading}
+      isDrafts={false}
+      isTrash={false}
+      emptyMessage="No threads with this label."
+      mailboxId={null}
+      title={`Label: ${labelName ?? hasKeyword}`}
+      countText={countText}
+      onRefresh={refetch}
+      labels={labels}
+    />
+  );
+}
+
+function ThreadListSearchMode({ query, labels }: { readonly query: string; readonly labels: readonly LabelDef[] }) {
   // PR 53 / CoWork #15 — accumulate pages, drive infinite scroll from
   // the body's scroll handler, and pass the tokenized query down so
   // rows can highlight matches in the subject + preview snippet.
@@ -196,11 +233,12 @@ function ThreadListSearchMode({ query }: { readonly query: string }) {
       isLoadingMore={isLoadingMore}
       hasMore={hasMore}
       onLoadMore={loadMore}
+      labels={labels}
     />
   );
 }
 
-function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
+function ThreadListWithMailbox({ mailboxId, labels }: { readonly mailboxId: string; readonly labels: readonly LabelDef[] }) {
   const { data, error, isLoading, refetch } = useThreadList({ mailboxId });
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
   const mailboxes = useMailboxList({});
@@ -258,6 +296,7 @@ function ThreadListWithMailbox({ mailboxId }: { readonly mailboxId: string }) {
       onRefresh={refetch}
       {...(inboxMailboxId !== undefined ? { inboxMailboxId } : {})}
       moveTargets={moveTargets}
+      labels={labels}
     />
   );
 }
@@ -287,6 +326,8 @@ function ThreadListBody(props: {
   readonly isLoadingMore?: boolean;
   readonly hasMore?: boolean;
   readonly onLoadMore?: () => void;
+  /** Task 8 — label registry for resolving label chips on rows. */
+  readonly labels?: readonly LabelDef[];
 }) {
   const { data, error, isLoading, isDrafts, isTrash, emptyMessage, mailboxId, title, countText, onRefresh } =
     props;
@@ -294,6 +335,7 @@ function ThreadListBody(props: {
   const isLoadingMore = props.isLoadingMore === true;
   const hasMore = props.hasMore === true;
   const onLoadMore = props.onLoadMore;
+  const labels = props.labels ?? [];
   const refetch = onRefresh;
   const selectedThreadId = useAtomValue(selectedThreadIdAtom);
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
@@ -522,6 +564,27 @@ function ThreadListBody(props: {
       })();
     },
     [invoker, refetch, bumpPushGeneration, mailboxId],
+  );
+
+  // Task 10 — toggle a label keyword on a single email. `add=true`
+  // applies the label keyword; `add=false` removes it.
+  const handleLabelToggle = useCallback(
+    (emailId: string, labelKey: string, add: boolean) => {
+      void (async () => {
+        try {
+          await invoker.invoke('label.apply', {
+            emailIds: [emailId],
+            ...(add ? { add: [labelKey] } : { remove: [labelKey] }),
+          });
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] label.apply failed:', e);
+        }
+      })();
+    },
+    [invoker, refetch, bumpPushGeneration],
   );
 
   // Candidate mailboxes for "Move to…" come from the prop (computed in
@@ -769,6 +832,8 @@ function ThreadListBody(props: {
                   ? { onMove: handleMove, moveTargets }
                   : {})}
                 {...(tokens !== undefined ? { tokens } : {})}
+                labels={labels}
+                {...(labels.length > 0 ? { onLabelToggle: handleLabelToggle } : {})}
               />
             );
           })}
@@ -919,6 +984,10 @@ type ThreadRowProps = {
    *  preview is reduced to a 120-char snippet centered on the first
    *  match. Mailbox-mode rows pass undefined and render unchanged. */
   readonly tokens?: readonly string[];
+  /** Task 8 — label registry for resolving label chips on this row. */
+  readonly labels?: readonly LabelDef[];
+  /** Task 10 — callback to toggle a label on the row's latest email. */
+  readonly onLabelToggle?: (emailId: string, labelKey: string, add: boolean) => void;
 };
 
 const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(props, ref) {
@@ -938,6 +1007,8 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
     onMove,
     moveTargets,
     tokens,
+    labels,
+    onLabelToggle,
   } = props;
   const highlightTokens = tokens ?? EMPTY_TOKENS;
   const isSearchMode = highlightTokens.length > 0;
@@ -957,6 +1028,12 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
   const avatarColor = colorFor(senderEmail || senderName, kind);
   const subject = e.subject ?? '(no subject)';
   const date = formatDate(e.receivedAt);
+  // Task 8 — resolve label chips for this row.
+  // useMemo is acceptable here; hooks must not be called conditionally.
+  const rowLabels = useMemo(
+    () => resolveLabels(e.keywords, labels ?? []),
+    [e.keywords, labels],
+  );
 
   const liClassName = [
     styles['rowLi'],
@@ -1047,6 +1124,14 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
               )}
             </span>
           ) : null}
+          {/* Task 8 — label chips */}
+          {rowLabels.length > 0 ? (
+            <span className={styles['labelChips']} aria-label="Labels">
+              {rowLabels.map((l) => (
+                <LabelChip key={l.key} label={l} />
+              ))}
+            </span>
+          ) : null}
         </span>
         <span className={styles['meta']}>
           <span className={styles['date']}>{date}</span>
@@ -1091,6 +1176,23 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
             }))}
           >
             <MoveToFolderIcon />
+          </MenuButton>
+        ) : null}
+        {labels !== undefined && labels.length > 0 && onLabelToggle !== undefined ? (
+          // Task 10 — Label picker. Checkbox items stay open for multi-select.
+          <MenuButton
+            label={`Label ${subject}`}
+            items={labels.map((lbl) => {
+              const isChecked = e.keywords.find((k) => k.name === lbl.key)?.value === true;
+              return {
+                key: lbl.key,
+                label: lbl.name,
+                checked: isChecked,
+                onSelect: () => { onLabelToggle(e.id, lbl.key, !isChecked); },
+              };
+            })}
+          >
+            <LabelTagIcon />
           </MenuButton>
         ) : null}
         <button
@@ -1194,17 +1296,6 @@ function InboxIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M22 12h-6l-2 3h-4l-2-3H2" />
       <path d="M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z" />
-    </svg>
-  );
-}
-
-/** Task 7 — folder/move icon for the "Move to…" menu trigger. */
-function MoveToFolderIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-      <line x1="12" y1="11" x2="12" y2="17" />
-      <polyline points="9 14 12 17 15 14" />
     </svg>
   );
 }

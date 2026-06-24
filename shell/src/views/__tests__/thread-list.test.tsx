@@ -55,6 +55,7 @@ vi.mock('@tanstack/react-virtual', () => ({
 
 import { IarsmaProvider, mockInvoker } from '../../runtime/index.js';
 import type { ThreadList as ThreadListData } from '../../runtime/jmap-client.js';
+import type { LabelDef } from '../../runtime/label-registry.js';
 import { selectedMailboxIdAtom } from '../../mail-state.js';
 import { runAxe } from '../../__tests__/util/axe.js';
 import { ThreadList } from '../thread-list.js';
@@ -949,5 +950,120 @@ describe('ThreadList — Move to… folder picker', () => {
     const menu = screen.getByRole('menu', { name: 'Move Welcome to…' });
     const items = within(menu).getAllByRole('menuitem');
     expect(items.map((el) => el.textContent)).not.toContain('Inbox');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Label picker (Task 10)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('ThreadList — label picker', () => {
+  const LABELS: LabelDef[] = [
+    { key: 'label_work', name: 'Work', color: '#ff6b35', order: 1 },
+    { key: 'label_personal', name: 'Personal', color: '#ff9d23', order: 2 },
+  ];
+  // thread fixture with label_work applied
+  function threadWithLabel(id: string): ThreadListData['threads'][number] {
+    return {
+      id,
+      latestEmail: {
+        id: `E-${id}`,
+        threadId: id,
+        from: [{ name: 'Alice', email: 'alice@example.net' }],
+        subject: 'Labeled thread',
+        preview: 'preview',
+        receivedAt: '2026-05-09T18:30:00Z',
+        keywords: [
+          { name: '$seen', value: true },
+          { name: 'label_work', value: true },
+        ],
+        size: 512,
+      },
+    };
+  }
+
+  it('shows one checkbox per label with correct checked state', async () => {
+    const data = { threads: [threadWithLabel('TL1')], position: 0, total: 1 };
+    const invoker = mockInvoker({
+      'thread.list': async () => data,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList labels={LABELS} />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    // Open the label picker for row TL1
+    const labelBtn = screen.getByLabelText('Label Labeled thread');
+    fireEvent.click(labelBtn);
+    const menu = screen.getByRole('menu', { name: 'Label Labeled thread' });
+    const workItem = within(menu).getByRole('menuitemcheckbox', { name: /Work/i });
+    const personalItem = within(menu).getByRole('menuitemcheckbox', { name: /Personal/i });
+    expect(workItem).toHaveAttribute('aria-checked', 'true');
+    expect(personalItem).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('toggling an unchecked label calls invoke label.apply with add', async () => {
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const data = { threads: [threadWithLabel('TL1')], position: 0, total: 1 };
+    const invoker = mockInvoker({
+      'thread.list': async () => data,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+      'label.apply': async (input) => {
+        calls.push({ name: 'label.apply', input });
+        return { modifiedCount: 1 };
+      },
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList labels={LABELS} />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    fireEvent.click(screen.getByLabelText('Label Labeled thread'));
+    const menu = screen.getByRole('menu', { name: 'Label Labeled thread' });
+    fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: /Personal/i }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.input).toEqual({ emailIds: ['E-TL1'], add: ['label_personal'] });
+  });
+
+  it('toggling a checked label calls invoke label.apply with remove', async () => {
+    const calls: Array<{ name: string; input: unknown }> = [];
+    const data = { threads: [threadWithLabel('TL1')], position: 0, total: 1 };
+    const invoker = mockInvoker({
+      'thread.list': async () => data,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+      'label.apply': async (input) => {
+        calls.push({ name: 'label.apply', input });
+        return { modifiedCount: 1 };
+      },
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList labels={LABELS} />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    fireEvent.click(screen.getByLabelText('Label Labeled thread'));
+    const menu = screen.getByRole('menu', { name: 'Label Labeled thread' });
+    fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: /Work/i }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.input).toEqual({ emailIds: ['E-TL1'], remove: ['label_work'] });
   });
 });

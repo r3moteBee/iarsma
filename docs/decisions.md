@@ -579,3 +579,38 @@ So this PR isn't backtracking PR 36 — it's the realization that the OAuth path
 - A "denied calls" badge on the agent dashboard that aggregates Stalwart's per-call permission errors from the action log — wires the new permissive list-then-deny flow into a visible UX signal.
 - Inferring scopes from Inherit-mode keys when Stalwart eventually exposes the resolved permission set on `x:ApiKey/get`.
 - Replacing the `permissionsToScopes` reverse-map with a Stalwart-stored "iarsma scope tag" string on each key (description prefix or custom field) so the mapping is explicit, not derived.
+
+## D-059 — Labels: A′ stable-key model + FileNode registry + documented agent join
+**Date:** 2026-06-23
+**Decision:** Labels use the **A′ human-readable stable-key model**. The JMAP keyword stored on each tagged message is a charset-safe slug `key` matching `^[a-z0-9][a-z0-9_-]{0,62}$`, minted once from the label name at creation time and immutable thereafter. Display `name`, `color`, and `order` live in a single registry document. This means rename/recolor/reorder are O(1) registry-only edits — zero message rewrites, no batch `Email/set`, no cross-mailbox race — and labels survive export/import because the meaningful keyword travels with the message.
+
+**Registry storage:**
+- One FileNode (`urn:ietf:params:jmap:filenode`) named `.iarsma/labels.json`, whose content is a blob (`urn:ietf:params:jmap:blob`). Both capabilities are advertised by the Stalwart session for the account (verified live, 2026-06-23).
+- Read: `FileNode/get` → download blob → parse JSON. Missing node = empty registry `{ version: 1, labels: [] }`.
+- Write: serialize → `Blob/upload` → `FileNode/set` (create if absent, else update `blobId`).
+- **Concurrency: last-write-wins.** Stalwart does **not** enforce `ifInState` on `FileNode/set` (verified live, 2026-06-23) — state-mismatch is a rare defensive case, not a guarantee. The `label_registry_conflict` refusal exists to avoid silently clobbering a concurrent agent edit (read-modify-write guarded by the FileNode `state` token; on mismatch, re-read once and re-apply; if it still mismatches, refuse). Single-user last-write-wins is acceptable; the guard is belt-and-suspenders.
+
+**Permissions:** `FileNode/set` is gated by split per-operation Stalwart permissions — `jmapFileNodeGet`, `jmapFileNodeCreate`, `jmapFileNodeUpdate`, `jmapFileNodeDestroy` — **not** a single `jmapFileNodeSet`. The same "verify the method→permission convention" discipline applied here as with `jmapMailboxDestroy` (D-058-era practice). Iarsma maps these to its scope vocabulary: `mail:label:read` → FileNode read; `mail:label:write` → FileNode create/update/destroy.
+
+**Agent join (replaces read-path output field):** The task-12 scope decision rejected attaching a resolved `labels: [{key,name,color}]` field to the read-path output contract. Instead: a message's `keywords` array carries label keys directly; agents call `label.list` to resolve key → name/color. This join is explicit and documented. `label.apply` accepts label names OR keys, so agents can work in display terms without knowing keys in advance. The five `label.*` tools (`label.list`, `label.create`, `label.update`, `label.delete`, `label.apply`) are the complete agent surface; the protocol is documented in `docs/agent-collaboration.md` and `docs/labels.md`.
+
+**Why:**
+- Immutable keys mean portability (keywords survive any export/import path) and cheap cosmetic edits (no message rewrite, no cap on rename frequency).
+- A single registry document keeps the storage surface minimal — one FileNode, one blob, one read, one write; no index, no secondary store.
+- Documenting the join (rather than resolving on the read path) avoids coupling every `mail.list`/`mail.read` call to a registry fetch and keeps the read-path output contract stable. Agents that don't need labels pay zero overhead.
+
+**Trade-offs accepted:**
+- Cosmetic drift: a foreign client that stored keyword `work` displays it as the slug `work`, not the current display name "Job" after a rename. This is accepted as far more legible than an opaque token.
+- Last-write-wins on concurrent edits: single-user, single-account; the guard exists to catch the edge case of simultaneous agent + UI edits, not as a hard consistency guarantee.
+
+**How to apply:**
+- New label operations read/write the registry through `shell/src/runtime/label-store.ts` only — no capability touches the FileNode/Blob wire shape directly.
+- New scopes (`mail:label:read`, `mail:label:write`) land in both `mcp-server/src/stalwart-permissions.ts` and `shell/src/runtime/stalwart-apikey-issuer.ts` per the D-058 discipline.
+- The key minting helper (`mintLabelKey(name, existingKeys)`) is pure and unit-tested; all creation paths go through it.
+- `label.create` reuses an existing key (rather than minting a new one) when a name slugifies to a key already present in the registry — this is the adoption seam for externally-imported keywords.
+
+**Out of scope (follow-ups):**
+- Gmail/Takeout/mbox import build-out (registry and key model are designed for it; `docs/labels.md` documents the contract).
+- Nested labels (flat list in v1; nested label names flatten to a single slug key at import time).
+- Per-label notification/filter rules.
+- A `parentId`-style reparent on labels.

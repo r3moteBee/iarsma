@@ -16,6 +16,7 @@ import {
 import { composeStateAtom } from './compose-state.js';
 import { loadConfig, type ShellConfig } from './config.js';
 import { useMailboxList } from './generated/capabilities/mailbox-list.js';
+import { useLabelList } from './generated/capabilities/label-list.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { useBreakpoint } from './hooks/use-media-query.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
@@ -44,6 +45,8 @@ import { hiddenCalendarIdsAtom, toggleCalendarId } from './runtime/calendar-visi
 import { createSendBuffer, type SendBuffer } from './runtime/send-buffer.js';
 import { SendBufferProvider, useOutboxCount } from './runtime/send-buffer-context.js';
 import type { MailSendInput, MailSendResult, Session } from './runtime/jmap-client.js';
+import type { LabelDef } from './runtime/label-registry.js';
+import { DEFAULT_LABEL_COLOR } from './runtime/label-registry.js';
 import {
   pushGenerationAtom,
   usePushSubscription,
@@ -73,6 +76,7 @@ import {
 import { CalendarView, buildEventParticipants } from './views/calendar-view.js';
 import { CommandPalette, type CommandItem } from './components/command-palette.js';
 import { CreateFolderDialog, RenameFolderDialog, DeleteFolderDialog } from './components/folder-dialogs.js';
+import { CreateLabelDialog, RenameLabelDialog, RecolorLabelDialog, DeleteLabelDialog } from './components/label-dialogs.js';
 import { SendToast } from './components/send-toast.js';
 import { DeleteToast } from './components/delete-toast.js';
 import { KeyboardHelpOverlay } from './views/keyboard-help-overlay.js';
@@ -553,6 +557,7 @@ function SignedInShell({
     onStateChange: () => bumpPushGeneration((n) => n + 1),
   });
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
+  const [labelFilterKey, setLabelFilterKey] = useState<string | null>(null);
   const [mailLayout, setMailLayout] = useAtom(mailLayoutAtom);
   const [selectedMailboxId, setSelectedMailboxId] = useAtom(selectedMailboxIdAtom);
   const mailboxListResult = useMailboxList({});
@@ -560,6 +565,21 @@ function SignedInShell({
     if (mailboxListResult.data === undefined) return undefined;
     return mailboxListResult.data.map(toSidebarMailboxEntry);
   }, [mailboxListResult.data]);
+
+  // Task 8 — load the label registry once at the shell level and thread
+  // it down to views that need to resolve label chips on messages.
+  // Normalize optional color/order from the generated type to the
+  // required fields in LabelDef.
+  const labelListResult = useLabelList({});
+  const labelDefs = useMemo((): readonly LabelDef[] => {
+    const raw = labelListResult.data?.labels ?? [];
+    return raw.map((l) => ({
+      key: l.key,
+      name: l.name,
+      color: l.color ?? DEFAULT_LABEL_COLOR,
+      order: l.order ?? 0,
+    }));
+  }, [labelListResult.data]);
 
   // Auto-select the Inbox the first time mailboxes load (§6.4 "no dead clicks").
   // Without this, clicking Mail in the nav leaves both panes blank because
@@ -620,6 +640,67 @@ function SignedInShell({
     },
     [sidebarMailboxes],
   );
+
+  const handleMailboxSelect = useCallback((id: string) => {
+    setSelectedMailboxId(id);
+    setLabelFilterKey(null);
+  }, [setSelectedMailboxId]);
+
+  const handleLabelSelect = useCallback((key: string) => {
+    setLabelFilterKey(key);
+    setSelectedMailboxId(null);
+  }, [setSelectedMailboxId]);
+
+  // ── Label management dialog state ──────────────────────────────────
+  type LabelDialog =
+    | { kind: 'none' }
+    | { kind: 'create' }
+    | { kind: 'rename'; key: string; currentName: string }
+    | { kind: 'recolor'; key: string; currentColor: string }
+    | { kind: 'delete'; key: string; affectedCount?: number };
+  const [labelDialog, setLabelDialog] = useState<LabelDialog>({ kind: 'none' });
+  const [labelDialogError, setLabelDialogError] = useState<string | undefined>(undefined);
+
+  const handleNewLabel = useCallback(() => {
+    setLabelDialogError(undefined);
+    setLabelDialog({ kind: 'create' });
+  }, []);
+
+  const handleRenameLabel = useCallback((key: string) => {
+    const label = labelDefs.find((l) => l.key === key);
+    if (label === undefined) return;
+    setLabelDialogError(undefined);
+    setLabelDialog({ kind: 'rename', key, currentName: label.name });
+  }, [labelDefs]);
+
+  const handleRecolorLabel = useCallback((key: string) => {
+    const label = labelDefs.find((l) => l.key === key);
+    if (label === undefined) return;
+    setLabelDialogError(undefined);
+    setLabelDialog({ kind: 'recolor', key, currentColor: label.color });
+  }, [labelDefs]);
+
+  const handleDeleteLabel = useCallback((key: string) => {
+    void (async () => {
+      try {
+        const preview = await invoker.invoke<{ key: string }, { affectedCount: number }>(
+          'label.delete',
+          { key },
+          { dryRun: true },
+        ) as { affectedCount: number };
+        setLabelDialogError(undefined);
+        setLabelDialog({
+          kind: 'delete',
+          key,
+          affectedCount: preview.affectedCount,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setLabelDialogError(msg);
+        setLabelDialog({ kind: 'delete', key });
+      }
+    })();
+  }, [invoker]);
 
   const handleRenameFolder = useCallback((id: string, currentName: string) => {
     setFolderDialogError(undefined);
@@ -1149,11 +1230,17 @@ function SignedInShell({
           outboxCount={outboxCount}
           inboxUnreadCount={inboxUnreadCount}
           {...(sidebarMailboxes !== undefined ? { mailboxes: sidebarMailboxes } : {})}
-          onMailboxSelect={setSelectedMailboxId}
+          onMailboxSelect={handleMailboxSelect}
           {...(selectedMailboxId !== null ? { selectedMailboxId } : {})}
           onCreateFolder={handleCreateFolder}
           onRenameFolder={handleRenameFolder}
           onDeleteFolder={handleDeleteFolder}
+          labels={labelDefs}
+          onLabelSelect={handleLabelSelect}
+          onNewLabel={handleNewLabel}
+          onRenameLabel={handleRenameLabel}
+          onRecolorLabel={handleRecolorLabel}
+          onDeleteLabel={handleDeleteLabel}
         />
       )}
 
@@ -1228,7 +1315,7 @@ function SignedInShell({
         )}
 
         {activeView === 'mail' ? (
-          <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} />
+          <MailLayout isLoading={session.isLoading} error={session.error} layout={mailLayout} labels={labelDefs} labelFilterKey={labelFilterKey} {...((): { selectedLabelName?: string } => { const n = labelFilterKey !== null ? labelDefs.find(l => l.key === labelFilterKey)?.name : undefined; return n !== undefined ? { selectedLabelName: n } : {}; })()} />
         ) : activeView === 'calendar' ? (
           <CalendarView
             events={visibleCalendarEvents}
@@ -1506,6 +1593,86 @@ function SignedInShell({
           })();
         }}
       />
+      {/* Label management dialogs */}
+      <CreateLabelDialog
+        open={labelDialog.kind === 'create'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'create' ? { error: labelDialogError } : {})}
+        onSubmit={(name, color) => {
+          void (async () => {
+            try {
+              await invoker.invoke('label.create', { name, color });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <RenameLabelDialog
+        open={labelDialog.kind === 'rename'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        currentName={labelDialog.kind === 'rename' ? labelDialog.currentName : ''}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'rename' ? { error: labelDialogError } : {})}
+        onSubmit={(newName) => {
+          if (labelDialog.kind !== 'rename') return;
+          const key = labelDialog.key;
+          void (async () => {
+            try {
+              await invoker.invoke('label.update', { key, name: newName });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <RecolorLabelDialog
+        open={labelDialog.kind === 'recolor'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        currentColor={labelDialog.kind === 'recolor' ? labelDialog.currentColor : DEFAULT_LABEL_COLOR}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'recolor' ? { error: labelDialogError } : {})}
+        onSubmit={(color) => {
+          if (labelDialog.kind !== 'recolor') return;
+          const key = labelDialog.key;
+          void (async () => {
+            try {
+              await invoker.invoke('label.update', { key, color });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <DeleteLabelDialog
+        open={labelDialog.kind === 'delete'}
+        onClose={() => { setLabelDialog({ kind: 'none' }); setLabelDialogError(undefined); }}
+        {...(labelDialog.kind === 'delete' && labelDialog.affectedCount !== undefined
+          ? { affectedCount: labelDialog.affectedCount }
+          : {})}
+        {...(labelDialogError !== undefined && labelDialog.kind === 'delete' ? { error: labelDialogError } : {})}
+        onConfirm={() => {
+          if (labelDialog.kind !== 'delete') return;
+          const key = labelDialog.key;
+          void (async () => {
+            try {
+              await invoker.invoke('label.delete', { key });
+              bumpPushGeneration((n) => n + 1);
+              setLabelDialog({ kind: 'none' });
+              setLabelDialogError(undefined);
+            } catch (e) {
+              setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
       <DeleteToast onUndo={handleUndo} />
       <CommandPalette
         open={paletteOpen}
@@ -1524,10 +1691,17 @@ function MailLayout({
   isLoading,
   error,
   layout,
+  labels,
+  labelFilterKey,
+  selectedLabelName,
 }: {
   readonly isLoading: boolean;
   readonly error?: { message: string } | undefined;
   readonly layout: MailLayoutType;
+  /** Task 8 — label registry for rendering chips on rows/thread. */
+  readonly labels: readonly LabelDef[];
+  readonly labelFilterKey?: string | null;
+  readonly selectedLabelName?: string;
 }) {
   // PR 3: pane structure mirrors contacts-view.module.css. Each pane
   // owns its own scroll region; no 70vh magic, no page-level scrolling
@@ -1547,13 +1721,13 @@ function MailLayout({
         {error !== undefined ? (
           <p role="alert">Session error: {error.message}</p>
         ) : null}
-        <ThreadList />
+        <ThreadList labels={labels} labelFilterKey={labelFilterKey ?? null} {...(selectedLabelName !== undefined ? { selectedLabelName } : {})} />
       </section>
       <section
         aria-label="Selected thread"
         className={`${mailLayoutStyles['pane']} ${mailLayoutStyles['readPane']}`}
       >
-        <ThreadView />
+        <ThreadView labels={labels} />
       </section>
     </div>
   );

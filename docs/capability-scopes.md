@@ -23,6 +23,8 @@ The `session.get` capability declares this scope. Any agent token without `sessi
 | `mail:modify` | Move, label, mark read/unread. Non-destructive mutations. |
 | `mail:delete` | Move to Trash and/or permanently delete. Always routes through approval queue by default. |
 | `mail:mailbox` | Create, rename, and delete mail folders (JMAP Mailbox/set). Required for folder-management capabilities: mailbox.create, mailbox.update, mailbox.delete. |
+| `mail:label:read` | Read label definitions (name, key, color, order). Required by label.list and label.apply (resolving label names/keys at apply time). |
+| `mail:label:write` | Create, update, and delete label definitions (JMAP Keyword registry). Required by label.create, label.update, label.delete. |
 
 ## Calendar
 

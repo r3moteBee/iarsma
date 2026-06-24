@@ -31,7 +31,7 @@
  *   - axe-core baseline.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider as JotaiProvider, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -807,5 +807,101 @@ describe('ThreadView — auto-mark-read on open', () => {
     );
     await waitFor(() => expect(modifyCalls).toHaveLength(1));
     expect(modifyCalls[0]!.emailIds).toEqual(['E2', 'E3']);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Label picker (Task 10)
+// ──────────────────────────────────────────────────────────────────────
+
+import type { LabelDef } from '../../runtime/label-registry.js';
+
+describe('ThreadView — label picker', () => {
+  const LABELS: LabelDef[] = [
+    { key: 'label_work', name: 'Work', color: '#ff6b35', order: 1 },
+    { key: 'label_personal', name: 'Personal', color: '#ff9d23', order: 2 },
+  ];
+
+  function renderWithLabels(emails: Email[], applyCalls?: Array<unknown>) {
+    const invoker = mockInvoker({
+      'thread.get': async () => fixtureThreadGet(emails),
+      'mail.modify': async () => ({ modifiedCount: emails.length }),
+      'label.apply': async (input) => {
+        applyCalls?.push(input);
+        return { modifiedCount: 1 };
+      },
+    });
+    return render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedThread threadId="T1">
+            <ThreadView labels={LABELS} />
+          </WithSelectedThread>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+  }
+
+  it('shows one checkbox per label with correct checked state', async () => {
+    const emails = [
+      email({
+        id: 'E1',
+        subject: 'Test subject',
+        keywords: [
+          { name: '$seen', value: true },
+          { name: 'label_work', value: true },
+        ],
+      }),
+    ];
+    renderWithLabels(emails);
+    await waitFor(() => screen.getByRole('region', { name: 'Thread' }));
+    fireEvent.click(screen.getByLabelText('Label Test subject'));
+    const menu = screen.getByRole('menu', { name: 'Label Test subject' });
+    const workItem = within(menu).getByRole('menuitemcheckbox', { name: /Work/i });
+    const personalItem = within(menu).getByRole('menuitemcheckbox', { name: /Personal/i });
+    expect(workItem).toHaveAttribute('aria-checked', 'true');
+    expect(personalItem).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('toggling an unchecked label calls label.apply with add', async () => {
+    const calls: unknown[] = [];
+    const emails = [
+      email({
+        id: 'E1',
+        subject: 'Test subject',
+        keywords: [
+          { name: '$seen', value: true },
+          { name: 'label_work', value: true },
+        ],
+      }),
+    ];
+    renderWithLabels(emails, calls);
+    await waitFor(() => screen.getByRole('region', { name: 'Thread' }));
+    fireEvent.click(screen.getByLabelText('Label Test subject'));
+    const menu = screen.getByRole('menu', { name: 'Label Test subject' });
+    fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: /Personal/i }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({ emailIds: ['E1'], add: ['label_personal'] });
+  });
+
+  it('toggling a checked label calls label.apply with remove', async () => {
+    const calls: unknown[] = [];
+    const emails = [
+      email({
+        id: 'E1',
+        subject: 'Test subject',
+        keywords: [
+          { name: '$seen', value: true },
+          { name: 'label_work', value: true },
+        ],
+      }),
+    ];
+    renderWithLabels(emails, calls);
+    await waitFor(() => screen.getByRole('region', { name: 'Thread' }));
+    fireEvent.click(screen.getByLabelText('Label Test subject'));
+    const menu = screen.getByRole('menu', { name: 'Label Test subject' });
+    fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: /Work/i }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({ emailIds: ['E1'], remove: ['label_work'] });
   });
 });
