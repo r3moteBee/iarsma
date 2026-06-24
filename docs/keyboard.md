@@ -51,6 +51,7 @@ Implements the [WAI-ARIA listbox pattern](https://www.w3.org/WAI/ARIA/apg/patter
 | <kbd>#</kbd> | Delete the focused thread (in Trash, opens the delete-forever confirm) |
 | <kbd>Shift</kbd>+<kbd>I</kbd> | Mark the focused thread read |
 | <kbd>Shift</kbd>+<kbd>U</kbd> | Mark the focused thread unread |
+| <kbd>x</kbd> | Toggle selection of focused thread |
 
 ## Thread view (right column)
 
@@ -71,7 +72,6 @@ Documented here so they don't get accidentally bound to something else. Implemen
 | Key | Reserved for | Scope |
 |-----|--------------|-------|
 | <kbd>f</kbd> | **Forward** the focused message | Thread view |
-| <kbd>x</kbd> | Toggle selection (multi-select for bulk operations) | Thread list |
 | <kbd>!</kbd> | Report as spam / move to junk | Thread list, thread view |
 
 ## Out of scope (post-v1)

@@ -60,7 +60,7 @@ import {
   selectedThreadIdsAtom,
   selectionAnchorIndexAtom,
 } from '../mail-state.js';
-import { toggle, selectRange } from '../runtime/thread-selection.js';
+import { toggle, selectRange, clearSelection } from '../runtime/thread-selection.js';
 import { useInvoker } from '../runtime/invoker.js';
 import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import type { EmailFull, ThreadGet } from '../runtime/jmap-client.js';
@@ -724,6 +724,23 @@ function ThreadListBody(props: {
           event.preventDefault();
           toggleKeyword(focusedEmailId, '$seen', false);
           break;
+        case 'x': // toggle selection of the focused thread
+          if (i < 0) break;
+          event.preventDefault();
+          {
+            const focusedThread = threads[i];
+            if (focusedThread !== undefined) {
+              handleToggleSelect(focusedThread.id, i, { shift: false, meta: false });
+            }
+          }
+          break;
+        case 'Escape': // clear an active selection (only when non-empty,
+                       // so the global overlay-close handler still works)
+          if (selectedThreadIds.size === 0) break;
+          event.preventDefault();
+          setSelectedThreadIds(clearSelection());
+          setSelectionAnchor(null);
+          break;
       }
     },
     [
@@ -735,6 +752,10 @@ function ThreadListBody(props: {
       handlePurgeRow,
       handleSoftDelete,
       toggleKeyword,
+      handleToggleSelect,
+      selectedThreadIds,
+      setSelectedThreadIds,
+      setSelectionAnchor,
     ],
   );
 

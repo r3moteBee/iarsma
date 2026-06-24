@@ -1138,3 +1138,28 @@ describe('multi-select checkbox', () => {
     expect(checkbox).toBeChecked();
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Multi-select keyboard (Task 5)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('multi-select keyboard', () => {
+  it('toggles selection of the focused thread on "x"', async () => {
+    renderThreadList({});
+    await waitForList(); // first row auto-focused
+    const list = screen.getByRole('list', { name: 'Threads' });
+    fireEvent.keyDown(list, { key: 'x' });
+    const checkboxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    expect(checkboxes[0]).toBeChecked();
+  });
+
+  it('clears the selection on Escape', async () => {
+    renderThreadList({});
+    await waitForList();
+    const list = screen.getByRole('list', { name: 'Threads' });
+    fireEvent.keyDown(list, { key: 'x' });
+    fireEvent.keyDown(list, { key: 'Escape' });
+    const checkboxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    expect(checkboxes[0]).not.toBeChecked();
+  });
+});
