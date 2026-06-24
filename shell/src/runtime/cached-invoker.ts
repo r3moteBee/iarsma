@@ -163,6 +163,14 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
             opts.inner.uploadAttachment!(blob, uploadOpts),
         }
       : {}),
+    // Thread-email-id resolution is a cheap read with no cacheable value —
+    // it's always issued fresh via the inner invoker. Pass-through.
+    ...(opts.inner.resolveThreadEmailIds !== undefined
+      ? {
+          resolveThreadEmailIds: (threadIds: readonly string[]) =>
+            opts.inner.resolveThreadEmailIds!(threadIds),
+        }
+      : {}),
   };
 
   function scheduleRevalidate<I, O>(

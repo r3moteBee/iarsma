@@ -80,6 +80,7 @@ export const KEYBOARD_BINDINGS: ReadonlyArray<Binding> = [
   { keys: '#', action: 'Delete focused thread', scope: 'thread-list' },
   { keys: 'Shift-I', action: 'Mark focused thread read', scope: 'thread-list' },
   { keys: 'Shift-U', action: 'Mark focused thread unread', scope: 'thread-list' },
+  { keys: 'x', action: 'Toggle selection of focused thread', scope: 'thread-list' },
   // Thread view ────────────────────────────────────────────────────
   {
     keys: 'n / ↓',

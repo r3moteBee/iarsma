@@ -30,8 +30,16 @@
 
 .titleRow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-sm);
+}
+
+.selectAll {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .title {
@@ -361,6 +369,29 @@
   .rowLiSelected .rowActions {
     display: flex;
   }
+}
+
+/* ── Multi-select checkbox (Task 4) ─────────────────────────────── */
+
+.rowCheckbox {
+  position: absolute;
+  left: var(--space-md);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  display: none;
+  accent-color: var(--accent);
+}
+
+.rowLi:hover .rowCheckbox,
+.rowLi:focus-within .rowCheckbox,
+.rowCheckbox:checked,
+.rowCheckbox[data-active='true'] {
+  display: block;
 }
 
 /* ── Narrow-screen layout (PR 28) ────────────────────────────────

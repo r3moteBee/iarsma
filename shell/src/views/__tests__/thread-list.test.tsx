@@ -15,7 +15,7 @@
  * `mailbox-list.test.tsx` (which mocks the WASM bindings).
  */
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider as JotaiProvider, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -121,6 +121,13 @@ function renderThreadList(opts: {
   threadGet?: (input: { threadId: string }) => unknown;
   onModify?: (input: unknown) => void;
   onDelete?: (input: unknown) => void;
+  /** Task 8 — override the invoker's invoke and/or resolveThreadEmailIds
+   *  for bulk-action dispatch tests. When provided, these override the
+   *  default mail.modify / mail.delete handlers. */
+  invokerOverrides?: {
+    invoke?: (name: string, input: unknown) => Promise<never>;
+    resolveThreadEmailIds?: (ids: readonly string[]) => Promise<ReadonlyMap<string, readonly string[]>>;
+  };
 } = {}) {
   const data = opts.data ?? FIXTURES;
   const mailboxId = opts.mailboxId === undefined ? 'Mb01' : opts.mailboxId;
@@ -128,6 +135,7 @@ function renderThreadList(opts: {
   // exercise the drafts path supply their own list with a
   // `role: 'drafts'` entry.
   const mailboxes = (opts.mailboxes ?? [{ id: 'Mb01' }]) as ReadonlyArray<unknown>;
+  const overrideInvoke = opts.invokerOverrides?.invoke;
   const invoker = mockInvoker({
     'thread.list': async () => {
       if (opts.invokerError !== undefined) throw opts.invokerError;
@@ -141,13 +149,23 @@ function renderThreadList(opts: {
       return { thread: { id: '', emailIds: [] }, emails: [] };
     },
     'mail.modify': async (input) => {
+      if (overrideInvoke !== undefined) return overrideInvoke('mail.modify', input);
       opts.onModify?.(input);
       return { modifiedCount: 1 };
     },
     'mail.delete': async (input) => {
+      if (overrideInvoke !== undefined) return overrideInvoke('mail.delete', input);
       opts.onDelete?.(input);
       return { deletedCount: 1 };
     },
+    'label.apply': async (input) => {
+      if (overrideInvoke !== undefined) return overrideInvoke('label.apply', input);
+      return { modifiedCount: 1 };
+    },
+  }, {
+    ...(opts.invokerOverrides?.resolveThreadEmailIds !== undefined
+      ? { resolveThreadEmailIds: opts.invokerOverrides.resolveThreadEmailIds }
+      : {}),
   });
   return render(
     <JotaiProvider>
@@ -1078,5 +1096,331 @@ describe('ThreadList — label picker', () => {
     fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: /Work/i }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.input).toEqual({ emailIds: ['E-TL1'], remove: ['label_work'] });
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Multi-select checkbox (Task 4)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('multi-select checkbox', () => {
+  it('shows a selection checkbox per row and selects on click', async () => {
+    renderThreadList({});
+    await waitForList();
+    const checkboxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    expect(checkboxes.length).toBeGreaterThan(0);
+    fireEvent.click(checkboxes[0]!);
+    expect(checkboxes[0]).toBeChecked();
+  });
+
+  it('clicking a checkbox does not open the thread', async () => {
+    /** Probe component that reads selectedThreadIdAtom so the test can
+     *  assert it was NOT set by a checkbox click. */
+    function ThreadOpenProbe() {
+      const selectedThread = useAtomValue(selectedThreadIdAtom);
+      return (
+        <div
+          data-testid="thread-open-probe"
+          data-selected-thread={selectedThread ?? ''}
+        />
+      );
+    }
+
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList />
+            <ThreadOpenProbe />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    const checkbox = screen.getAllByRole('checkbox', { name: /select conversation/i })[0]!;
+    fireEvent.click(checkbox);
+    // Give any async effects time to run.
+    await new Promise((r) => setTimeout(r, 10));
+    // selectedThreadIdAtom must remain unset — a checkbox click selects
+    // the row for bulk actions, it does NOT open the thread view.
+    expect(screen.getByTestId('thread-open-probe')).toHaveAttribute(
+      'data-selected-thread',
+      '',
+    );
+    // The checkbox itself must be checked (multi-select state updated).
+    expect(checkbox).toBeChecked();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Select-all header checkbox (Task 6)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('select-all', () => {
+  it('selects all loaded threads when the header checkbox is clicked', async () => {
+    renderThreadList({});
+    await waitForList();
+    const selectAll = screen.getByRole('checkbox', { name: /select all/i });
+    fireEvent.click(selectAll);
+    const rowBoxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    for (const box of rowBoxes) expect(box).toBeChecked();
+    expect(selectAll).toBeChecked();
+  });
+
+  it('clears the selection when clicked while all selected', async () => {
+    renderThreadList({});
+    await waitForList();
+    const selectAll = screen.getByRole('checkbox', { name: /select all/i });
+    fireEvent.click(selectAll); // all
+    fireEvent.click(selectAll); // none
+    const rowBoxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    for (const box of rowBoxes) expect(box).not.toBeChecked();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Multi-select keyboard (Task 5)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('multi-select keyboard', () => {
+  it('toggles selection of the focused thread on "x"', async () => {
+    renderThreadList({});
+    await waitForList(); // first row auto-focused
+    const list = screen.getByRole('list', { name: 'Threads' });
+    fireEvent.keyDown(list, { key: 'x' });
+    const checkboxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    expect(checkboxes[0]).toBeChecked();
+  });
+
+  it('clears the selection on Escape', async () => {
+    renderThreadList({});
+    await waitForList();
+    const list = screen.getByRole('list', { name: 'Threads' });
+    fireEvent.keyDown(list, { key: 'x' });
+    fireEvent.keyDown(list, { key: 'Escape' });
+    const checkboxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    expect(checkboxes[0]).not.toBeChecked();
+  });
+
+  it('does not preventDefault on Escape when the selection is empty', async () => {
+    renderThreadList({});
+    await waitForList();
+    const list = screen.getByRole('list', { name: 'Threads' });
+    const event = createEvent.keyDown(list, { key: 'Escape' });
+    fireEvent(list, event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Bulk actions dispatch (Task 8)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('bulk actions dispatch', () => {
+  it('resolves selected threads and marks them read in one mail.modify', async () => {
+    const modifyCalls: unknown[] = [];
+    const resolveThreadEmailIds = vi.fn(
+      async (ids: readonly string[]) =>
+        new Map(ids.map((id) => [id, [`${id}-e1`, `${id}-e2`]])),
+    );
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds,
+        invoke: async (name: string, input: unknown) => {
+          if (name === 'mail.modify') modifyCalls.push(input);
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    // select the first two rows
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+    // scope to the BulkActionBar region so per-row "Mark read: X" buttons
+    // don't cause a multiple-match error
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /mark read/i }));
+
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(resolveThreadEmailIds).toHaveBeenCalledTimes(1);
+    const call = modifyCalls[0] as { emailIds: string[]; patch: { keywords?: Record<string, unknown> } };
+    expect(call.emailIds.length).toBe(4); // 2 threads × 2 emails
+    expect(call.patch.keywords).toMatchObject({ $seen: true });
+  });
+
+  it('clears the selection after a successful bulk action', async () => {
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async () => ({}) as never,
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar2 = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar2).getByRole('button', { name: /mark read/i }));
+    await waitFor(() =>
+      expect(screen.queryByText(/1 selected/i)).not.toBeInTheDocument(),
+    );
+  });
+
+  it('does NOT clear the selection when the bulk action invoke rejects', async () => {
+    // When the mutator invoke rejects, runBulk catches the error and leaves
+    // the selection intact so the user can retry.
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async () => {
+          throw new Error('network error');
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    // The "1 selected" bulk bar should be visible.
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /mark read/i }));
+    // After the failed action, the selection should remain (still "1 selected").
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+  });
+
+  it('does NOT call the mutator invoke when resolveThreadEmailIds returns an empty Map, but DOES clear the selection', async () => {
+    // When no email ids can be resolved (e.g. all selected threads have
+    // no emails), runBulk skips the mutator and clears the selection.
+    const invokeCalls: string[] = [];
+    renderThreadList({
+      invokerOverrides: {
+        // Return empty Map — no thread ids map to any email ids.
+        resolveThreadEmailIds: async (_ids: readonly string[]) => new Map(),
+        invoke: async (name: string) => {
+          invokeCalls.push(name);
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    expect(screen.getByText(/1 selected/i)).toBeInTheDocument();
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /mark read/i }));
+    // Selection should be cleared even though invoke was skipped.
+    await waitFor(() =>
+      expect(screen.queryByText(/1 selected/i)).not.toBeInTheDocument(),
+    );
+    // Mutator invoke must NOT have been called.
+    expect(invokeCalls).toHaveLength(0);
+  });
+
+  it('bulk Move issues one mail.modify with mailboxIds patch', async () => {
+    // Verify the shape of the bulk-move invoke against a known from+target pair.
+    const invokeCalls: Array<{ name: string; input: unknown }> = [];
+    renderThreadList({
+      mailboxes: [
+        { id: 'Mb-inbox', role: 'inbox', name: 'Inbox' },
+        { id: 'Mb-archive', name: 'Archive' },
+      ],
+      mailboxId: 'Mb-inbox',
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async (name: string, input: unknown) => {
+          invokeCalls.push({ name, input });
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    // Open the Move menu and pick Archive.
+    const moveMenu = within(bulkBar).getByRole('button', { name: /move selected to/i });
+    fireEvent.click(moveMenu);
+    const archiveItem = screen.getByRole('menuitem', { name: /archive/i });
+    fireEvent.click(archiveItem);
+    await waitFor(() => expect(invokeCalls).toHaveLength(1));
+    expect(invokeCalls[0]!.name).toBe('mail.modify');
+    const input = invokeCalls[0]!.input as {
+      emailIds: string[];
+      patch: { mailboxIds: Record<string, boolean> };
+    };
+    expect(input.emailIds).toEqual([`${FIXTURES.threads[0]!.id}-e1`]);
+    expect(input.patch.mailboxIds).toEqual({ 'Mb-inbox': false, 'Mb-archive': true });
+  });
+
+  it('bulk Label issues one label.apply with add array', async () => {
+    // Render with a labels prop so the BulkActionBar shows the Label menu.
+    const invokeCalls: Array<{ name: string; input: unknown }> = [];
+    const LABELS = [{ key: 'label_work', name: 'Work', color: '#ff6b35', order: 1 }];
+    const invoker = mockInvoker({
+      'thread.list': async () => FIXTURES,
+      'mailbox.list': async () => [{ id: 'Mb01' }],
+      'thread.get': async () => ({ thread: { id: '', emailIds: [] }, emails: [] }),
+      'label.apply': async (input) => {
+        invokeCalls.push({ name: 'label.apply', input });
+        return { modifiedCount: 1 };
+      },
+    }, {
+      resolveThreadEmailIds: async (ids: readonly string[]) =>
+        new Map(ids.map((id) => [id, [`${id}-e1`]])),
+    });
+    render(
+      <JotaiProvider>
+        <IarsmaProvider value={invoker}>
+          <WithSelectedMailbox mailboxId="Mb01">
+            <ThreadList labels={LABELS} />
+          </WithSelectedMailbox>
+        </IarsmaProvider>
+      </JotaiProvider>,
+    );
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    // Open the Label menu (uses aria-label "Label selected").
+    const labelMenu = within(bulkBar).getByRole('button', { name: /label selected/i });
+    fireEvent.click(labelMenu);
+    const workItem = screen.getByRole('menuitem', { name: /work/i });
+    fireEvent.click(workItem);
+    await waitFor(() => expect(invokeCalls.find((c) => c.name === 'label.apply')).toBeDefined());
+    const lc = invokeCalls.find((c) => c.name === 'label.apply')!;
+    expect((lc.input as { emailIds: string[]; add: string[] }).add).toEqual(['label_work']);
+    expect((lc.input as { emailIds: string[]; add: string[] }).emailIds).toEqual([`${FIXTURES.threads[0]!.id}-e1`]);
+  });
+
+  it('bulk Delete issues one mail.delete with emailIds', async () => {
+    const invokeCalls: Array<{ name: string; input: unknown }> = [];
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async (name: string, input: unknown) => {
+          invokeCalls.push({ name, input });
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /delete/i }));
+    await waitFor(() => expect(invokeCalls).toHaveLength(1));
+    expect(invokeCalls[0]!.name).toBe('mail.delete');
+    const input = invokeCalls[0]!.input as { emailIds: string[] };
+    expect(input.emailIds).toEqual([`${FIXTURES.threads[0]!.id}-e1`]);
   });
 });

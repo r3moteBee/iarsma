@@ -931,6 +931,99 @@ export function parseThreadGet(body: string): ThreadGet {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Thread/get — batched email-id resolver (bulk-action path)
+// ──────────────────────────────────────────────────────────────────────
+
+export type ResolveThreadEmailIdsOptions = JmapClientOptions & {
+  readonly session: Session;
+  readonly threadIds: readonly string[];
+};
+
+/**
+ * Resolve a set of thread ids to each thread's full email-id list via a
+ * single batched `Thread/get`. Returns `Map<threadId, emailIds[]>`;
+ * threads the server doesn't return are absent from the map. Used by the
+ * bulk-action path to expand whole-conversation selections before a
+ * single `Email/set` — see `resolveThreadEmailIds` on the Invoker.
+ *
+ * No `Email/get` back-reference here: bulk actions only need the ids,
+ * not the bodies (contrast `fetchThreadGet`, which fetches full bodies).
+ */
+export async function fetchResolveThreadEmailIds(
+  opts: ResolveThreadEmailIdsOptions,
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  if (opts.threadIds.length === 0) {
+    return new Map();
+  }
+  const token = await opts.getAuthToken();
+  if (token === null) {
+    throw makeError('unauthorized', 'No auth token available.');
+  }
+  const fetchImpl = opts.fetch ?? fetch;
+  const accountId = opts.session.primaryAccountIdMail;
+  const body = JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [['Thread/get', { accountId, ids: opts.threadIds }, '0']],
+  });
+
+  let response: Response;
+  try {
+    response = await fetchImpl(opts.session.apiUrl, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+  } catch (e) {
+    throw makeError('network_error', `JMAP fetch failed: ${describe(e)}`);
+  }
+  if (!response.ok) {
+    throw makeError(
+      response.status === 401 ? 'unauthorized' : 'jmap_http_error',
+      `JMAP Thread/get (batch) returned ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Thread/get batch: ${describe(e)}`,
+    );
+  }
+  const responses = (parsed as { methodResponses?: unknown }).methodResponses;
+  if (!Array.isArray(responses) || responses.length === 0) {
+    throw makeError('jmap_parse_error', 'Thread/get batch: no methodResponses.');
+  }
+  const first = responses[0];
+  if (!Array.isArray(first) || first.length < 2) {
+    throw makeError('jmap_parse_error', 'Thread/get batch: malformed response.');
+  }
+  const result = first[1] as { list?: unknown };
+  const items = Array.isArray(result.list) ? result.list : [];
+  const out = new Map<string, readonly string[]>();
+  for (const item of items) {
+    if (item === null || typeof item !== 'object') continue;
+    const t = item as { id?: unknown; emailIds?: unknown };
+    if (typeof t.id !== 'string') continue;
+    const ids: string[] = [];
+    if (Array.isArray(t.emailIds)) {
+      for (const eid of t.emailIds) {
+        if (typeof eid === 'string') ids.push(eid);
+      }
+    }
+    out.set(t.id, ids);
+  }
+  return out;
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Email/set (mail.draft commit)
 // ──────────────────────────────────────────────────────────────────────
 //

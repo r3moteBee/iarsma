@@ -51,6 +51,7 @@ import {
   makeMailboxDeletePreview,
   fetchMailboxList,
   fetchSession,
+  fetchResolveThreadEmailIds,
   fetchThreadGet,
   fetchThreadList,
   fetchThreadSearch,
@@ -151,6 +152,18 @@ export interface Invoker {
     blob: Blob,
     options?: { readonly name?: string; readonly type?: string },
   ): Promise<AttachmentUpload>;
+  /**
+   * Resolve a set of thread ids to each thread's full flattened email
+   * ids via a single batched `Thread/get`. Used by bulk actions to
+   * expand whole-conversation selections before a single mutating call.
+   *
+   * Optional for the same reason as `uploadAttachment`: test mocks can
+   * skip it unless the test under exercise resolves threads. The JMAP
+   * invoker always implements it.
+   */
+  resolveThreadEmailIds?(
+    threadIds: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly string[]>>;
 }
 
 const InvokerContext = createContext<Invoker | null>(null);
@@ -711,6 +724,14 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
         ...(uploadOpts.type !== undefined ? { type: uploadOpts.type } : {}),
       });
     },
+    async resolveThreadEmailIds(threadIds) {
+      const session = await getSession();
+      return fetchResolveThreadEmailIds({
+        ...opts,
+        session,
+        threadIds,
+      });
+    },
   };
 }
 
@@ -734,6 +755,10 @@ export type MockInvokerOptions = {
    *  uploads can omit it; calls fall through to a not_implemented
    *  error so test forgetfulness fails loud. */
   readonly uploadAttachment?: MockInvokerUploadHandler;
+  /** Optional `resolveThreadEmailIds` handler for bulk-action tests. */
+  readonly resolveThreadEmailIds?: (
+    threadIds: readonly string[],
+  ) => Promise<ReadonlyMap<string, readonly string[]>>;
 };
 
 export function mockInvoker(
@@ -755,6 +780,9 @@ export function mockInvoker(
           uploadAttachment: async (blob, uploadOpts = {}) =>
             options.uploadAttachment!(blob, uploadOpts),
         }
+      : {}),
+    ...(options.resolveThreadEmailIds !== undefined
+      ? { resolveThreadEmailIds: options.resolveThreadEmailIds }
       : {}),
   };
 }

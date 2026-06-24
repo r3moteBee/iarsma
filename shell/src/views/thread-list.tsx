@@ -39,10 +39,11 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import { BulkActionBar } from '../components/bulk-action-bar.js';
 import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
 import { EmptyState } from '../components/empty-state.js';
-import { LabelTagIcon, MoveToFolderIcon } from '../components/icons.js';
+import { LabelTagIcon, MarkReadIcon, MarkUnreadIcon, MoveToFolderIcon, TrashIcon } from '../components/icons.js';
 import { LabelChip } from '../components/label-chip.js';
 import { MenuButton } from '../components/menu-button.js';
 import { Notice } from '../components/notice.js';
@@ -57,7 +58,10 @@ import {
   mailboxScrollPositionsAtom,
   selectedMailboxIdAtom,
   selectedThreadIdAtom,
+  selectedThreadIdsAtom,
+  selectionAnchorIndexAtom,
 } from '../mail-state.js';
+import { toggle, selectRange, selectAll, clearSelection } from '../runtime/thread-selection.js';
 import { useInvoker } from '../runtime/invoker.js';
 import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import type { EmailFull, ThreadGet } from '../runtime/jmap-client.js';
@@ -169,10 +173,14 @@ export function ThreadList({ labels = [], labelFilterKey = null, selectedLabelNa
 function ThreadListWithLabel({ hasKeyword, labelName, labels }: { readonly hasKeyword: string; readonly labelName?: string; readonly labels: readonly LabelDef[] }) {
   const { data, error, isLoading, refetch } = useThreadList({ hasKeyword });
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
+  const setSelectedThreadIds = useSetAtom(selectedThreadIdsAtom);
+  const setSelectionAnchor = useSetAtom(selectionAnchorIndexAtom);
 
   useEffect(() => {
     setSelectedThreadId(null);
-  }, [hasKeyword, setSelectedThreadId]);
+    setSelectedThreadIds(new Set());
+    setSelectionAnchor(null);
+  }, [hasKeyword, setSelectedThreadId, setSelectedThreadIds, setSelectionAnchor]);
 
   const threadsLen = data?.threads.length ?? 0;
   const total = data?.total;
@@ -209,6 +217,17 @@ function ThreadListSearchMode({ query, labels }: { readonly query: string; reado
     loadMore,
     refetch,
   } = useThreadSearchPaginated({ query });
+
+  // Clear multi-select state when the search query changes so stale
+  // selections don't carry over between different search contexts.
+  const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
+  const setSelectedThreadIds = useSetAtom(selectedThreadIdsAtom);
+  const setSelectionAnchor = useSetAtom(selectionAnchorIndexAtom);
+  useEffect(() => {
+    setSelectedThreadId(null);
+    setSelectedThreadIds(new Set());
+    setSelectionAnchor(null);
+  }, [query, setSelectedThreadId, setSelectedThreadIds, setSelectionAnchor]);
   const data: ThreadListData = {
     threads,
     position: 0,
@@ -241,6 +260,8 @@ function ThreadListSearchMode({ query, labels }: { readonly query: string; reado
 function ThreadListWithMailbox({ mailboxId, labels }: { readonly mailboxId: string; readonly labels: readonly LabelDef[] }) {
   const { data, error, isLoading, refetch } = useThreadList({ mailboxId });
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
+  const setSelectedThreadIds = useSetAtom(selectedThreadIdsAtom);
+  const setSelectionAnchor = useSetAtom(selectionAnchorIndexAtom);
   const mailboxes = useMailboxList({});
 
   const currentMailbox = useMemo(() => {
@@ -267,7 +288,9 @@ function ThreadListWithMailbox({ mailboxId, labels }: { readonly mailboxId: stri
   // Reset thread selection when the mailbox changes.
   useEffect(() => {
     setSelectedThreadId(null);
-  }, [mailboxId, setSelectedThreadId]);
+    setSelectedThreadIds(new Set());
+    setSelectionAnchor(null);
+  }, [mailboxId, setSelectedThreadId, setSelectedThreadIds, setSelectionAnchor]);
 
   const title = getMailboxLabel(currentMailbox, 'Mail');
   const threadsLen = data?.threads.length ?? 0;
@@ -340,12 +363,38 @@ function ThreadListBody(props: {
   const selectedThreadId = useAtomValue(selectedThreadIdAtom);
   const setSelectedThreadId = useSetAtom(selectedThreadIdAtom);
   const setComposeState = useSetAtom(composeStateAtom);
+  const [selectedThreadIds, setSelectedThreadIds] = useAtom(selectedThreadIdsAtom);
+  const [selectionAnchor, setSelectionAnchor] = useAtom(selectionAnchorIndexAtom);
+  const selectionActive = selectedThreadIds.size > 0;
   const invoker = useInvoker();
   const [emptyConfirmOpen, setEmptyConfirmOpen] = useState(false);
   const [emptying, setEmptying] = useState(false);
   const [emptyError, setEmptyError] = useState<string | null>(null);
 
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
+
+  // Task 6 — header select-all checkbox state
+  const loadedSelectedCount = useMemo(
+    () => threads.reduce((n, t) => (selectedThreadIds.has(t.id) ? n + 1 : n), 0),
+    [threads, selectedThreadIds],
+  );
+  const allLoadedSelected = threads.length > 0 && loadedSelectedCount === threads.length;
+  const someLoadedSelected = loadedSelectedCount > 0 && !allLoadedSelected;
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current !== null) {
+      selectAllRef.current.indeterminate = someLoadedSelected;
+    }
+  }, [someLoadedSelected]);
+
+  const handleSelectAllToggle = useCallback(() => {
+    if (allLoadedSelected) {
+      setSelectedThreadIds(clearSelection());
+      setSelectionAnchor(null);
+    } else {
+      setSelectedThreadIds(selectAll(threads.map((t) => t.id)));
+    }
+  }, [allLoadedSelected, threads, setSelectedThreadIds, setSelectionAnchor]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -462,6 +511,38 @@ function ThreadListBody(props: {
       })();
     },
     [threads, setSelectedThreadId, isDrafts, invoker, setComposeState],
+  );
+
+  const handleToggleSelect = useCallback(
+    (threadId: string, index: number, mods: { shift: boolean; meta: boolean }) => {
+      if (mods.shift && selectionAnchor !== null) {
+        const orderedIds = threads.map((t) => t.id);
+        setSelectedThreadIds((prev: ReadonlySet<string>) =>
+          selectRange(orderedIds, selectionAnchor, index, prev),
+        );
+        return;
+      }
+      setSelectedThreadIds((prev: ReadonlySet<string>) => toggle(prev, threadId));
+      setSelectionAnchor(index);
+    },
+    [threads, selectionAnchor, setSelectedThreadIds, setSelectionAnchor],
+  );
+
+  const handleRowActivate = useCallback(
+    (index: number, ev: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; preventDefault: () => void }) => {
+      const thread = threads[index];
+      if (thread === undefined) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey) {
+        ev.preventDefault();
+        handleToggleSelect(thread.id, index, {
+          shift: ev.shiftKey,
+          meta: ev.metaKey || ev.ctrlKey,
+        });
+        return;
+      }
+      onSelect(index);
+    },
+    [threads, handleToggleSelect, onSelect],
   );
 
   // Per-row mail.modify wire-up (PR 4.5). `refetch()` runs after a
@@ -587,6 +668,85 @@ function ThreadListBody(props: {
     [invoker, refetch, bumpPushGeneration],
   );
 
+  // Task 8 — bulk action helpers: resolve selected thread ids → email ids,
+  // run a mutate fn, then clear selection + refetch.
+  const resolveSelectedEmailIds = useCallback(async (): Promise<string[]> => {
+    if (invoker.resolveThreadEmailIds === undefined) return [];
+    const map = await invoker.resolveThreadEmailIds([...selectedThreadIds]);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const ids of map.values()) {
+      for (const id of ids) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          out.push(id);
+        }
+      }
+    }
+    return out;
+  }, [invoker, selectedThreadIds]);
+
+  const runBulk = useCallback(
+    (mutate: (emailIds: string[]) => Promise<unknown>) => {
+      void (async () => {
+        try {
+          const emailIds = await resolveSelectedEmailIds();
+          if (emailIds.length === 0) {
+            setSelectedThreadIds(clearSelection());
+            setSelectionAnchor(null);
+            return;
+          }
+          await mutate(emailIds);
+          setSelectedThreadIds(clearSelection());
+          setSelectionAnchor(null);
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // Leave the selection intact so the user can retry.
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] bulk action failed:', e);
+        }
+      })();
+    },
+    [resolveSelectedEmailIds, refetch, bumpPushGeneration, setSelectedThreadIds, setSelectionAnchor],
+  );
+
+  const handleBulkMarkRead = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $seen: true } } })),
+    [runBulk, invoker],
+  );
+  // { $seen: null } intentionally mirrors toggleKeyword's `set ? true : null`
+  // convention — null means "remove the keyword" in the JMAP patch dialect.
+  const handleBulkMarkUnread = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $seen: null } } })),
+    [runBulk, invoker],
+  );
+  const handleBulkMove = useCallback(
+    (targetMailboxId: string) => {
+      const fromId = mailboxId;
+      if (fromId === null) return;
+      runBulk((emailIds) =>
+        invoker.invoke('mail.modify', {
+          emailIds,
+          patch: { mailboxIds: { [fromId]: false, [targetMailboxId]: true } },
+        }),
+      );
+    },
+    [runBulk, invoker, mailboxId],
+  );
+  const handleBulkLabel = useCallback(
+    (labelKey: string) => runBulk((emailIds) => invoker.invoke('label.apply', { emailIds, add: [labelKey] })),
+    [runBulk, invoker],
+  );
+  const handleBulkDelete = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.delete', { emailIds })),
+    [runBulk, invoker],
+  );
+  const handleClearSelection = useCallback(() => {
+    setSelectedThreadIds(clearSelection());
+    setSelectionAnchor(null);
+  }, [setSelectedThreadIds, setSelectionAnchor]);
+
   // Candidate mailboxes for "Move to…" come from the prop (computed in
   // ThreadListWithMailbox, already filtered to exclude the current
   // mailbox). Fall back to empty in search mode.
@@ -667,6 +827,23 @@ function ThreadListBody(props: {
           event.preventDefault();
           toggleKeyword(focusedEmailId, '$seen', false);
           break;
+        case 'x': // toggle selection of the focused thread
+          if (i < 0) break;
+          event.preventDefault();
+          {
+            const focusedThread = threads[i];
+            if (focusedThread !== undefined) {
+              handleToggleSelect(focusedThread.id, i, { shift: false, meta: false });
+            }
+          }
+          break;
+        case 'Escape': // clear an active selection (only when non-empty,
+                       // so the global overlay-close handler still works)
+          if (selectedThreadIds.size === 0) break;
+          event.preventDefault();
+          setSelectedThreadIds(clearSelection());
+          setSelectionAnchor(null);
+          break;
       }
     },
     [
@@ -678,6 +855,10 @@ function ThreadListBody(props: {
       handlePurgeRow,
       handleSoftDelete,
       toggleKeyword,
+      handleToggleSelect,
+      selectedThreadIds,
+      setSelectedThreadIds,
+      setSelectionAnchor,
     ],
   );
 
@@ -717,6 +898,14 @@ function ThreadListBody(props: {
   const headerEl = (
     <header className={styles['header']}>
       <div className={styles['titleRow']}>
+        <input
+          ref={selectAllRef}
+          type="checkbox"
+          className={styles['selectAll']}
+          checked={allLoadedSelected}
+          onChange={handleSelectAllToggle}
+          aria-label="Select all conversations"
+        />
         <h2 className={styles['title']}>{title}</h2>
         {countText !== null ? (
           <span className={styles['sub']} aria-live="polite">
@@ -725,29 +914,45 @@ function ThreadListBody(props: {
         ) : null}
       </div>
       <div className={styles['toolbar']} aria-label="Mailbox actions">
-        <button
-          type="button"
-          className={styles['iconBtn']}
-          onClick={() => void refetch()}
-          aria-label="Refresh"
-          title="Refresh"
-        >
-          <RefreshIcon />
-        </button>
-        <span className={styles['toolbarSpacer']} />
-        {/* PR 30 — Empty trash button. Only shown in the Trash
-         *  mailbox. Disabled when there's nothing to empty. */}
-        {isTrash ? (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setEmptyConfirmOpen(true)}
-            disabled={(data?.total ?? 0) === 0 || emptying}
-            aria-label="Empty trash"
-          >
-            {emptying ? 'Emptying…' : 'Empty trash'}
-          </Button>
-        ) : null}
+        {selectionActive ? (
+          <BulkActionBar
+            count={selectedThreadIds.size}
+            moveTargets={(moveTargets).map((m) => ({ id: m.id, label: getMailboxLabel(m, m.id) }))}
+            labels={labels.map((l) => ({ key: l.key, name: l.name }))}
+            onMarkRead={handleBulkMarkRead}
+            onMarkUnread={handleBulkMarkUnread}
+            onMove={handleBulkMove}
+            onLabelToggle={handleBulkLabel}
+            onDelete={handleBulkDelete}
+            onClear={handleClearSelection}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              className={styles['iconBtn']}
+              onClick={() => void refetch()}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshIcon />
+            </button>
+            <span className={styles['toolbarSpacer']} />
+            {/* PR 30 — Empty trash button. Only shown in the Trash
+             *  mailbox. Disabled when there's nothing to empty. */}
+            {isTrash ? (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setEmptyConfirmOpen(true)}
+                disabled={(data?.total ?? 0) === 0 || emptying}
+                aria-label="Empty trash"
+              >
+                {emptying ? 'Emptying…' : 'Empty trash'}
+              </Button>
+            ) : null}
+          </>
+        )}
       </div>
     </header>
   );
@@ -822,7 +1027,10 @@ function ThreadListBody(props: {
                 rowHeight={ROW_HEIGHT_PX}
                 isSelected={isSelected}
                 isFocused={isFocused}
-                onClick={() => onSelect(vi.index)}
+                selected={selectedThreadIds.has(thread.id)}
+                selectionActive={selectionActive}
+                onToggleSelect={handleToggleSelect}
+                onClick={(ev) => handleRowActivate(vi.index, ev)}
                 onToggleFlag={(id, current) => toggleKeyword(id, '$flagged', !current)}
                 onToggleRead={(id, current) => toggleKeyword(id, '$seen', !current)}
                 onDelete={isTrash ? handlePurgeRow : handleSoftDelete}
@@ -958,7 +1166,13 @@ type ThreadRowProps = {
   readonly rowHeight: number;
   readonly isSelected: boolean;
   readonly isFocused: boolean;
-  readonly onClick: () => void;
+  readonly onClick: (ev: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Task 4 — whether this row is in the multi-select set. */
+  readonly selected: boolean;
+  /** Task 4 — whether ANY row is selected (drives checkbox visibility). */
+  readonly selectionActive: boolean;
+  /** Task 4 — toggle this row in/out of the multi-select set. */
+  readonly onToggleSelect: (threadId: string, index: number, mods: { shift: boolean; meta: boolean }) => void;
   /** Per-row Flag toggle. `current` is the row's pre-click value so
    *  the caller can compute the patch direction without re-reading
    *  state. */
@@ -999,6 +1213,9 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
     isSelected,
     isFocused,
     onClick,
+    selected,
+    selectionActive,
+    onToggleSelect,
     onToggleFlag,
     onToggleRead,
     onDelete,
@@ -1074,6 +1291,21 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
         boxSizing: 'border-box',
       }}
     >
+      <input
+        type="checkbox"
+        className={styles['rowCheckbox']}
+        checked={selected}
+        readOnly
+        data-active={selectionActive ? 'true' : undefined}
+        aria-label={`Select conversation: ${subject}`}
+        onClick={(ev) => {
+          ev.stopPropagation();
+          onToggleSelect(thread.id, index, {
+            shift: ev.shiftKey,
+            meta: ev.metaKey || ev.ctrlKey,
+          });
+        }}
+      />
       <button
         type="button"
         id={`thread-row-${thread.id}`}
@@ -1260,35 +1492,6 @@ function FlagIcon({ filled }: { readonly filled: boolean }) {
     <svg viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
       <line x1="4" y1="22" x2="4" y2="15" />
-    </svg>
-  );
-}
-
-function MarkReadIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-    </svg>
-  );
-}
-
-function MarkUnreadIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <path d="M22 7l-10 7L2 7" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 6h18" />
-      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-      <path d="M10 11v6" />
-      <path d="M14 11v6" />
-      <path d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2" />
     </svg>
   );
 }
