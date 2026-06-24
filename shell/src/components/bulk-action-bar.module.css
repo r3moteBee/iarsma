@@ -1,0 +1,27 @@
+/* shell/src/components/bulk-action-bar.module.css */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+}
+.count {
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-1);
+  cursor: pointer;
+}
+.spacer {
+  flex: 1;
+}
