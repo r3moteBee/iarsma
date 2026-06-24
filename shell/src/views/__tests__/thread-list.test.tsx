@@ -15,7 +15,7 @@
  * `mailbox-list.test.tsx` (which mocks the WASM bindings).
  */
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider as JotaiProvider, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -1161,5 +1161,14 @@ describe('multi-select keyboard', () => {
     fireEvent.keyDown(list, { key: 'Escape' });
     const checkboxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
     expect(checkboxes[0]).not.toBeChecked();
+  });
+
+  it('does not preventDefault on Escape when the selection is empty', async () => {
+    renderThreadList({});
+    await waitForList();
+    const list = screen.getByRole('list', { name: 'Threads' });
+    const event = createEvent.keyDown(list, { key: 'Escape' });
+    fireEvent(list, event);
+    expect(event.defaultPrevented).toBe(false);
   });
 });
