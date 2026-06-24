@@ -2267,6 +2267,7 @@ export type Calendar = {
   readonly name: string;
   readonly color?: string;
   readonly isVisible: boolean;
+  readonly isDefault: boolean;
 };
 
 export type FetchCalendarListOptions = JmapClientOptions & {
@@ -2388,6 +2389,7 @@ function parseCalendar(raw: unknown, index: number): Calendar {
     name: r.name,
     ...(typeof r.color === 'string' ? { color: r.color } : {}),
     isVisible: typeof r.isVisible === 'boolean' ? r.isVisible : true,
+    isDefault: typeof r.isDefault === 'boolean' ? r.isDefault : false,
   };
 }
 
