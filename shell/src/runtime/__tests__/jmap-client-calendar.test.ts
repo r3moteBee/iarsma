@@ -88,17 +88,20 @@ describe('parseCalendarListResponse', () => {
       name: 'Personal',
       color: '#1a73e8',
       isVisible: true,
+      isDefault: false,
     });
     expect(calendars[1]).toEqual({
       id: 'Cal02',
       name: 'Work',
       color: '#e67c73',
       isVisible: true,
+      isDefault: false,
     });
     expect(calendars[2]).toEqual({
       id: 'Cal03',
       name: 'Birthdays',
       isVisible: false,
+      isDefault: false,
     });
   });
 

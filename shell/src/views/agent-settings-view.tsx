@@ -44,6 +44,8 @@ const ALL_SCOPES = [
   'mail:mailbox',
   'mail:label:read',
   'mail:label:write',
+  'calendar:read',
+  'calendar:write',
 ] as const;
 
 // ── Lifetime options (label → seconds) ─────────────────────────────

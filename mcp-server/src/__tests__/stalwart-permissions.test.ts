@@ -64,4 +64,40 @@ describe('scopesToStalwartPermissions', () => {
     expect(perms.jmapEmailUpdate).toBe(true);
     expect(perms.jmapFileNodeGet).toBe(true);
   });
+
+  // calendar:read — Task 5
+  it('maps calendar:read to exactly the six calendar read/query permissions', () => {
+    const perms = scopesToStalwartPermissions(['calendar:read']);
+    expect(perms.jmapCalendarGet).toBe(true);
+    expect(perms.jmapCalendarChanges).toBe(true);
+    expect(perms.jmapCalendarEventGet).toBe(true);
+    expect(perms.jmapCalendarEventChanges).toBe(true);
+    expect(perms.jmapCalendarEventQuery).toBe(true);
+    expect(perms.jmapCalendarEventQueryChanges).toBe(true);
+    // write perms must NOT be present
+    expect(perms.jmapCalendarCreate).toBeUndefined();
+    expect(perms.jmapCalendarUpdate).toBeUndefined();
+    expect(perms.jmapCalendarDestroy).toBeUndefined();
+    expect(perms.jmapCalendarEventCreate).toBeUndefined();
+    expect(perms.jmapCalendarEventUpdate).toBeUndefined();
+    expect(perms.jmapCalendarEventDestroy).toBeUndefined();
+  });
+
+  // calendar:write — Task 5
+  it('maps calendar:write to exactly the six calendar mutation permissions', () => {
+    const perms = scopesToStalwartPermissions(['calendar:write']);
+    expect(perms.jmapCalendarCreate).toBe(true);
+    expect(perms.jmapCalendarUpdate).toBe(true);
+    expect(perms.jmapCalendarDestroy).toBe(true);
+    expect(perms.jmapCalendarEventCreate).toBe(true);
+    expect(perms.jmapCalendarEventUpdate).toBe(true);
+    expect(perms.jmapCalendarEventDestroy).toBe(true);
+    // read perms must NOT be granted by write alone
+    expect(perms.jmapCalendarGet).toBeUndefined();
+    expect(perms.jmapCalendarChanges).toBeUndefined();
+    expect(perms.jmapCalendarEventGet).toBeUndefined();
+    expect(perms.jmapCalendarEventChanges).toBeUndefined();
+    expect(perms.jmapCalendarEventQuery).toBeUndefined();
+    expect(perms.jmapCalendarEventQueryChanges).toBeUndefined();
+  });
 });

@@ -24,6 +24,7 @@ const Calendar = z.object({
     .optional()
     .describe('CSS color value for the calendar (e.g., "#1a73e8"). Optional.'),
   isVisible: z.boolean().describe('Whether the calendar is visible in the UI by default.'),
+  isDefault: z.boolean().describe('Whether this is the account default calendar (cannot be deleted).'),
 });
 
 export const calendarList = capability({

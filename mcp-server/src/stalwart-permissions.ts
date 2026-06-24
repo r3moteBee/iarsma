@@ -66,6 +66,22 @@ const SCOPE_PERMISSIONS: Readonly<Record<string, Record<string, boolean>>> = {
     jmapBlobUpload: true,
     jmapBlobGet: true,
   },
+  'calendar:read': {
+    jmapCalendarGet: true,
+    jmapCalendarChanges: true,
+    jmapCalendarEventGet: true,
+    jmapCalendarEventChanges: true,
+    jmapCalendarEventQuery: true,
+    jmapCalendarEventQueryChanges: true,
+  },
+  'calendar:write': {
+    jmapCalendarCreate: true,
+    jmapCalendarUpdate: true,
+    jmapCalendarDestroy: true,
+    jmapCalendarEventCreate: true,
+    jmapCalendarEventUpdate: true,
+    jmapCalendarEventDestroy: true,
+  },
 };
 
 export function scopesToStalwartPermissions(

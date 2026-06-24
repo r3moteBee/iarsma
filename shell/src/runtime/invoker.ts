@@ -24,6 +24,9 @@ import {
   buildMailDraftRequest,
   buildMailSendRequest,
   fetchAttachmentUpload,
+  fetchCalendarCreateCommit,
+  fetchCalendarUpdateCommit,
+  fetchCalendarDeleteCommit,
   fetchCalendarList,
   fetchContactCreateCommit,
   fetchContactDeleteCommit,
@@ -707,6 +710,44 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             return (await labelApplyPreview({ ...opts, session }, params)) as unknown as O | DryRunPreview<O>;
           }
           return (await labelApplyCommit({ ...opts, session }, params)) as unknown as O;
+        }
+        case 'calendar.create': {
+          const p = _input as unknown as { name: string; color?: string };
+          const session = await getSession();
+          return (await fetchCalendarCreateCommit({ ...opts, session, name: p.name, ...(p.color !== undefined ? { color: p.color } : {}) })) as unknown as O;
+        }
+        case 'calendar.update': {
+          const p = _input as unknown as { calendarId: string; name?: string; color?: string };
+          const session = await getSession();
+          // Existence pre-check: fetch the calendar list and confirm the target
+          // exists before issuing Calendar/set update. Mirrors the delete guard.
+          const updateCals = await fetchCalendarList({ ...opts, session });
+          const updateTarget = updateCals.find((c) => c.id === p.calendarId);
+          if (updateTarget === undefined) {
+            throw makeToolError('calendar_not_found', 'Calendar not found.');
+          }
+          return (await fetchCalendarUpdateCommit({ ...opts, session, calendarId: p.calendarId, ...(p.name !== undefined ? { name: p.name } : {}), ...(p.color !== undefined ? { color: p.color } : {}) })) as unknown as O;
+        }
+        case 'calendar.delete': {
+          const p = _input as unknown as { calendarId: string; removeEvents?: boolean };
+          const session = await getSession();
+          if (_options.dryRun === true) {
+            const cals = await fetchCalendarList({ ...opts, session });
+            const target = cals.find((c) => c.id === p.calendarId);
+            return { isDefault: target?.isDefault === true } as unknown as O | DryRunPreview<O>;
+          }
+          // Defense-in-depth: guard against deleting the default calendar even
+          // when the UI hides the Delete action. Mirrors the dry-run lookup.
+          const cals = await fetchCalendarList({ ...opts, session });
+          const target = cals.find((c) => c.id === p.calendarId);
+          if (target?.isDefault === true) {
+            throw makeToolError('calendar_is_default', 'The default calendar cannot be deleted.');
+          }
+          // Idempotent: if the calendar is already gone, treat as success.
+          if (target === undefined) {
+            return { deleted: true } as unknown as O;
+          }
+          return (await fetchCalendarDeleteCommit({ ...opts, session, calendarId: p.calendarId, removeEvents: p.removeEvents === true })) as unknown as O;
         }
         default:
           throw makeToolError(

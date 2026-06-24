@@ -660,8 +660,8 @@ describe('CalendarView', () => {
 
   describe('visibility rail (PR 14, §8.4)', () => {
     const SAMPLE_CALENDARS = [
-      { id: 'cal-1', name: 'Personal', color: '#3b82f6' },
-      { id: 'cal-2', name: 'Work', color: '#10b981' },
+      { id: 'cal-1', name: 'Personal', color: '#3b82f6', isDefault: true },
+      { id: 'cal-2', name: 'Work', color: '#10b981', isDefault: false },
     ];
 
     it('renders one row per calendar with color swatch and checkbox', () => {
@@ -1107,6 +1107,101 @@ describe('CalendarView', () => {
       expect(screen.getByText('Awaiting reply')).toBeInTheDocument();
       expect(screen.getByText('organizer')).toBeInTheDocument();
       expect(screen.getByText('optional')).toBeInTheDocument();
+    });
+  });
+
+  // ── Task 9: CalendarRail + / row menu ──────────────────────────
+  describe('CalendarRail CRUD affordances (Task 9)', () => {
+    function renderCalendarView(overrides: {
+      calendars?: Array<{ id: string; name: string; color?: string; isDefault: boolean }>;
+      onCreateCalendar?: () => void;
+      onEditCalendar?: (id: string) => void;
+      onDeleteCalendar?: (id: string) => void;
+    }) {
+      const {
+        calendars = [{ id: 'b', name: 'Personal', isDefault: true }],
+        onCreateCalendar,
+        onEditCalendar,
+        onDeleteCalendar,
+      } = overrides;
+      render(
+        <CalendarView
+          events={[]}
+          view="month"
+          onViewChange={noop}
+          currentDate={TEST_DATE}
+          onDateChange={noop}
+          calendars={calendars}
+          hiddenCalendarIds={[]}
+          onToggleCalendar={noop}
+          {...(onCreateCalendar !== undefined ? { onCreateCalendar } : {})}
+          {...(onEditCalendar !== undefined ? { onEditCalendar } : {})}
+          {...(onDeleteCalendar !== undefined ? { onDeleteCalendar } : {})}
+        />,
+      );
+    }
+
+    it('shows "+ New calendar" and fires onCreateCalendar', () => {
+      const onCreateCalendar = vi.fn();
+      renderCalendarView({
+        calendars: [{ id: 'b', name: 'Personal', isDefault: true }],
+        onCreateCalendar,
+      });
+      fireEvent.click(screen.getByRole('button', { name: /new calendar/i }));
+      expect(onCreateCalendar).toHaveBeenCalled();
+    });
+
+    it('hides Delete on the default calendar row', () => {
+      const onEditCalendar = vi.fn();
+      const onDeleteCalendar = vi.fn();
+      renderCalendarView({
+        calendars: [{ id: 'b', name: 'Personal', isDefault: true }],
+        onEditCalendar,
+        onDeleteCalendar,
+      });
+      // Open the row menu for the default row
+      fireEvent.click(screen.getByRole('button', { name: /personal actions/i }));
+      // Edit should be present
+      expect(screen.getByRole('menuitem', { name: /edit/i })).toBeInTheDocument();
+      // Delete should be absent for the default row
+      expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
+    });
+
+    it('shows Delete on non-default calendar row', () => {
+      const onEditCalendar = vi.fn();
+      const onDeleteCalendar = vi.fn();
+      renderCalendarView({
+        calendars: [
+          { id: 'a', name: 'Work', isDefault: false },
+        ],
+        onEditCalendar,
+        onDeleteCalendar,
+      });
+      fireEvent.click(screen.getByRole('button', { name: /work actions/i }));
+      expect(screen.getByRole('menuitem', { name: /edit/i })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
+    });
+
+    it('Edit menu item fires onEditCalendar with the calendar id', () => {
+      const onEditCalendar = vi.fn();
+      renderCalendarView({
+        calendars: [{ id: 'cal-work', name: 'Work', isDefault: false }],
+        onEditCalendar,
+      });
+      fireEvent.click(screen.getByRole('button', { name: /work actions/i }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /edit/i }));
+      expect(onEditCalendar).toHaveBeenCalledWith('cal-work');
+    });
+
+    it('Delete menu item fires onDeleteCalendar with the calendar id', () => {
+      const onDeleteCalendar = vi.fn();
+      renderCalendarView({
+        calendars: [{ id: 'cal-work', name: 'Work', isDefault: false }],
+        onDeleteCalendar,
+      });
+      fireEvent.click(screen.getByRole('button', { name: /work actions/i }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /delete/i }));
+      expect(onDeleteCalendar).toHaveBeenCalledWith('cal-work');
     });
   });
 });

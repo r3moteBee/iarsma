@@ -155,10 +155,11 @@ describe('run (integration with the project contracts)', () => {
     // event.get + contact.list + contact.get + files.list +
     // files.read + files.propose_write +
     // mailbox.create + mailbox.update + mailbox.delete +
-    // label.list + label.create + label.update + label.delete + label.apply.
+    // label.list + label.create + label.update + label.delete + label.apply +
+    // calendar.create + calendar.update + calendar.delete.
     // Bump explicitly when adding contracts so a missing or duplicate
     // contract surfaces in code review.
-    expect(r.capabilities).toBe(26);
+    expect(r.capabilities).toBe(29);
   });
 
   it('produces openapi.json at the dist root', async () => {
