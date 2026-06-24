@@ -121,6 +121,13 @@ function renderThreadList(opts: {
   threadGet?: (input: { threadId: string }) => unknown;
   onModify?: (input: unknown) => void;
   onDelete?: (input: unknown) => void;
+  /** Task 8 — override the invoker's invoke and/or resolveThreadEmailIds
+   *  for bulk-action dispatch tests. When provided, these override the
+   *  default mail.modify / mail.delete handlers. */
+  invokerOverrides?: {
+    invoke?: (name: string, input: unknown) => Promise<never>;
+    resolveThreadEmailIds?: (ids: readonly string[]) => Promise<ReadonlyMap<string, readonly string[]>>;
+  };
 } = {}) {
   const data = opts.data ?? FIXTURES;
   const mailboxId = opts.mailboxId === undefined ? 'Mb01' : opts.mailboxId;
@@ -128,6 +135,7 @@ function renderThreadList(opts: {
   // exercise the drafts path supply their own list with a
   // `role: 'drafts'` entry.
   const mailboxes = (opts.mailboxes ?? [{ id: 'Mb01' }]) as ReadonlyArray<unknown>;
+  const overrideInvoke = opts.invokerOverrides?.invoke;
   const invoker = mockInvoker({
     'thread.list': async () => {
       if (opts.invokerError !== undefined) throw opts.invokerError;
@@ -141,13 +149,23 @@ function renderThreadList(opts: {
       return { thread: { id: '', emailIds: [] }, emails: [] };
     },
     'mail.modify': async (input) => {
+      if (overrideInvoke !== undefined) return overrideInvoke('mail.modify', input);
       opts.onModify?.(input);
       return { modifiedCount: 1 };
     },
     'mail.delete': async (input) => {
+      if (overrideInvoke !== undefined) return overrideInvoke('mail.delete', input);
       opts.onDelete?.(input);
       return { deletedCount: 1 };
     },
+    'label.apply': async (input) => {
+      if (overrideInvoke !== undefined) return overrideInvoke('label.apply', input);
+      return { modifiedCount: 1 };
+    },
+  }, {
+    ...(opts.invokerOverrides?.resolveThreadEmailIds !== undefined
+      ? { resolveThreadEmailIds: opts.invokerOverrides.resolveThreadEmailIds }
+      : {}),
   });
   return render(
     <JotaiProvider>
@@ -1196,5 +1214,61 @@ describe('multi-select keyboard', () => {
     const event = createEvent.keyDown(list, { key: 'Escape' });
     fireEvent(list, event);
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Bulk actions dispatch (Task 8)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('bulk actions dispatch', () => {
+  it('resolves selected threads and marks them read in one mail.modify', async () => {
+    const modifyCalls: unknown[] = [];
+    const resolveThreadEmailIds = vi.fn(
+      async (ids: readonly string[]) =>
+        new Map(ids.map((id) => [id, [`${id}-e1`, `${id}-e2`]])),
+    );
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds,
+        invoke: async (name: string, input: unknown) => {
+          if (name === 'mail.modify') modifyCalls.push(input);
+          return {} as never;
+        },
+      },
+    });
+    await waitForList();
+    // select the first two rows
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+    // scope to the BulkActionBar region so per-row "Mark read: X" buttons
+    // don't cause a multiple-match error
+    const bulkBar = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar).getByRole('button', { name: /mark read/i }));
+
+    await waitFor(() => expect(modifyCalls).toHaveLength(1));
+    expect(resolveThreadEmailIds).toHaveBeenCalledTimes(1);
+    const call = modifyCalls[0] as { emailIds: string[]; patch: { keywords?: Record<string, unknown> } };
+    expect(call.emailIds.length).toBe(4); // 2 threads × 2 emails
+    expect(call.patch.keywords).toMatchObject({ $seen: true });
+  });
+
+  it('clears the selection after a successful bulk action', async () => {
+    renderThreadList({
+      invokerOverrides: {
+        resolveThreadEmailIds: async (ids: readonly string[]) =>
+          new Map(ids.map((id) => [id, [`${id}-e1`]])),
+        invoke: async () => ({}) as never,
+      },
+    });
+    await waitForList();
+    const boxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    fireEvent.click(boxes[0]!);
+    const bulkBar2 = screen.getByRole('region', { name: /bulk actions/i });
+    fireEvent.click(within(bulkBar2).getByRole('button', { name: /mark read/i }));
+    await waitFor(() =>
+      expect(screen.queryByText(/1 selected/i)).not.toBeInTheDocument(),
+    );
   });
 });

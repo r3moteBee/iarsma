@@ -39,6 +39,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
+import { BulkActionBar } from '../components/bulk-action-bar.js';
 import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
 import { EmptyState } from '../components/empty-state.js';
@@ -667,6 +668,83 @@ function ThreadListBody(props: {
     [invoker, refetch, bumpPushGeneration],
   );
 
+  // Task 8 — bulk action helpers: resolve selected thread ids → email ids,
+  // run a mutate fn, then clear selection + refetch.
+  const resolveSelectedEmailIds = useCallback(async (): Promise<string[]> => {
+    if (invoker.resolveThreadEmailIds === undefined) return [];
+    const map = await invoker.resolveThreadEmailIds([...selectedThreadIds]);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const ids of map.values()) {
+      for (const id of ids) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          out.push(id);
+        }
+      }
+    }
+    return out;
+  }, [invoker, selectedThreadIds]);
+
+  const runBulk = useCallback(
+    (mutate: (emailIds: string[]) => Promise<unknown>) => {
+      void (async () => {
+        try {
+          const emailIds = await resolveSelectedEmailIds();
+          if (emailIds.length === 0) {
+            setSelectedThreadIds(clearSelection());
+            setSelectionAnchor(null);
+            return;
+          }
+          await mutate(emailIds);
+          setSelectedThreadIds(clearSelection());
+          setSelectionAnchor(null);
+          await refetch();
+          bumpPushGeneration((n) => n + 1);
+        } catch (e) {
+          // Leave the selection intact so the user can retry.
+          // eslint-disable-next-line no-console
+          console.warn('[iarsma] bulk action failed:', e);
+        }
+      })();
+    },
+    [resolveSelectedEmailIds, refetch, bumpPushGeneration, setSelectedThreadIds, setSelectionAnchor],
+  );
+
+  const handleBulkMarkRead = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $seen: true } } })),
+    [runBulk, invoker],
+  );
+  const handleBulkMarkUnread = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $seen: null } } })),
+    [runBulk, invoker],
+  );
+  const handleBulkMove = useCallback(
+    (targetMailboxId: string) => {
+      const fromId = mailboxId;
+      if (fromId === null) return;
+      runBulk((emailIds) =>
+        invoker.invoke('mail.modify', {
+          emailIds,
+          patch: { mailboxIds: { [fromId]: false, [targetMailboxId]: true } },
+        }),
+      );
+    },
+    [runBulk, invoker, mailboxId],
+  );
+  const handleBulkLabel = useCallback(
+    (labelKey: string) => runBulk((emailIds) => invoker.invoke('label.apply', { emailIds, add: [labelKey] })),
+    [runBulk, invoker],
+  );
+  const handleBulkDelete = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.delete', { emailIds })),
+    [runBulk, invoker],
+  );
+  const handleClearSelection = useCallback(() => {
+    setSelectedThreadIds(clearSelection());
+    setSelectionAnchor(null);
+  }, [setSelectedThreadIds, setSelectionAnchor]);
+
   // Candidate mailboxes for "Move to…" come from the prop (computed in
   // ThreadListWithMailbox, already filtered to exclude the current
   // mailbox). Fall back to empty in search mode.
@@ -834,29 +912,45 @@ function ThreadListBody(props: {
         ) : null}
       </div>
       <div className={styles['toolbar']} aria-label="Mailbox actions">
-        <button
-          type="button"
-          className={styles['iconBtn']}
-          onClick={() => void refetch()}
-          aria-label="Refresh"
-          title="Refresh"
-        >
-          <RefreshIcon />
-        </button>
-        <span className={styles['toolbarSpacer']} />
-        {/* PR 30 — Empty trash button. Only shown in the Trash
-         *  mailbox. Disabled when there's nothing to empty. */}
-        {isTrash ? (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setEmptyConfirmOpen(true)}
-            disabled={(data?.total ?? 0) === 0 || emptying}
-            aria-label="Empty trash"
-          >
-            {emptying ? 'Emptying…' : 'Empty trash'}
-          </Button>
-        ) : null}
+        {selectionActive ? (
+          <BulkActionBar
+            count={selectedThreadIds.size}
+            moveTargets={(moveTargets).map((m) => ({ id: m.id, label: getMailboxLabel(m, m.id) }))}
+            labels={labels.map((l) => ({ key: l.key, name: l.name }))}
+            onMarkRead={handleBulkMarkRead}
+            onMarkUnread={handleBulkMarkUnread}
+            onMove={handleBulkMove}
+            onLabelToggle={handleBulkLabel}
+            onDelete={handleBulkDelete}
+            onClear={handleClearSelection}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              className={styles['iconBtn']}
+              onClick={() => void refetch()}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <RefreshIcon />
+            </button>
+            <span className={styles['toolbarSpacer']} />
+            {/* PR 30 — Empty trash button. Only shown in the Trash
+             *  mailbox. Disabled when there's nothing to empty. */}
+            {isTrash ? (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setEmptyConfirmOpen(true)}
+                disabled={(data?.total ?? 0) === 0 || emptying}
+                aria-label="Empty trash"
+              >
+                {emptying ? 'Emptying…' : 'Empty trash'}
+              </Button>
+            ) : null}
+          </>
+        )}
       </div>
     </header>
   );
