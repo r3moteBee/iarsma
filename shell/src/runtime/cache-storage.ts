@@ -82,6 +82,17 @@ export interface CacheStorage {
   put<T>(purpose: CachePurposeKey, key: string, value: T): Promise<void>;
   /** Drop a single entry (used on JMAP-side mutations). */
   delete(purpose: CachePurposeKey, key: string): Promise<void>;
+  /**
+   * Drop every entry for one purpose. Used after a local mutation that
+   * changes which messages a query returns (a move/restore/delete
+   * shifts mailbox membership; a label apply/delete shifts keyword
+   * membership) — every cached `threads`/`searchResults` entry for that
+   * purpose is now potentially stale, including mailboxes the user
+   * isn't currently viewing, so we clear the whole store rather than
+   * guess the affected keys. The next read for any of those queries is
+   * a clean miss → fresh fetch. See `cacheInvalidationsFor`.
+   */
+  invalidate(purpose: CachePurposeKey): Promise<void>;
   /** Drop every cache entry. Called on sign-out. */
   clearAll(): Promise<void>;
 }
@@ -110,6 +121,9 @@ export function inMemoryCacheStorage(): CacheStorage {
     },
     delete: async (purpose, key) => {
       getStore(purpose).delete(key);
+    },
+    invalidate: async (purpose) => {
+      stores.get(purpose)?.clear();
     },
     clearAll: async () => {
       stores.clear();
@@ -241,6 +255,12 @@ export function indexedDbCacheStorage(
       if (db === null) return;
       const cfg = CACHE_PURPOSES[purposeKey];
       await idbDelete(db, cfg.store, key);
+    },
+    invalidate: async (purposeKey) => {
+      const db = await tryOpenDb();
+      if (db === null) return;
+      const cfg = CACHE_PURPOSES[purposeKey];
+      await idbClear(db, cfg.store);
     },
     clearAll: async () => {
       const db = await tryOpenDb();

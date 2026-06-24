@@ -1166,6 +1166,7 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
           // subject so screen readers get per-row context. MenuItem keys
           // are mailbox ids (stable, no display-name collisions).
           <MenuButton
+            size="sm"
             label={`Move ${subject} to…`}
             items={moveTargets.map((m) => ({
               key: m.id,
@@ -1181,6 +1182,7 @@ const ThreadRow = forwardRef<HTMLLIElement, ThreadRowProps>(function ThreadRow(p
         {labels !== undefined && labels.length > 0 && onLabelToggle !== undefined ? (
           // Task 10 — Label picker. Checkbox items stay open for multi-select.
           <MenuButton
+            size="sm"
             label={`Label ${subject}`}
             items={labels.map((lbl) => {
               const isChecked = e.keywords.find((k) => k.name === lbl.key)?.value === true;

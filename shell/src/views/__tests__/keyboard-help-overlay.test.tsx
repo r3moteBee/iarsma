@@ -138,6 +138,40 @@ describe('KeyboardHelpOverlay — dismissal', () => {
   });
 });
 
+describe('KeyboardHelpOverlay — theming (dark-mode readable)', () => {
+  it('the dialog panel uses theme tokens, not hardcoded white/black', () => {
+    render(
+      <JotaiProvider>
+        <WithOpenOverlay>
+          <KeyboardHelpOverlay />
+        </WithOpenOverlay>
+      </JotaiProvider>,
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.style.background).toContain('var(--surface-1)');
+    expect(dialog.style.color).toContain('var(--text-1)');
+    // No hardcoded light-theme colors that break dark mode.
+    expect(dialog.style.background).not.toContain('white');
+    expect(dialog.style.color).not.toContain('black');
+  });
+
+  it('every action-description cell has an explicit theme text color', () => {
+    render(
+      <JotaiProvider>
+        <WithOpenOverlay>
+          <KeyboardHelpOverlay />
+        </WithOpenOverlay>
+      </JotaiProvider>,
+    );
+    const dialog = screen.getByRole('dialog');
+    for (const b of KEYBOARD_BINDINGS) {
+      const cell = within(dialog).getByText(b.action);
+      expect(cell.tagName).toBe('TD');
+      expect((cell as HTMLElement).style.color).toContain('var(--text-1)');
+    }
+  });
+});
+
 describe('KeyboardHelpOverlay — a11y', () => {
   it('has zero axe-core violations against WCAG 2.1 AA', async () => {
     const { container } = render(

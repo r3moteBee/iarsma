@@ -33,11 +33,15 @@ export function MenuButton({
   items,
   children,
   align = 'start',
+  size = 'default',
 }: {
   readonly label: string;
   readonly items: readonly MenuItem[];
   readonly children?: React.ReactNode;
   readonly align?: 'start' | 'end';
+  /** Trigger sizing. 'sm' renders a 28×28 flat icon button to match the
+   *  raw row-action icon buttons in the message list. */
+  readonly size?: 'default' | 'sm';
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -97,12 +101,19 @@ export function MenuButton({
     align === 'end' ? styles['alignEnd'] : styles['alignStart'],
   ].join(' ');
 
+  const triggerClass = [
+    styles['trigger'],
+    size === 'sm' ? styles['triggerSmall'] : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
     <div className={styles['wrapper']}>
       <button
         ref={triggerRef}
         type="button"
-        className={styles['trigger']}
+        className={triggerClass}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}

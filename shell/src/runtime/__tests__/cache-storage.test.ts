@@ -55,6 +55,24 @@ describe('inMemoryCacheStorage', () => {
     expect(await cache.get('threads', 'k2')).toEqual({ id: 2 });
   });
 
+  it('invalidate drops every entry for one purpose, leaving other purposes intact', async () => {
+    const cache = inMemoryCacheStorage();
+    await cache.put('threads', 'k1', { id: 1 });
+    await cache.put('threads', 'k2', { id: 2 });
+    await cache.put('mailboxes', 'k1', { kind: 'mailbox' });
+    await cache.invalidate('threads');
+    expect(await cache.get('threads', 'k1')).toBeNull();
+    expect(await cache.get('threads', 'k2')).toBeNull();
+    // A different purpose is untouched.
+    expect(await cache.get('mailboxes', 'k1')).toEqual({ kind: 'mailbox' });
+  });
+
+  it('invalidate on an empty purpose is a no-op', async () => {
+    const cache = inMemoryCacheStorage();
+    await cache.invalidate('searchResults');
+    expect(await cache.get('searchResults', 'k')).toBeNull();
+  });
+
   it('clearAll drops every purpose', async () => {
     const cache = inMemoryCacheStorage();
     await cache.put('mailboxes', 'k', { a: 1 });
