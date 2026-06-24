@@ -34,6 +34,14 @@
   gap: var(--space-sm);
 }
 
+.selectAll {
+  width: 18px;
+  height: 18px;
+  margin: 0 var(--space-sm) 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .title {
   margin: 0;
   font-size: var(--text-lg);

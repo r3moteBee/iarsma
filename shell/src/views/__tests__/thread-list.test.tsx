@@ -1140,6 +1140,32 @@ describe('multi-select checkbox', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// Select-all header checkbox (Task 6)
+// ──────────────────────────────────────────────────────────────────────
+
+describe('select-all', () => {
+  it('selects all loaded threads when the header checkbox is clicked', async () => {
+    renderThreadList({});
+    await waitForList();
+    const selectAll = screen.getByRole('checkbox', { name: /select all/i });
+    fireEvent.click(selectAll);
+    const rowBoxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    for (const box of rowBoxes) expect(box).toBeChecked();
+    expect(selectAll).toBeChecked();
+  });
+
+  it('clears the selection when clicked while all selected', async () => {
+    renderThreadList({});
+    await waitForList();
+    const selectAll = screen.getByRole('checkbox', { name: /select all/i });
+    fireEvent.click(selectAll); // all
+    fireEvent.click(selectAll); // none
+    const rowBoxes = screen.getAllByRole('checkbox', { name: /select conversation/i });
+    for (const box of rowBoxes) expect(box).not.toBeChecked();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
 // Multi-select keyboard (Task 5)
 // ──────────────────────────────────────────────────────────────────────
 

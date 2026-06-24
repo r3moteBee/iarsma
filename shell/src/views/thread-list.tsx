@@ -60,7 +60,7 @@ import {
   selectedThreadIdsAtom,
   selectionAnchorIndexAtom,
 } from '../mail-state.js';
-import { toggle, selectRange, clearSelection } from '../runtime/thread-selection.js';
+import { toggle, selectRange, selectAll, clearSelection } from '../runtime/thread-selection.js';
 import { useInvoker } from '../runtime/invoker.js';
 import { pushGenerationAtom } from '../runtime/push-subscription.js';
 import type { EmailFull, ThreadGet } from '../runtime/jmap-client.js';
@@ -371,6 +371,29 @@ function ThreadListBody(props: {
   const [emptyError, setEmptyError] = useState<string | null>(null);
 
   const threads = useMemo(() => data?.threads ?? [], [data?.threads]);
+
+  // Task 6 — header select-all checkbox state
+  const loadedSelectedCount = useMemo(
+    () => threads.reduce((n, t) => (selectedThreadIds.has(t.id) ? n + 1 : n), 0),
+    [threads, selectedThreadIds],
+  );
+  const allLoadedSelected = threads.length > 0 && loadedSelectedCount === threads.length;
+  const someLoadedSelected = loadedSelectedCount > 0 && !allLoadedSelected;
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current !== null) {
+      selectAllRef.current.indeterminate = someLoadedSelected;
+    }
+  }, [someLoadedSelected]);
+
+  const handleSelectAllToggle = useCallback(() => {
+    if (allLoadedSelected) {
+      setSelectedThreadIds(clearSelection());
+      setSelectionAnchor(null);
+    } else {
+      setSelectedThreadIds(selectAll(threads.map((t) => t.id)));
+    }
+  }, [allLoadedSelected, threads, setSelectedThreadIds, setSelectionAnchor]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -795,6 +818,14 @@ function ThreadListBody(props: {
   const headerEl = (
     <header className={styles['header']}>
       <div className={styles['titleRow']}>
+        <input
+          ref={selectAllRef}
+          type="checkbox"
+          className={styles['selectAll']}
+          checked={allLoadedSelected}
+          onChange={handleSelectAllToggle}
+          aria-label="Select all conversations"
+        />
         <h2 className={styles['title']}>{title}</h2>
         {countText !== null ? (
           <span className={styles['sub']} aria-live="polite">
