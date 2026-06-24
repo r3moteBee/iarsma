@@ -74,6 +74,8 @@ import {
   type ApprovalStore,
 } from './runtime/approval-store.js';
 import { CalendarView, buildEventParticipants } from './views/calendar-view.js';
+import { CalendarDialog, DeleteCalendarDialog } from './components/calendar-dialogs.js';
+import { resolveCalendarDeleteState } from './runtime/calendar-delete-helpers.js';
 import { CommandPalette, type CommandItem } from './components/command-palette.js';
 import { CreateFolderDialog, RenameFolderDialog, DeleteFolderDialog } from './components/folder-dialogs.js';
 import { CreateLabelDialog, RenameLabelDialog, RecolorLabelDialog, DeleteLabelDialog } from './components/label-dialogs.js';
@@ -739,7 +741,8 @@ function SignedInShell({
   const [calendarDate, setCalendarDate] = useState(() => new Date());
 
   // Calendar data fetching
-  const [calendars, setCalendars] = useState<ReadonlyArray<{ id: string; name: string; color?: string }>>([]);
+  type CalendarEntry = { id: string; name: string; color?: string; isDefault?: boolean };
+  const [calendars, setCalendars] = useState<ReadonlyArray<CalendarEntry>>([]);
   const [calendarEvents, setCalendarEvents] = useState<ReadonlyArray<{
     id: string;
     title: string;
@@ -749,13 +752,20 @@ function SignedInShell({
     calendarId?: string;
   }>>([]);
 
+  // Extract calendar.list fetch into a stable callback so mutations can
+  // call it directly without re-running the full calendar effect.
+  const refetchCalendars = useCallback(async () => {
+    const list = await invoker.invoke<unknown, ReadonlyArray<CalendarEntry>>('calendar.list', {});
+    setCalendars(list as ReadonlyArray<CalendarEntry>);
+  }, [invoker]);
+
   useEffect(() => {
     if (activeView !== 'calendar') return;
     let cancelled = false;
     (async () => {
       try {
-        const list = await invoker.invoke<unknown, ReadonlyArray<{ id: string; name: string; color?: string }>>('calendar.list', {});
-        if (!cancelled) setCalendars(list as ReadonlyArray<{ id: string; name: string; color?: string }>);
+        const list = await invoker.invoke<unknown, ReadonlyArray<CalendarEntry>>('calendar.list', {});
+        if (!cancelled) setCalendars(list as ReadonlyArray<CalendarEntry>);
 
         const monthStart = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
         const monthEnd = new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 2, 1);
@@ -784,7 +794,7 @@ function SignedInShell({
           // Map JMAP's calendarIds:{cal-1:true} → flat calendarId for the
           // view. Pick the first true entry; multi-calendar membership is
           // a rare case we can revisit when it matters.
-          const calList = list as ReadonlyArray<{ id: string; name: string; color?: string }>;
+          const calList = list as ReadonlyArray<CalendarEntry>;
           const colorByCalId = new Map<string, string | undefined>(
             calList.map((c) => [c.id, c.color]),
           );
@@ -800,6 +810,39 @@ function SignedInShell({
     })();
     return () => { cancelled = true; };
   }, [activeView, calendarDate, invoker, crudRefresh]);
+
+  // ── Calendar management dialog state (Task 9) ───────────────────────
+  type CalendarDialogState =
+    | { kind: 'none' }
+    | { kind: 'create' }
+    | { kind: 'edit'; calendarId: string; name: string; color: string }
+    | { kind: 'delete'; calendarId: string; name: string; mode: 'light' | 'typed' };
+  const [calendarDialog, setCalendarDialog] = useState<CalendarDialogState>({ kind: 'none' });
+  const [calendarDialogError, setCalendarDialogError] = useState<string | undefined>(undefined);
+
+  const handleCreateCalendar = useCallback(() => {
+    setCalendarDialogError(undefined);
+    setCalendarDialog({ kind: 'create' });
+  }, []);
+
+  const handleEditCalendar = useCallback((id: string) => {
+    const cal = calendars.find((c) => c.id === id);
+    if (cal === undefined) return;
+    setCalendarDialogError(undefined);
+    setCalendarDialog({
+      kind: 'edit',
+      calendarId: id,
+      name: cal.name,
+      color: cal.color ?? '#3b82f6',
+    });
+  }, [calendars]);
+
+  const handleDeleteCalendar = useCallback((id: string) => {
+    const cal = calendars.find((c) => c.id === id);
+    if (cal === undefined) return;
+    setCalendarDialogError(undefined);
+    setCalendarDialog({ kind: 'delete', calendarId: id, name: cal.name, mode: 'light' });
+  }, [calendars]);
 
   // Calendar visibility — hidden-set atom is persisted; events whose
   // calendarId is in the set are filtered out before reaching the view.
@@ -1324,6 +1367,9 @@ function SignedInShell({
             onToggleCalendar={(id) =>
               setHiddenCalendarIds(toggleCalendarId(hiddenCalendarIds, id))
             }
+            onCreateCalendar={handleCreateCalendar}
+            onEditCalendar={handleEditCalendar}
+            onDeleteCalendar={handleDeleteCalendar}
             view={calendarView}
             onViewChange={setCalendarView}
             currentDate={calendarDate}
@@ -1669,6 +1715,73 @@ function SignedInShell({
               setLabelDialogError(undefined);
             } catch (e) {
               setLabelDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      {/* Calendar management dialogs (Task 9) */}
+      <CalendarDialog
+        open={calendarDialog.kind === 'create' || calendarDialog.kind === 'edit'}
+        mode={calendarDialog.kind === 'edit' ? 'edit' : 'create'}
+        {...(calendarDialog.kind === 'edit' ? { initialName: calendarDialog.name } : {})}
+        {...(calendarDialog.kind === 'edit' ? { initialColor: calendarDialog.color } : {})}
+        {...(calendarDialogError !== undefined && (calendarDialog.kind === 'create' || calendarDialog.kind === 'edit') ? { error: calendarDialogError } : {})}
+        onClose={() => { setCalendarDialog({ kind: 'none' }); setCalendarDialogError(undefined); }}
+        onSubmit={(name, color) => {
+          void (async () => {
+            try {
+              if (calendarDialog.kind === 'create') {
+                await invoker.invoke('calendar.create', { name, color });
+              } else if (calendarDialog.kind === 'edit') {
+                const calendarId = calendarDialog.calendarId;
+                await invoker.invoke('calendar.update', { calendarId, name, color });
+              }
+              await refetchCalendars();
+              setCalendarDialog({ kind: 'none' });
+              setCalendarDialogError(undefined);
+            } catch (e) {
+              setCalendarDialogError(e instanceof Error ? e.message : String(e));
+            }
+          })();
+        }}
+      />
+      <DeleteCalendarDialog
+        open={calendarDialog.kind === 'delete'}
+        calendarName={calendarDialog.kind === 'delete' ? calendarDialog.name : ''}
+        mode={calendarDialog.kind === 'delete' ? calendarDialog.mode : 'light'}
+        {...(calendarDialogError !== undefined && calendarDialog.kind === 'delete' ? { error: calendarDialogError } : {})}
+        onClose={() => { setCalendarDialog({ kind: 'none' }); setCalendarDialogError(undefined); }}
+        onConfirm={() => {
+          if (calendarDialog.kind !== 'delete') return;
+          const { calendarId, mode } = calendarDialog;
+          void (async () => {
+            try {
+              if (mode === 'light') {
+                await invoker.invoke('calendar.delete', { calendarId });
+              } else {
+                await invoker.invoke('calendar.delete', { calendarId, removeEvents: true });
+              }
+              await refetchCalendars();
+              bumpPushGeneration((n) => n + 1);
+              setCalendarDialog({ kind: 'none' });
+              setCalendarDialogError(undefined);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              // Check if the error is calendar_not_empty — escalate to typed mode.
+              const isNotEmpty =
+                (e !== null && typeof e === 'object' && 'code' in e && (e as { code?: unknown }).code === 'calendar_not_empty') ||
+                msg.toLowerCase().includes('not_empty') ||
+                msg.toLowerCase().includes('not empty');
+              if (isNotEmpty && mode === 'light') {
+                const resolved = resolveCalendarDeleteState({ refusal: 'not_empty', error: null });
+                setCalendarDialog((prev) =>
+                  prev.kind === 'delete' ? { ...prev, mode: resolved.mode } : prev,
+                );
+                setCalendarDialogError(undefined);
+              } else {
+                const resolved = resolveCalendarDeleteState({ refusal: null, error: msg });
+                setCalendarDialogError(resolved.errorMsg);
+              }
             }
           })();
         }}

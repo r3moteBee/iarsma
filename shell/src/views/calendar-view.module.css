@@ -101,14 +101,40 @@
   padding: var(--space-sm) 0;
 }
 
-.railHeading {
-  margin: 0 0 var(--space-xs);
+.railHeadingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 var(--space-xs);
+  margin: 0 0 var(--space-xs);
+}
+
+.railHeading {
+  margin: 0;
+  padding: 0;
   font-size: var(--text-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-2);
+}
+
+.railNewBtn {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+}
+
+.railNewBtn:hover {
+  background: var(--surface-2);
 }
 
 .railList {
@@ -122,6 +148,13 @@
 
 .railItem {
   margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.railItem .railLabel {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .railLabel {

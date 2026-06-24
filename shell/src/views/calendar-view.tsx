@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Dialog } from '../components/index.js';
+import { MenuButton } from '../components/menu-button.js';
 import { SegmentedControl, type SegmentedOption } from '../components/segmented-control.js';
 import styles from './calendar-view.module.css';
 
@@ -50,6 +51,9 @@ export type CalendarInfo = {
   readonly id: string;
   readonly name: string;
   readonly color?: string;
+  /** Whether this is the account's default calendar. Default rows
+   *  cannot be deleted, so the per-row menu omits the Delete item. */
+  readonly isDefault?: boolean;
 };
 
 /**
@@ -97,6 +101,10 @@ export type CalendarViewProps = {
    *  checkbox state. */
   readonly hiddenCalendarIds?: readonly string[];
   readonly onToggleCalendar?: (calendarId: string) => void;
+  // Calendar management callbacks (Task 9)
+  readonly onCreateCalendar?: () => void;
+  readonly onEditCalendar?: (calendarId: string) => void;
+  readonly onDeleteCalendar?: (calendarId: string) => void;
   // CRUD callbacks
   readonly onSaveEvent?: (input: EventFormData) => Promise<void>;
   readonly onUpdateEvent?: (id: string, input: EventFormData) => Promise<void>;
@@ -265,6 +273,9 @@ export function CalendarView({
   calendars,
   hiddenCalendarIds,
   onToggleCalendar,
+  onCreateCalendar,
+  onEditCalendar,
+  onDeleteCalendar,
   onSaveEvent,
   onUpdateEvent,
   onDeleteEvent,
@@ -447,6 +458,9 @@ export function CalendarView({
             calendars={calendars}
             hiddenIds={hiddenCalendarIds ?? []}
             onToggle={onToggleCalendar}
+            onCreateCalendar={onCreateCalendar}
+            onEditCalendar={onEditCalendar}
+            onDeleteCalendar={onDeleteCalendar}
           />
         ) : null}
         <div className={styles.viewArea}>
@@ -1139,10 +1153,16 @@ function CalendarRail({
   calendars,
   hiddenIds,
   onToggle,
+  onCreateCalendar,
+  onEditCalendar,
+  onDeleteCalendar,
 }: {
   readonly calendars: readonly CalendarInfo[];
   readonly hiddenIds: readonly string[];
   readonly onToggle: (id: string) => void;
+  readonly onCreateCalendar?: (() => void) | undefined;
+  readonly onEditCalendar?: ((id: string) => void) | undefined;
+  readonly onDeleteCalendar?: ((id: string) => void) | undefined;
 }) {
   const hidden = new Set(hiddenIds);
   return (
@@ -1150,10 +1170,39 @@ function CalendarRail({
       className={styles.rail}
       aria-label="Calendars"
     >
-      <h3 className={styles.railHeading}>Calendars</h3>
+      <div className={styles.railHeadingRow}>
+        <h3 className={styles.railHeading}>Calendars</h3>
+        {onCreateCalendar !== undefined ? (
+          <button
+            type="button"
+            className={styles.railNewBtn}
+            onClick={onCreateCalendar}
+            aria-label="New calendar"
+          >
+            +
+          </button>
+        ) : null}
+      </div>
       <ul className={styles.railList}>
         {calendars.map((c) => {
           const isHidden = hidden.has(c.id);
+          const showMenu = onEditCalendar !== undefined || onDeleteCalendar !== undefined;
+          const menuItems = [
+            {
+              key: 'edit',
+              label: 'Edit…',
+              onSelect: () => onEditCalendar?.(c.id),
+            },
+            ...(c.isDefault !== true
+              ? [
+                  {
+                    key: 'delete',
+                    label: 'Delete',
+                    onSelect: () => onDeleteCalendar?.(c.id),
+                  },
+                ]
+              : []),
+          ];
           return (
             <li key={c.id} className={styles.railItem}>
               <label className={styles.railLabel}>
@@ -1171,6 +1220,14 @@ function CalendarRail({
                 />
                 <span className={styles.railName}>{c.name}</span>
               </label>
+              {showMenu ? (
+                <MenuButton
+                  label={`${c.name} actions`}
+                  size="sm"
+                  align="end"
+                  items={menuItems}
+                />
+              ) : null}
             </li>
           );
         })}
