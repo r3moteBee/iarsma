@@ -3486,6 +3486,9 @@ export function parseEventUpdateResponse(body: string): EventUpdateResult {
     const entries = Object.entries(result.notUpdated);
     if (entries.length > 0) {
       const [id, err] = entries[0]!;
+      if (err.type === 'notFound') {
+        throw makeError('event_not_found', `CalendarEvent ${id} not found.`, result.notUpdated);
+      }
       throw makeError(
         'jmap_set_error',
         `CalendarEvent/set update rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
@@ -3532,17 +3535,18 @@ export function parseEventDeleteResponse(body: string): EventDeleteResult {
   };
   if (result.notDestroyed !== undefined && Object.keys(result.notDestroyed).length > 0) {
     const ids = Object.keys(result.notDestroyed);
+    const firstId = ids[0]!;
+    const firstEntry = result.notDestroyed[firstId]!;
+    if (firstEntry.type === 'notFound') {
+      throw makeError('event_not_found', `CalendarEvent ${firstId} not found.`, result.notDestroyed);
+    }
     const details = ids
       .map((id) => {
         const entry = result.notDestroyed![id]!;
         return `${id}: ${entry.type ?? 'unknown'}${entry.description !== undefined ? ` — ${entry.description}` : ''}`;
       })
       .join('; ');
-    throw makeError(
-      'jmap_set_error',
-      `CalendarEvent/set notDestroyed: ${details}`,
-      result.notDestroyed,
-    );
+    throw makeError('jmap_set_error', `CalendarEvent/set notDestroyed: ${details}`, result.notDestroyed);
   }
   return { deleted: true };
 }
