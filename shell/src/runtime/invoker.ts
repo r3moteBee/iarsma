@@ -581,9 +581,21 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
         }
         case 'event.update': {
           const params = _input as unknown as EventUpdateInput;
+          const hasMutable =
+            params.calendarId !== undefined ||
+            params.title !== undefined ||
+            params.start !== undefined ||
+            params.duration !== undefined ||
+            params.description !== undefined ||
+            params.location !== undefined ||
+            params.participants !== undefined;
+          if (!hasMutable) {
+            throw makeToolError('nothing_to_update', 'event.update requires at least one field to change.');
+          }
           if (_options.dryRun === true) {
             return {
               eventId: params.eventId,
+              ...(params.calendarId !== undefined ? { calendarId: params.calendarId } : {}),
               ...(params.title !== undefined ? { title: params.title } : {}),
               ...(params.start !== undefined ? { start: params.start } : {}),
               ...(params.duration !== undefined ? { duration: params.duration } : {}),
