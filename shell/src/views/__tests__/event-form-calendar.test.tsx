@@ -12,6 +12,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { runAxe } from '../../__tests__/util/axe.js';
 import type { CalendarViewEvent } from '../calendar-view.js';
 import { CalendarView } from '../calendar-view.js';
 
@@ -106,5 +107,26 @@ describe('EventFormDialog — calendar selector', () => {
         expect.objectContaining({ calendarId: 'cal-personal' }),
       );
     });
+  });
+
+  it('has zero axe-core violations with the Calendar select rendered', async () => {
+    const { container } = render(
+      <CalendarView
+        events={[]}
+        calendars={calendars}
+        view="month"
+        onViewChange={() => {}}
+        currentDate={TEST_DATE}
+        onDateChange={() => {}}
+        onSaveEvent={async () => {}}
+      />,
+    );
+
+    // Open the event form so the Calendar <select> is present in the DOM.
+    fireEvent.click(screen.getByRole('button', { name: /new event/i }));
+    screen.getByRole('dialog'); // assert dialog is open
+
+    const violations = await runAxe(container);
+    expect(violations.map((v) => v.id)).toEqual([]);
   });
 });
