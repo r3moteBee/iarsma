@@ -43,7 +43,7 @@ import { BulkActionBar } from '../components/bulk-action-bar.js';
 import { Button } from '../components/button.js';
 import { Dialog } from '../components/dialog.js';
 import { EmptyState } from '../components/empty-state.js';
-import { LabelTagIcon, MarkReadIcon, MarkUnreadIcon, MoveToFolderIcon, TrashIcon } from '../components/icons.js';
+import { FlagIcon, LabelTagIcon, MarkReadIcon, MarkUnreadIcon, MoveToFolderIcon, TrashIcon } from '../components/icons.js';
 import { LabelChip } from '../components/label-chip.js';
 import { MenuButton } from '../components/menu-button.js';
 import { Notice } from '../components/notice.js';
@@ -1493,15 +1493,6 @@ function RefreshIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="23 4 23 10 17 10" />
       <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-    </svg>
-  );
-}
-
-function FlagIcon({ filled }: { readonly filled: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
-      <line x1="4" y1="22" x2="4" y2="15" />
     </svg>
   );
 }
