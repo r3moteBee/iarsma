@@ -75,6 +75,7 @@ export type EventFormData = {
   readonly date: string; // YYYY-MM-DD
   readonly startTime: string; // HH:MM
   readonly duration: string; // ISO duration "PT30M", "PT1H", "PT2H", "P1D"
+  readonly calendarId?: string;
   readonly description?: string;
   readonly location?: string;
   /** PR 54 — when present and non-empty, the host wraps these into
@@ -498,6 +499,7 @@ export function CalendarView({
           {...(dialogMode.editEvent !== undefined ? { editEvent: dialogMode.editEvent } : {})}
           {...(dialogMode.prefillDate !== undefined ? { prefillDate: dialogMode.prefillDate } : {})}
           saving={saving}
+          calendars={calendars ?? []}
           onSave={async (data) => {
             setSaving(true);
             try {
@@ -1310,6 +1312,7 @@ function EventFormDialog({
   prefillDate,
   saving,
   onSave,
+  calendars = [],
 }: {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -1317,6 +1320,7 @@ function EventFormDialog({
   readonly prefillDate?: string;
   readonly saving: boolean;
   readonly onSave: (data: EventFormData) => Promise<void>;
+  readonly calendars: readonly CalendarInfo[];
 }) {
   // Derive initial values from editEvent or defaults
   const initialDate = editEvent !== undefined
@@ -1329,10 +1333,15 @@ function EventFormDialog({
 
   const initialDuration = editEvent?.duration ?? 'PT1H';
 
+  const defaultCalendarId =
+    calendars.find((c) => c.isDefault)?.id ?? calendars[0]?.id ?? '';
+  const initialCalendarId = editEvent?.calendarId ?? defaultCalendarId;
+
   const [title, setTitle] = useState(editEvent?.title ?? '');
   const [date, setDate] = useState(initialDate);
   const [startTime, setStartTime] = useState(initialTime);
   const [duration, setDuration] = useState(initialDuration);
+  const [calendarId, setCalendarId] = useState(initialCalendarId);
   const [description, setDescription] = useState(editEvent?.description ?? '');
   const [location, setLocation] = useState(editEvent?.location ?? '');
   // PR 54 — attendees field. Seeds from `editEvent.participants` after
@@ -1353,6 +1362,7 @@ function EventFormDialog({
       date,
       startTime,
       duration,
+      ...(calendarId !== '' ? { calendarId } : {}),
       ...(description.trim() !== '' ? { description: description.trim() } : {}),
       ...(location.trim() !== '' ? { location: location.trim() } : {}),
       // Always pass `attendees` — empty array communicates "clear
@@ -1385,6 +1395,25 @@ function EventFormDialog({
       }
     >
       <div className={styles.eventForm}>
+        {calendars.length > 0 ? (
+          <div className={styles.formField}>
+            <label htmlFor="event-calendar" className={styles.formLabel}>
+              Calendar
+            </label>
+            <select
+              id="event-calendar"
+              className={styles.formSelect}
+              value={calendarId}
+              onChange={(e) => setCalendarId(e.target.value)}
+            >
+              {calendars.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <div className={styles.formField}>
           <label htmlFor="event-title" className={styles.formLabel}>
             Title <span aria-hidden="true">*</span>

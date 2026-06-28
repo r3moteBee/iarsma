@@ -1375,8 +1375,8 @@ function SignedInShell({
             currentDate={calendarDate}
             onDateChange={setCalendarDate}
             onSaveEvent={async (data) => {
-              const defaultCalendar = calendars[0];
-              if (defaultCalendar === undefined) {
+              const targetCalendarId = data.calendarId ?? calendars[0]?.id;
+              if (targetCalendarId === undefined) {
                 throw new Error('No calendar available to create event in.');
               }
               const startIso = `${data.date}T${data.startTime}:00`;
@@ -1385,7 +1385,7 @@ function SignedInShell({
                 organizerIdentity,
               );
               await invoker.invoke('event.create', {
-                calendarId: defaultCalendar.id,
+                calendarId: targetCalendarId,
                 title: data.title,
                 start: startIso,
                 duration: data.duration,
@@ -1403,6 +1403,7 @@ function SignedInShell({
               );
               await invoker.invoke('event.update', {
                 eventId: id,
+                ...(data.calendarId !== undefined ? { calendarId: data.calendarId } : {}),
                 title: data.title,
                 start: startIso,
                 duration: data.duration,
