@@ -721,6 +721,14 @@ function ThreadListBody(props: {
     () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $seen: null } } })),
     [runBulk, invoker],
   );
+  const handleBulkFlag = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $flagged: true } } })),
+    [runBulk, invoker],
+  );
+  const handleBulkUnflag = useCallback(
+    () => runBulk((emailIds) => invoker.invoke('mail.modify', { emailIds, patch: { keywords: { $flagged: null } } })),
+    [runBulk, invoker],
+  );
   const handleBulkMove = useCallback(
     (targetMailboxId: string) => {
       const fromId = mailboxId;
@@ -921,6 +929,8 @@ function ThreadListBody(props: {
             labels={labels.map((l) => ({ key: l.key, name: l.name }))}
             onMarkRead={handleBulkMarkRead}
             onMarkUnread={handleBulkMarkUnread}
+            onFlag={handleBulkFlag}
+            onUnflag={handleBulkUnflag}
             onMove={handleBulkMove}
             onLabelToggle={handleBulkLabel}
             onDelete={handleBulkDelete}
