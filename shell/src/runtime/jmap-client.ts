@@ -3221,6 +3221,7 @@ export type EventCreateResult = { readonly eventId: string };
 
 export type EventUpdateInput = {
   readonly eventId: string;
+  readonly calendarId?: string;
   readonly title?: string;
   readonly start?: string;
   readonly duration?: string;
@@ -3306,6 +3307,9 @@ export function buildEventUpdateRequest(opts: {
 }): string {
   const { accountId, params } = opts;
   const patch: Record<string, unknown> = {};
+  if (params.calendarId !== undefined) {
+    patch.calendarIds = { [params.calendarId]: true };
+  }
   if (params.title !== undefined) {
     patch.title = params.title;
   }
