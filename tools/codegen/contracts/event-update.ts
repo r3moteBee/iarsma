@@ -4,7 +4,14 @@ import { capability } from '../src/index.js';
 const Participant = z.object({
   email: z.string().describe('Participant email address.'),
   name: z.string().optional().describe('Display name.'),
-  roles: z.string().describe('JSON-serialized roles map. Parsed at runtime.'),
+  roles: z
+    .object({
+      owner: z.boolean().optional(),
+      attendee: z.boolean().optional(),
+      optional: z.boolean().optional(),
+      chair: z.boolean().optional(),
+    })
+    .describe('JSCalendar participant roles, e.g. { attendee: true } or { owner: true }.'),
   participationStatus: z
     .enum(['needs-action', 'accepted', 'declined', 'tentative', 'delegated'])
     .optional()
