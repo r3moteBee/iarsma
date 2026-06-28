@@ -1,7 +1,7 @@
 // Phase 0 work items 6 + 7 — OAuth 2.1 + PKCE flow + login UI.
 // Phase 4 — responsive shell layout with sidebar, top bar, bottom nav.
 
-import { Provider as JotaiProvider, useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { Provider as JotaiProvider, useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   actionLog,
@@ -20,7 +20,8 @@ import { useLabelList } from './generated/capabilities/label-list.js';
 import { useSessionGet } from './generated/capabilities/session-get.js';
 import { useBreakpoint } from './hooks/use-media-query.js';
 import { keyboardHelpOpenAtom } from './keyboard-state.js';
-import { mailLayoutAtom, pendingDeleteUndoAtom, searchQueryAtom, selectedMailboxIdAtom, type MailLayout as MailLayoutType } from './mail-state.js';
+import { mailLayoutAtom, mailboxListDataAtom, pendingDeleteUndoAtom, searchQueryAtom, selectedMailboxIdAtom, type MailLayout as MailLayoutType } from './mail-state.js';
+import { resolveMoveUndo } from './runtime/move-undo.js';
 import { activeViewAtom } from './nav-state.js';
 import type { ActiveView } from './nav-state.js';
 import {
@@ -200,6 +201,11 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
   // stable setter, so referencing it in the invoker memo below doesn't
   // rebuild the invoker.
   const setPendingDeleteUndo = useSetAtom(pendingDeleteUndoAtom);
+  // Stable Jotai store reference — never changes for the lifetime of
+  // the JotaiProvider. Used inside onUndoRegistered to read
+  // mailboxListDataAtom imperatively so the invoker useMemo doesn't
+  // gain volatile mailbox-list deps.
+  const store = useStore();
   // PR 44 — token accessor with auto-refresh. Replaces the bare
   // `authStorage.loadTokens()?.accessToken ?? null` at every invoker /
   // push / approval-store wiring. `getAccessToken` checks expiresAtMs
@@ -244,20 +250,35 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
         onUnauthorized: () => {
           void authStorage.clearTokens().then(() => bumpAuth((v) => v + 1));
         },
-        // U-4 — only UI deletes get the act-then-undo toast; agent
-        // deletes are surfaced in the Activity log instead.
+        // U-4 — only UI deletes/moves get the act-then-undo toast; agent
+        // operations are surfaced in the Activity log instead.
         onUndoRegistered: (info) => {
-          if (info.tool !== 'mail.delete' || info.callerClass !== 'ui') return;
-          const emailIds =
-            (info.params as { emailIds?: readonly string[] }).emailIds ?? [];
-          setPendingDeleteUndo({
-            seq: info.seq,
-            count: emailIds.length,
-            createdAtMs: Date.now(),
-          });
+          if (info.callerClass !== 'ui') return;
+          if (info.tool === 'mail.delete') {
+            const emailIds =
+              (info.params as { emailIds?: readonly string[] }).emailIds ?? [];
+            setPendingDeleteUndo({
+              seq: info.seq,
+              count: emailIds.length,
+              createdAtMs: Date.now(),
+            });
+            return;
+          }
+          const mailboxes = store.get(mailboxListDataAtom);
+          const lookupMailboxName = (id: string): string =>
+            mailboxes.find((m) => m.id === id)?.name ?? id;
+          const move = resolveMoveUndo(info, lookupMailboxName);
+          if (move !== null) {
+            setPendingDeleteUndo({
+              seq: move.seq,
+              count: move.count,
+              message: move.message,
+              createdAtMs: Date.now(),
+            });
+          }
         },
       }),
-    [config, getAuthTokenAsync, bumpAuth, setPendingDeleteUndo],
+    [config, getAuthTokenAsync, bumpAuth, setPendingDeleteUndo, store],
   );
   // Populate the agent-context atom from config so capabilities and
   // agent-facing surfaces can read it without re-walking the config.
@@ -567,6 +588,17 @@ function SignedInShell({
     if (mailboxListResult.data === undefined) return undefined;
     return mailboxListResult.data.map(toSidebarMailboxEntry);
   }, [mailboxListResult.data]);
+
+  // Task 7 — keep mailboxListDataAtom current so onUndoRegistered's
+  // move-undo resolver can look up mailbox names without adding volatile
+  // deps to ConnectedApp's invoker useMemo.
+  const setMailboxListData = useSetAtom(mailboxListDataAtom);
+  useEffect(() => {
+    if (mailboxListResult.data === undefined) return;
+    setMailboxListData(
+      mailboxListResult.data.map((m) => ({ id: m.id, name: m.name })),
+    );
+  }, [mailboxListResult.data, setMailboxListData]);
 
   // Task 8 — load the label registry once at the shell level and thread
   // it down to views that need to resolve label chips on messages.

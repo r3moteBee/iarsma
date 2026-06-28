@@ -65,8 +65,18 @@ export type PendingDeleteUndo = {
   readonly seq: number;
   readonly count: number;
   readonly createdAtMs: number;
+  readonly message?: string;
 };
 export const pendingDeleteUndoAtom = atom<PendingDeleteUndo | null>(null);
+
+/**
+ * Mailbox list cache for stable name lookup inside the invoker construction
+ * useMemo. Updated by SignedInShell whenever `useMailboxList` resolves;
+ * read imperatively via `store.get(mailboxListDataAtom)` inside
+ * `onUndoRegistered` so the lookup is always current without adding volatile
+ * deps to the invoker memo.
+ */
+export const mailboxListDataAtom = atom<ReadonlyArray<{ readonly id: string; readonly name: string }>>([]);
 
 /**
  * Search query atom (Phase 2 item 9). Empty string = inactive (the

@@ -34,9 +34,8 @@ export function DeleteToast({ onUndo }: { readonly onUndo: (seq: number) => void
   if (pending === null) return null;
 
   const label =
-    pending.count === 1
-      ? 'Message moved to Trash'
-      : `${pending.count} messages moved to Trash`;
+    pending.message ??
+    (pending.count === 1 ? 'Message moved to Trash' : `${pending.count} messages moved to Trash`);
 
   return (
     <div className={styles['stack']} role="region" aria-label="Recently deleted">
