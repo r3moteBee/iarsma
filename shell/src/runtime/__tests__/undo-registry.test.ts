@@ -105,14 +105,16 @@ describe('buildInverse', () => {
     });
   });
 
-  it('flips boolean values in a mail.modify keywords patch', () => {
+  it('inverts a single-email keywords patch using the true/null dialect', () => {
+    // JMAP keyword patches: true adds, null removes. RFC 8621 forbids
+    // false — the inverse of "add" must be "remove" (null), not false.
     const inv = buildInverse('mail.modify', {
       emailIds: ['em-1'],
-      patch: { keywords: { '$seen': true, '$flagged': false } },
+      patch: { keywords: { '$seen': true, '$flagged': null } },
     });
     expect(inv?.inverseParams).toEqual({
       emailIds: ['em-1'],
-      patch: { keywords: { '$seen': false, '$flagged': true } },
+      patch: { keywords: { '$seen': null, '$flagged': true } },
     });
   });
 
@@ -128,8 +130,32 @@ describe('buildInverse', () => {
       emailIds: ['em-1'],
       patch: {
         mailboxIds: { 'Mb-inbox': true },
-        keywords: { '$seen': false },
+        keywords: { '$seen': null },
       },
+    });
+  });
+
+  it('returns null for keyword patches spanning more than one email', () => {
+    // A uniform inverse can't restore mixed per-email flag states —
+    // undoing a bulk Unflag would flag emails that were never flagged.
+    // No undo is better than a corrupting one.
+    const inv = buildInverse('mail.modify', {
+      emailIds: ['em-1', 'em-2'],
+      patch: { keywords: { '$flagged': true } },
+    });
+    expect(inv).toBeNull();
+  });
+
+  it('still builds an inverse for bulk mailbox-only patches (moves)', () => {
+    // Bulk moves stay undoable: every selected email came from the
+    // same source mailbox, so the uniform inverse is exact.
+    const inv = buildInverse('mail.modify', {
+      emailIds: ['em-1', 'em-2'],
+      patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+    });
+    expect(inv?.inverseParams).toEqual({
+      emailIds: ['em-1', 'em-2'],
+      patch: { mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
     });
   });
 

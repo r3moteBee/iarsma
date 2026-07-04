@@ -115,18 +115,26 @@ export function buildInverse(
       emailIds: readonly string[];
       patch: {
         mailboxIds?: Readonly<Record<string, boolean>>;
-        keywords?: Readonly<Record<string, boolean>>;
+        keywords?: Readonly<Record<string, boolean | null>>;
       };
     };
+    // Bulk keyword patches (flag/read over 2+ emails) have no exact
+    // inverse: the selection's prior states can be mixed, and a
+    // uniform flip would overwrite them. Register no undo rather
+    // than a corrupting one. Mailbox-only bulk patches (moves) keep
+    // their inverse — the whole selection shares one source mailbox.
+    if (p.patch.keywords !== undefined && p.emailIds.length > 1) {
+      return null;
+    }
     const inversePatch: {
       mailboxIds?: Record<string, boolean>;
-      keywords?: Record<string, boolean>;
+      keywords?: Record<string, boolean | null>;
     } = {};
     if (p.patch.mailboxIds !== undefined) {
       inversePatch.mailboxIds = flipBooleans(p.patch.mailboxIds);
     }
     if (p.patch.keywords !== undefined) {
-      inversePatch.keywords = flipBooleans(p.patch.keywords);
+      inversePatch.keywords = flipKeywords(p.patch.keywords);
     }
     return {
       inverseAction: 'mail.modify',
@@ -180,5 +188,15 @@ export function buildInverse(
 function flipBooleans(m: Readonly<Record<string, boolean>>): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   for (const [k, v] of Object.entries(m)) out[k] = !v;
+  return out;
+}
+
+function flipKeywords(
+  m: Readonly<Record<string, boolean | null>>,
+): Record<string, boolean | null> {
+  // Keyword patch dialect (RFC 8621): true adds, null removes; false
+  // is not a valid patch value. Inverse of add is remove and vice versa.
+  const out: Record<string, boolean | null> = {};
+  for (const [k, v] of Object.entries(m)) out[k] = v === true ? null : true;
   return out;
 }
