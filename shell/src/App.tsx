@@ -1232,7 +1232,7 @@ function SignedInShell({
         const u = await undoRegistry.forEntry(seq);
         if (u === null || u.consumed) return;
         try {
-          await invoker.invoke(u.inverseAction, u.inverseParams);
+          await invoker.invoke(u.inverseAction, u.inverseParams, { undoOfSeq: seq });
           await undoRegistry.consume(seq);
           setCrudRefresh((n) => n + 1);
           // Restored mail must reappear in the thread list / unread
@@ -1923,7 +1923,9 @@ function useGlobalKeyboardShortcuts(): void {
             (a, b) => b.forEntrySeq - a.forEntrySeq,
           )[0]!;
           try {
-            await invoker.invoke(latest.inverseAction, latest.inverseParams);
+            await invoker.invoke(latest.inverseAction, latest.inverseParams, {
+              undoOfSeq: latest.forEntrySeq,
+            });
             await undoRegistry.consume(latest.forEntrySeq);
           } catch (e) {
             // eslint-disable-next-line no-console

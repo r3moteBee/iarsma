@@ -128,6 +128,16 @@ export type InvocationOptions = {
    * the just-stale-then-quietly-revalidated value.
    */
   readonly bypassCache?: boolean;
+  /**
+   * Set when this invocation replays a registered undo (Activity-log
+   * Undo button, delete/move toast, Cmd-Z). Carries the seq of the
+   * entry being undone. The loggingInvoker still logs the replay and
+   * registers the replay's own inverse (redo stays available), but
+   * suppresses the onUndoRegistered hook — an undo must never spawn
+   * a fresh act-then-undo toast (whose Undo would re-apply the
+   * original destructive action).
+   */
+  readonly undoOfSeq?: number;
 };
 
 export interface Invoker {

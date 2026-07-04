@@ -171,7 +171,10 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
                 inverseAction: inv.inverseAction,
                 inverseParams: inv.inverseParams,
               });
-              if (opts.onUndoRegistered !== undefined) {
+              if (
+                opts.onUndoRegistered !== undefined &&
+                options.undoOfSeq === undefined
+              ) {
                 try {
                   opts.onUndoRegistered({
                     tool: name,

@@ -251,4 +251,34 @@ describe('loggingInvoker × UndoRegistry (PR 21)', () => {
       }),
     ).resolves.toEqual({ modifiedCount: 1 });
   });
+
+  it('does NOT fire onUndoRegistered for an undo replay (undoOfSeq set)', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+      now: () => 1000,
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const calls: Array<{ tool: string; seq: number }> = [];
+    const inv = loggingInvoker({
+      inner: fakeInner({ modifiedCount: 1 }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+      onUndoRegistered: (info) => calls.push({ tool: info.tool, seq: info.seq }),
+    });
+
+    await inv.invoke(
+      'mail.modify',
+      { emailIds: ['em-1'], patch: { mailboxIds: { 'Mb-inbox': true, 'Mb-trash': false } } },
+      { undoOfSeq: 7 },
+    );
+
+    // The replay is still logged and its own inverse still registered
+    // (redo from the Activity log must keep working) …
+    expect(await undoRegistry.forEntry(0)).not.toBeNull();
+    // … but no toast hook fires — an undo must not spawn a fresh
+    // act-then-undo toast.
+    expect(calls).toEqual([]);
+  });
 });
