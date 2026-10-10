@@ -419,6 +419,20 @@ describe('buildMailRestoreMailboxesRequest (per-email undo)', () => {
     ]);
   });
 
+  it('treats prototype-named ids as plain ids', () => {
+    const body = JSON.parse(
+      buildMailRestoreMailboxesRequest({
+        accountId: 'c',
+        groups: [
+          { emailIds: ['constructor'], mailboxIds: { inbox: true } },
+          { emailIds: ['__proto__'], mailboxIds: { sent: true } },
+        ],
+      }),
+    ) as { methodCalls: [[string, { update: Record<string, unknown> }, string]] };
+    const update = body.methodCalls[0][1].update;
+    expect(Object.keys(update).sort()).toEqual(['__proto__', 'constructor']);
+  });
+
   it('rejects an empty group patch, overlapping groups, and no emails', () => {
     const codeOf = (groups: Parameters<typeof buildMailRestoreMailboxesRequest>[0]['groups']) => {
       try {

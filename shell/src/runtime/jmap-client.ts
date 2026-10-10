@@ -2146,7 +2146,9 @@ export function buildMailRestoreMailboxesRequest(opts: {
   readonly accountId: string;
   readonly groups: readonly MailboxPatchGroup[];
 }): string {
-  const update: Record<string, Record<string, boolean>> = {};
+  // A Map, not an object literal: ids are opaque server strings, and an
+  // object would treat "__proto__" / "constructor" specially.
+  const update = new Map<string, Record<string, boolean>>();
   for (const group of opts.groups) {
     const patchObj: Record<string, boolean> = {};
     for (const [id, value] of Object.entries(group.mailboxIds)) {
@@ -2159,21 +2161,23 @@ export function buildMailRestoreMailboxesRequest(opts: {
       );
     }
     for (const emailId of group.emailIds) {
-      if (update[emailId] !== undefined) {
+      if (update.has(emailId)) {
         throw makeError(
           'invalid_argument',
           `mail.restore-mailboxes: email "${emailId}" appears in more than one group.`,
         );
       }
-      update[emailId] = { ...patchObj };
+      update.set(emailId, { ...patchObj });
     }
   }
-  if (Object.keys(update).length === 0) {
+  if (update.size === 0) {
     throw makeError('invalid_argument', 'mail.restore-mailboxes: no emails to update.');
   }
   return JSON.stringify({
     using: JMAP_USING_MAIL,
-    methodCalls: [['Email/set', { accountId: opts.accountId, update }, '0']],
+    methodCalls: [
+      ['Email/set', { accountId: opts.accountId, update: Object.fromEntries(update) }, '0'],
+    ],
   });
 }
 
