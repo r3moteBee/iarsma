@@ -12,6 +12,17 @@
  *   4. `getAccessToken(deps)` — return current access token; refresh if
  *      expired and a refresh_token is available.
  *   5. `signOut(deps)` — clear tokens + any in-flight PKCE.
+ *
+ * Refresh lifecycle (`getAccessToken`, `refreshAfterUnauthorized`):
+ *   - One refresh in flight per storage instance; concurrent callers (read
+ *     hooks, the push stream, the approval store) share its promise, so an
+ *     expiry triggers exactly one token-endpoint POST per tab.
+ *   - The record is re-read from the persistent backing before refreshing:
+ *     another tab may already have refreshed and rotated the refresh token.
+ *   - Tokens are cleared only when the token endpoint rejects the grant
+ *     (400 / 401 / `invalid_grant`) or no refresh token exists. Network
+ *     errors and 5xx keep the tokens and reject with `refresh_failed` so
+ *     the caller can retry (e.g. a laptop waking from sleep before Wi-Fi).
  */
 
 import * as oauth from 'oauth4webapi';
@@ -31,6 +42,7 @@ export type OAuthError = {
     | 'token_exchange_failed'
     | 'id_token_invalid'
     | 'refresh_failed'
+    | 'refresh_rejected'
     | 'no_storage';
   message: string;
 };
@@ -45,6 +57,15 @@ export type OAuthDeps = {
   readonly redirect?: (url: string) => void;
   /** Override Date.now for tests. */
   readonly now?: () => number;
+  /**
+   * Called when the refresh path concludes the session is over and has
+   * cleared the tokens (refresh token rejected or missing, or the record was
+   * removed by another tab). The shell uses it to drop per-user cached data
+   * and flip to the signed-out view. Concurrent callers share one refresh,
+   * so this runs once per ended session, with the hook of the caller that
+   * started that refresh.
+   */
+  readonly onSessionEnded?: () => void | Promise<void>;
 };
 
 type DiscoveredAs = oauth.AuthorizationServer;
@@ -245,9 +266,11 @@ export async function handleCallback(
   }
 
   const claims = oauth.getValidatedIdTokenClaims(result);
+  const issuedAt = now();
   const tokens: StoredTokens = {
     accessToken: result.access_token,
-    expiresAtMs: now() + (result.expires_in ?? 0) * 1000,
+    expiresAtMs: issuedAt + (result.expires_in ?? 0) * 1000,
+    obtainedAtMs: issuedAt,
     ...(result.refresh_token !== undefined ? { refreshToken: result.refresh_token } : {}),
     ...(result.id_token !== undefined ? { idToken: result.id_token } : {}),
     ...(claims?.['sub'] !== undefined && typeof claims['sub'] === 'string'
@@ -261,36 +284,141 @@ export async function handleCallback(
   return tokens;
 }
 
+/** Treat the access token as expired this early, to avoid clock-skew /
+ *  network-latency 401s. */
+const EXPIRY_SKEW_MS = 30_000;
+
+/**
+ * A 401 on an access token obtained this recently is attributed to a
+ * request that still carried its predecessor, not to the new token being
+ * rejected, so it does not trigger another refresh. Bounds the 401 → refresh
+ * → 401 cycle to one refresh per window when the server keeps rejecting
+ * fresh tokens.
+ */
+const UNAUTHORIZED_GRACE_MS = 10_000;
+
+/** In-flight refresh per storage instance (see module doc). */
+const refreshInFlight = new WeakMap<AuthStorage, Promise<string | null>>();
+
 /**
  * Return the current access token, refreshing if expired (and a refresh
  * token is available). Returns null when no session exists or the
- * refresh fails.
+ * refresh token was rejected (tokens are then cleared and
+ * `deps.onSessionEnded` runs). Rejects with an `OAuthError`
+ * (`refresh_failed` / `discovery_failed`) when the refresh could not be
+ * completed for a transient reason; tokens are kept and a later call
+ * retries.
  */
 export async function getAccessToken(deps: OAuthDeps): Promise<string | null> {
   const storage = deps.storage ?? sessionAuthStorage();
   const now = deps.now ?? Date.now;
   const tokens = storage.loadTokens();
   if (tokens === null) return null;
-  // Treat the token as expired 30 seconds early to avoid clock-skew /
-  // network-latency 401s.
-  const skewMs = 30_000;
-  if (now() < tokens.expiresAtMs - skewMs) return tokens.accessToken;
-  if (tokens.refreshToken === undefined) {
-    await storage.clearTokens();
-    return null;
+  // A refresh in flight (possibly forced by a 401 on the token we hold)
+  // supersedes the cached token — don't hand out one the server rejected.
+  const pending = refreshInFlight.get(storage);
+  if (pending !== undefined) return pending;
+  if (isFresh(tokens, now())) return tokens.accessToken;
+  return sharedRefresh(deps, storage, false);
+}
+
+/**
+ * Recover from a 401 on a resource request: force one refresh before
+ * giving up on the session. Returns the access token to use from now on,
+ * or null when the session is over (tokens cleared, `onSessionEnded` ran).
+ * Rejects like `getAccessToken` on transient failures (tokens kept).
+ *
+ * A token obtained within `UNAUTHORIZED_GRACE_MS` (by this tab or another)
+ * is returned as-is instead of being refreshed again.
+ */
+export async function refreshAfterUnauthorized(deps: OAuthDeps): Promise<string | null> {
+  const storage = deps.storage ?? sessionAuthStorage();
+  // Already signed out in this tab — nothing to recover, nothing to end.
+  if (storage.loadTokens() === null) return null;
+  return sharedRefresh(deps, storage, true);
+}
+
+function isFresh(tokens: StoredTokens, nowMs: number): boolean {
+  return nowMs < tokens.expiresAtMs - EXPIRY_SKEW_MS;
+}
+
+function sharedRefresh(
+  deps: OAuthDeps,
+  storage: AuthStorage,
+  afterUnauthorized: boolean,
+): Promise<string | null> {
+  const existing = refreshInFlight.get(storage);
+  if (existing !== undefined) return existing;
+  const promise = runRefresh(deps, storage, afterUnauthorized);
+  refreshInFlight.set(storage, promise);
+  const release = () => {
+    if (refreshInFlight.get(storage) === promise) refreshInFlight.delete(storage);
+  };
+  promise.then(release, release);
+  return promise;
+}
+
+async function runRefresh(
+  deps: OAuthDeps,
+  storage: AuthStorage,
+  afterUnauthorized: boolean,
+): Promise<string | null> {
+  const now = deps.now ?? Date.now;
+  // Another tab may have refreshed (rotating the refresh token we hold in
+  // memory) or signed out since this tab hydrated. Spending a stale refresh
+  // token would get `invalid_grant` and sign every tab out.
+  const latest = await storage.reloadTokens();
+  if (latest === null) return endSession(deps, storage);
+  if (afterUnauthorized) {
+    const obtainedAt = latest.obtainedAtMs;
+    if (
+      obtainedAt !== undefined &&
+      now() - obtainedAt < UNAUTHORIZED_GRACE_MS &&
+      isFresh(latest, now())
+    ) {
+      return latest.accessToken;
+    }
+  } else if (isFresh(latest, now())) {
+    return latest.accessToken;
   }
+  if (latest.refreshToken === undefined) return endSession(deps, storage);
   try {
-    const refreshed = await refreshTokens(deps, tokens.refreshToken);
+    const refreshed = await refreshTokens(deps, latest.refreshToken);
     return refreshed.accessToken;
-  } catch {
-    await storage.clearTokens();
-    return null;
+  } catch (e) {
+    if (!isOAuthError(e) || e.code !== 'refresh_rejected') throw e;
+    // A tab racing us may have rotated the token between our re-read and
+    // our POST; its rotation is what got ours rejected. Use its result.
+    const raced = await storage.reloadTokens();
+    if (
+      raced !== null &&
+      raced.refreshToken !== latest.refreshToken &&
+      isFresh(raced, now())
+    ) {
+      return raced.accessToken;
+    }
+    return endSession(deps, storage);
   }
+}
+
+async function endSession(deps: OAuthDeps, storage: AuthStorage): Promise<null> {
+  await storage.clearTokens();
+  if (deps.onSessionEnded !== undefined) {
+    try {
+      await deps.onSessionEnded();
+    } catch {
+      // The session is over either way; a failing hook must not turn the
+      // signed-out result into an error.
+    }
+  }
+  return null;
 }
 
 /**
  * Exchange a refresh token for a new access token (and possibly a new
- * refresh token). Persists the result.
+ * refresh token). Persists the result. Rejects with `refresh_rejected` when
+ * the token endpoint refused the grant (the refresh token is dead) and with
+ * `refresh_failed` for anything that may succeed on retry.
  */
 export async function refreshTokens(
   deps: OAuthDeps,
@@ -325,13 +453,25 @@ export async function refreshTokens(
   try {
     result = await oauth.processRefreshTokenResponse(as, c, response);
   } catch (e) {
-    throw makeError('refresh_failed', `refresh response invalid: ${describe(e)}`);
+    // RFC 6749 §5.2: a dead / revoked / rotated-away refresh token is
+    // `invalid_grant` with 400; client-authentication failures are 401.
+    // Everything else (5xx, proxies, malformed bodies) is retryable.
+    const rejected =
+      response.status === 400 ||
+      response.status === 401 ||
+      (e instanceof oauth.ResponseBodyError && e.error === 'invalid_grant');
+    throw makeError(
+      rejected ? 'refresh_rejected' : 'refresh_failed',
+      `refresh response ${rejected ? 'rejected' : 'invalid'}: ${describe(e)}`,
+    );
   }
 
   const prior = storage.loadTokens();
+  const issuedAt = now();
   const tokens: StoredTokens = {
     accessToken: result.access_token,
-    expiresAtMs: now() + (result.expires_in ?? 0) * 1000,
+    expiresAtMs: issuedAt + (result.expires_in ?? 0) * 1000,
+    obtainedAtMs: issuedAt,
     refreshToken: result.refresh_token ?? prior?.refreshToken ?? refreshToken,
     ...(result.id_token !== undefined
       ? { idToken: result.id_token }
@@ -371,6 +511,17 @@ function defaultRedirect(url: string): void {
 
 function makeError(code: OAuthError['code'], message: string): OAuthError {
   return { code, message };
+}
+
+/** True for the `{ code, message }` errors this module throws. */
+export function isOAuthError(e: unknown): e is OAuthError {
+  return (
+    e !== null &&
+    typeof e === 'object' &&
+    typeof (e as { code?: unknown }).code === 'string' &&
+    typeof (e as { message?: unknown }).message === 'string' &&
+    !(e instanceof Error)
+  );
 }
 
 function describe(e: unknown): string {
