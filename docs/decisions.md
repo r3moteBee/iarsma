@@ -614,3 +614,17 @@ So this PR isn't backtracking PR 36 — it's the realization that the OAuth path
 - Nested labels (flat list in v1; nested label names flatten to a single slug key at import time).
 - Per-label notification/filter rules.
 - A `parentId`-style reparent on labels.
+
+## D-060 — Meta CSP + bundled Monaco; no runtime third-party code
+
+**Date:** 2026-10-10
+**Decision:** The shell ships a Content-Security-Policy as a `<meta http-equiv>` in `shell/index.html` (`default-src 'self'`; `script-src 'self' 'wasm-unsafe-eval'` + a hash for the inline theme bootstrap; full table in `docs/deployment.md`), and `<meta name="referrer" content="no-referrer">`. Monaco is loaded from the bundled `monaco-editor` package via `loader.config({ monaco })` with Vite `?worker` workers; `@monaco-editor/loader`'s jsdelivr default is blanked at build time. Release builds emit no sourcemaps.
+
+**Why:** The default `@monaco-editor/react` loader fetched the editor from cdn.jsdelivr.net at runtime into the same origin that holds the OAuth token-wrap key; a CDN compromise would have been full account takeover. Stalwart's Web Apps host can't set response headers, so a meta tag is the only CSP available on the default deploy path.
+
+**Trade-offs accepted:**
+- `img-src` includes `https:` because the per-message "Show external images" opt-in can't relax a meta CSP at runtime; default blocking stays the sanitizer's job.
+- `style-src 'unsafe-inline'` (React style attributes, mail-body styles, Monaco).
+- Cross-origin JMAP/OIDC deploys must extend `connect-src` (`IARSMA_CSP_CONNECT_SRC` at build time, or edit `index.html`).
+- No `frame-ancestors` / reporting (meta CSP limits); hosts that can send headers should add `frame-ancestors 'none'` themselves.
+

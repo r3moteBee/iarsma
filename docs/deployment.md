@@ -44,6 +44,34 @@ The deployer drops their `config.json` alongside `index.html` (or bakes it into 
 
 For non-Stalwart consumers using bare `unzip`, the equivalent of "extract into a named directory" is `unzip -d iarsma/ iarsma.zip`.
 
+### Content-Security-Policy
+
+The bundle enforces a CSP from a `<meta http-equiv>` in `index.html` (Stalwart's Web Apps host can't add response headers, so a meta tag is the only option that works on Path A; a meta CSP can't express `frame-ancestors`, `report-uri` or `sandbox`). The policy is pinned by `shell/src/__tests__/csp.test.ts` (D-060):
+
+| Directive | Value | Why |
+|---|---|---|
+| `default-src` | `'self'` | Everything not listed below is same-origin only. |
+| `script-src` | `'self' 'wasm-unsafe-eval' 'sha256-…'` | Bundle chunks only; `wasm-unsafe-eval` because jco instantiates the WASM components with `WebAssembly.compile`; the hash covers the inline theme bootstrap. No `unsafe-eval`, no CDN: Monaco is bundled (`shell/src/views/monaco/`). |
+| `style-src` | `'self' 'unsafe-inline'` | React `style={}` attributes, sanitized mail-body `style` attributes and Monaco's runtime `<style>` injection. CSS can't execute script; the risk accepted is CSS-based exfiltration, which the HTML sanitizer's style filter and `img-src` narrow. |
+| `img-src` | `'self' data: blob: https:` | `https:` is required by the per-message **Show external images** button: a meta CSP can't be relaxed at runtime, so the policy must allow what the opt-in allows. Remote images are blocked *by default* by the WASM sanitizer, not by the CSP. Known gap: the sanitizer keeps `style="background:url(https://…)"`, which `https:` lets load without the opt-in. |
+| `connect-src` | `'self' https://api.github.com` | JMAP, EventSource push, OIDC discovery/token and `version.json` are same-origin on Path A; the Files view calls the GitHub REST API. |
+| `worker-src` | `'self'` | Monaco's language workers and the service worker are same-origin chunks. |
+| `object-src` / `base-uri` / `form-action` | `'none'` / `'none'` / `'self'` | No plugins, no `<base>` hijack, no off-site form posts. |
+
+Plus `<meta name="referrer" content="no-referrer">`, so remote images and links opened from mail never leak the webmail URL.
+
+**Cross-origin JMAP/OIDC (Paths B, C, E with a `config.json` pointing at another host):** `connect-src 'self'` will block those calls. Build with the extra origins, which the `iarsma-csp` Vite plugin appends to `connect-src`:
+
+```bash
+IARSMA_CSP_CONNECT_SRC="https://mail.example.com" VITE_BASE_PATH=/ pnpm --filter @iarsma/shell build
+```
+
+(`VITE_OIDC_ISSUER` / `VITE_JMAP_BASE_URL` origins are added automatically when set at build time. Entries must be http(s)/ws(s) origins; keywords and wildcards fail the build.) With a prebuilt release zip, edit the `connect-src` list in `index.html` instead. A host that also sends a CSP header (Caddy/nginx) enforces *both* policies, so the header can only tighten the meta policy, never loosen it.
+
+The policy is stripped on the Vite dev server (its React-refresh preamble is an unhashed inline script); `vite preview` serves the built HTML with the policy, so check CSP behaviour there.
+
+**Sourcemaps** are not emitted by release builds: the source is public and any tag rebuilds reproducibly (D-028), while Monaco's maps alone add tens of MB to the zip and the service-worker cache. `IARSMA_SOURCEMAP=hidden` emits maps without the `sourceMappingURL` comment (for local symbolication); `IARSMA_SOURCEMAP=true` emits linked maps.
+
 ---
 
 ## Path A — Stalwart Web Application (recommended default)
