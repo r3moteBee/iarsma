@@ -1036,12 +1036,10 @@ function makeMailModifyPreview(params: MailModifyInput): {
  * single `mailboxIds` patch that moves every selected email into
  * Trash and out of the union of source mailboxes.
  *
- * Limitation: when callers delete a heterogeneous batch (e.g., one
- * email from Inbox and another from Archive), the combined patch
- * removes the email from *both* mailboxes — the Archive email
- * effectively loses its Archive membership too. The common case
- * (delete N from one mailbox) is unaffected. Heterogeneous batches
- * are a v2 refinement.
+ * A heterogeneous batch (one email from Inbox, another from Archive)
+ * still lands every email in Trash only — removing a membership an
+ * email lacks is a no-op. Undo is per email: buildInverse restores
+ * each email's own captured memberships, not the union (D-060).
  */
 function buildSoftDeletePatch(
   trashId: string,

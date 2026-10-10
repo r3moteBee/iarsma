@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildMailModifyRequest,
+  buildMailRestoreMailboxesRequest,
   fetchMailModifyCommit,
   parseMailModifyResponse,
   type MailModifyInput,
@@ -388,5 +389,52 @@ describe('fetchMailModifyCommit', () => {
         params: SAMPLE_MODIFY_INPUT,
       }),
     ).rejects.toMatchObject({ code: 'network_error' });
+  });
+});
+
+describe('buildMailRestoreMailboxesRequest (per-email undo)', () => {
+  it('emits one Email/set update with each group\'s own path patch', () => {
+    const body = JSON.parse(
+      buildMailRestoreMailboxesRequest({
+        accountId: 'c',
+        groups: [
+          { emailIds: ['e1', 'e2'], mailboxIds: { inbox: true, trash: false } },
+          { emailIds: ['e3'], mailboxIds: { sent: true, trash: false } },
+        ],
+      }),
+    ) as { methodCalls: unknown[] };
+    expect(body.methodCalls).toEqual([
+      [
+        'Email/set',
+        {
+          accountId: 'c',
+          update: {
+            e1: { 'mailboxIds/inbox': true, 'mailboxIds/trash': false },
+            e2: { 'mailboxIds/inbox': true, 'mailboxIds/trash': false },
+            e3: { 'mailboxIds/sent': true, 'mailboxIds/trash': false },
+          },
+        },
+        '0',
+      ],
+    ]);
+  });
+
+  it('rejects an empty group patch, overlapping groups, and no emails', () => {
+    const codeOf = (groups: Parameters<typeof buildMailRestoreMailboxesRequest>[0]['groups']) => {
+      try {
+        buildMailRestoreMailboxesRequest({ accountId: 'c', groups });
+      } catch (e) {
+        return (e as ToolError).code;
+      }
+      return 'no error';
+    };
+    expect(codeOf([{ emailIds: ['e1'], mailboxIds: {} }])).toBe('invalid_argument');
+    expect(
+      codeOf([
+        { emailIds: ['e1'], mailboxIds: { a: true } },
+        { emailIds: ['e1'], mailboxIds: { b: true } },
+      ]),
+    ).toBe('invalid_argument');
+    expect(codeOf([])).toBe('invalid_argument');
   });
 });
