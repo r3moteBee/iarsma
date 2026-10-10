@@ -410,7 +410,7 @@ describe('buildInverse', () => {
   });
 });
 
-describe('buildInverse — forward then undo round-trips memberships', () => {
+describe('buildInverse — forward, undo, redo round-trip memberships', () => {
   // Deterministic PRNG (mulberry32) so the sweep is reproducible.
   function rng(seed: number): () => number {
     let a = seed;
@@ -450,7 +450,7 @@ describe('buildInverse — forward then undo round-trips memberships', () => {
     return Object.fromEntries(Object.entries(state).map(([k, v]) => [k, [...v].sort()]));
   }
 
-  it('restores every email exactly across 300 random moves and deletes', () => {
+  it('restores every email exactly across 300 random moves and deletes, and redoes them', () => {
     const next = rng(42);
     const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)]!;
     for (let round = 0; round < 300; round++) {
@@ -495,8 +495,18 @@ describe('buildInverse — forward then undo round-trips memberships', () => {
         expect(snapshot(state)).toEqual(before);
         continue;
       }
+      const after = snapshot(state);
       applyInverse(state, inv);
       expect(snapshot(state), `round ${round} (${isDelete ? 'delete' : 'move'})`).toEqual(before);
+      // The undo replay registers its own inverse (redo from Activity):
+      // it must take every email back to its post-action state.
+      const redo = buildInverse(inv.inverseAction, inv.inverseParams, {
+        modifiedCount: n,
+        previousMailboxesByEmail: after,
+      });
+      expect(redo, `round ${round} redo`).not.toBeNull();
+      applyInverse(state, redo!);
+      expect(snapshot(state), `round ${round} redo`).toEqual(after);
     }
   });
 });

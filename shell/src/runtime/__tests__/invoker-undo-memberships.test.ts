@@ -53,7 +53,7 @@ function capturedUpdate(rows: Record<string, readonly string[]>): string {
   return respond(emailGetMemberships(rows, 'prev'), emailSetUpdated(Object.keys(rows)));
 }
 
-/** Fetch mock answering each JMAP API POST with the next canned body
+/** Fetch mock answering each JMAP API POST with the next canned body;
  *  the session GET is always served. */
 function makeSequencedFetch(apiBodies: readonly string[]): {
   fetch: ReturnType<typeof vi.fn<typeof fetch>>;
