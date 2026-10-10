@@ -212,7 +212,7 @@ fn looks_like_script_url(value: &str) -> bool {
 /// (comments removed, escapes decoded — so `u\rl(`, `u\72 l(` and
 /// `ur/**/l(` can't sneak past a substring check), then split into
 /// declarations, and each declaration is screened by
-/// [`is_allowed_style_declaration`]. The *normalized* text is what gets
+/// [`screen_style_declaration`]. The *normalized* text is what gets
 /// emitted, so the browser parses exactly the bytes that were checked.
 ///
 /// Returns an empty string when nothing survives (the caller drops the
@@ -224,13 +224,16 @@ fn filter_style(value: &str, allow_external_images: bool) -> String {
     let mut out = String::with_capacity(normalized.len());
     for declaration in split_declarations(&normalized) {
         let decl = declaration.trim();
-        if decl.is_empty() || !is_allowed_style_declaration(decl, allow_external_images) {
+        if decl.is_empty() {
             continue;
         }
+        let Some(decl) = screen_style_declaration(decl, allow_external_images) else {
+            continue;
+        };
         if !out.is_empty() {
             out.push_str("; ");
         }
-        out.push_str(decl);
+        out.push_str(&decl);
     }
     out
 }
@@ -367,15 +370,15 @@ const BLOCKED_CSS_FUNCTIONS: &[&str] = &[
     "element(",
 ];
 
-/// Screen one normalized `property: value` declaration.
-fn is_allowed_style_declaration(decl: &str, allow_external_images: bool) -> bool {
+/// Screen one normalized `property: value` declaration. Returns the
+/// declaration to emit — unchanged, or with remote `url(...)`s replaced
+/// by `none` while external content is blocked — or `None` to drop it.
+fn screen_style_declaration(decl: &str, allow_external_images: bool) -> Option<Cow<'_, str>> {
     // ASCII lowercasing keeps byte offsets identical to `decl`, so
     // positions found in `lower` index `decl` too.
     let lower = decl.to_ascii_lowercase();
 
-    let Some((property, value)) = lower.split_once(':') else {
-        return false;
-    };
+    let (property, value) = lower.split_once(':')?;
     let property = property.trim();
     // A plain (optionally vendor-prefixed) property name. Rejects custom
     // properties (`--x`), which only matter through `var()`.
@@ -383,10 +386,10 @@ fn is_allowed_style_declaration(decl: &str, allow_external_images: bool) -> bool
     if !chars.next().is_some_and(|c| c.is_ascii_lowercase())
         || !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     {
-        return false;
+        return None;
     }
     if matches!(property, "behavior" | "-moz-binding") {
-        return false;
+        return None;
     }
     // Containment: only in-flow positioning. `fixed` / `absolute` /
     // `sticky` let a message overlay the webmail chrome (e.g. a fake
@@ -394,7 +397,7 @@ fn is_allowed_style_declaration(decl: &str, allow_external_images: bool) -> bool
     if property == "position" {
         let v = value.replace("!important", "");
         if !matches!(v.trim(), "static" | "relative") {
-            return false;
+            return None;
         }
     }
 
@@ -405,30 +408,42 @@ fn is_allowed_style_declaration(decl: &str, allow_external_images: bool) -> bool
         || lower.contains('}')
         || BLOCKED_CSS_FUNCTIONS.iter().any(|f| lower.contains(f))
     {
-        return false;
+        return None;
     }
 
     // Every `url(...)` must parse cleanly and point at an allowed
-    // scheme: `cid:` / `data:` always, `http(s):` only when the user
-    // opted into external content. Relative URLs (which would resolve
-    // against the webmail origin) never.
+    // scheme: `cid:` / `data:` always; relative URLs (which would
+    // resolve against the webmail origin) and other schemes never.
+    // `http(s):` is remote content: kept when the user opted in,
+    // otherwise neutralized to `none` — `background: #123 url(...)`
+    // keeps its colour instead of losing the whole declaration.
+    let mut blocked_remote: Vec<std::ops::Range<usize>> = Vec::new();
     let mut search_from = 0;
     while let Some(pos) = lower[search_from..].find("url(") {
-        let arg_start = search_from + pos + "url(".len();
-        let Some((url, consumed)) = parse_css_url_arg(&decl[arg_start..]) else {
-            return false;
-        };
-        let allowed = match css_url_scheme(url).as_deref() {
-            Some("cid") | Some("data") => true,
-            Some("http") | Some("https") => allow_external_images,
-            _ => false,
-        };
-        if !allowed {
-            return false;
+        let url_start = search_from + pos;
+        let arg_start = url_start + "url(".len();
+        let (url, consumed) = parse_css_url_arg(&decl[arg_start..])?;
+        let url_end = arg_start + consumed;
+        match css_url_scheme(url).as_deref() {
+            Some("cid") | Some("data") => {}
+            Some("http") | Some("https") if allow_external_images => {}
+            Some("http") | Some("https") => blocked_remote.push(url_start..url_end),
+            _ => return None,
         }
-        search_from = arg_start + consumed;
+        search_from = url_end;
     }
-    true
+    if blocked_remote.is_empty() {
+        return Some(Cow::Borrowed(decl));
+    }
+    let mut rewritten = String::with_capacity(decl.len());
+    let mut last = 0;
+    for range in blocked_remote {
+        rewritten.push_str(&decl[last..range.start]);
+        rewritten.push_str("none");
+        last = range.end;
+    }
+    rewritten.push_str(&decl[last..]);
+    Some(Cow::Owned(rewritten))
 }
 
 /// Parse the argument of a `url(` function from just after the `(`.
@@ -703,6 +718,19 @@ mod tests {
         let out = sanitize(html, false);
         assert!(!out.contains("tracker.example"), "got {out:?}");
         assert!(out.contains("color: red"), "safe sibling kept: {out:?}");
+    }
+
+    #[test]
+    fn blocked_remote_url_is_neutralized_not_dropped() {
+        // Newsletter shorthand: the colour must survive the blocked image.
+        let html = r#"<div style="background: #123456 url(https://t.example/a.png) no-repeat, url('https://t.example/b.png')">x</div>"#;
+        let out = sanitize(html, false);
+        assert!(
+            out.contains("background: #123456 none no-repeat, none"),
+            "got {out:?}"
+        );
+        let out = sanitize(html, true);
+        assert!(out.contains("url(https://t.example/a.png)"), "got {out:?}");
     }
 
     #[test]
