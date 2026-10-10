@@ -628,6 +628,7 @@ async function resolveStalwartApiUrl(
     const r = await fetchFn(sessionUrl, {
       method: 'GET',
       headers: { accept: 'application/json', authorization: `Bearer ${bearer}` },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!r.ok) return null;
     const body = (await r.json()) as { apiUrl?: unknown };

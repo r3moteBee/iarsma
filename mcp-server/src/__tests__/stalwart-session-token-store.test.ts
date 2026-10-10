@@ -190,6 +190,26 @@ describe('stalwartSessionTokenStore', () => {
     expect(calls).toBe(2);
   });
 
+  it('times out a hung validation, fails closed, and does not cache it', async () => {
+    let calls = 0;
+    const fetchFn = makeFetch((init) => {
+      calls++;
+      if (calls > 1) return ok({ username: 'u', primaryAccounts: {} });
+      // Hang until the store's timeout aborts the request.
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    });
+    const store = stalwartSessionTokenStore({
+      jmapBaseUrl: BASE,
+      validateTimeoutMs: 20,
+      fetch: fetchFn,
+    });
+    expect(await store.resolve('tok')).toBeNull();
+    expect(await store.resolve('tok')).not.toBeNull();
+    expect(calls).toBe(2);
+  });
+
   it('single-flight: concurrent lookups of one bearer share one upstream call', async () => {
     let calls = 0;
     let release!: () => void;

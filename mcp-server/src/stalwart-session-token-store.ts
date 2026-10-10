@@ -46,6 +46,11 @@ export type StalwartSessionTokenStoreOptions = {
   readonly cacheTtlMs?: number;
   /** Max cached bearers; the oldest entry is evicted past it. Default 10 000. */
   readonly maxCacheEntries?: number;
+  /**
+   * Upstream validation timeout. A timeout is a transient failure
+   * (request rejected, nothing cached). Default 10s.
+   */
+  readonly validateTimeoutMs?: number;
   /** Override `fetch` for tests. */
   readonly fetch?: typeof fetch;
   /** Override clock for tests. Epoch millis. */
@@ -93,6 +98,7 @@ export function stalwartSessionTokenStore(
     now = Date.now,
     scopes = ALL_KNOWN_SCOPES,
     maxCacheEntries = 10_000,
+    validateTimeoutMs = 10_000,
   } = opts;
 
   // Insertion-ordered, so the first key is always the oldest entry.
@@ -132,6 +138,9 @@ export function stalwartSessionTokenStore(
           accept: 'application/json',
           authorization: `Bearer ${bearer}`,
         },
+        // Without a bound, a hung Stalwart would hang every caller
+        // sharing this single-flight lookup.
+        signal: AbortSignal.timeout(validateTimeoutMs),
       });
     } catch (e) {
       // eslint-disable-next-line no-console
