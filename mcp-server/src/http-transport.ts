@@ -1,33 +1,36 @@
 /**
  * Streamable HTTP transport for the MCP server (Phase 2 work item
  * 10a). Wraps the SDK's `StreamableHTTPServerTransport` behind a
- * Node `http` listener and gates every request on a Bearer-token
- * match.
+ * Node `http` listener and gates every request on a Bearer token.
  *
- * Phase 2 posture: single-shared-secret. `IARSMA_MCP_HTTP_TOKEN` is
- * checked verbatim against the request's `Authorization: Bearer
- * <token>`. Phase 3 introduces per-agent token introspection (the
- * MCP server validates the token against the auth server and derives
- * scopes from the introspection response). The transport shape is
- * the same — only the token-check function changes.
+ * Auth: every `/mcp` request is authenticated BEFORE anything else
+ * happens — the token store resolves the bearer (per-agent tokens,
+ * D-057/D-058), with the legacy single shared secret
+ * (`IARSMA_MCP_HTTP_TOKEN`) as a dev-only fallback. Unauthenticated
+ * requests never allocate server state.
  *
- * Stateless mode (`sessionIdGenerator: undefined`): each POST is
- * independent. No server-side session table; auth happens fresh per
- * request. This is the right posture for "agents from anywhere"
- * usage. Stateful mode lands when we need server-pushed
- * notifications (Phase 3 push subscriptions).
+ * Stateful mode (`sessionIdGenerator: randomUUID`): the SDK couples a
+ * Server 1:1 with a Transport, so each MCP session (one `initialize`
+ * handshake) gets its own Server+Transport pair, keyed by the
+ * `Mcp-Session-Id` the transport assigns. Auth still happens fresh on
+ * every request; a session is additionally bound to the identity that
+ * initialized it, so another bearer cannot ride on it. The session
+ * table is bounded: sessions are dropped when the transport closes
+ * (client `DELETE`, server shutdown), after `sessionIdleTtlMs` without
+ * traffic, and the least-recently-used session is evicted once
+ * `maxSessionsPerIdentity` (that identity's own LRU) or `maxSessions`
+ * (global LRU) is reached.
  *
- * The transport is enabled when BOTH env vars are set:
- *   - `IARSMA_MCP_HTTP_PORT`  — port to bind (e.g., 8765).
- *   - `IARSMA_MCP_HTTP_TOKEN` — shared bearer secret.
- *
- * Either missing → HTTP disabled, stdio remains the only surface.
+ * The transport is enabled when `IARSMA_MCP_HTTP_PORT` is set; see
+ * `loadHttpTransportConfig` for the remaining env vars. Unset → HTTP
+ * disabled, stdio remains the only surface.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { TokenStore, ResolvedIdentity, TokenEntry } from './token-store.js';
 import { createStalwartApiKey, destroyStalwartApiKey } from './stalwart-permissions.js';
 
@@ -64,6 +67,24 @@ export function readApproval(approvalId: string, filePath?: string): ApprovalSta
   }
 }
 
+/** Default request-body cap (1 MiB). Larger bodies get a 413. */
+export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+/**
+ * Default idle lifetime of an MCP session (24 h without traffic). The
+ * caps below already bound memory; the TTL only reclaims sessions that
+ * clients abandoned without a DELETE, so it is generous to avoid
+ * surprising long-lived agents with a `Session not found`.
+ */
+export const DEFAULT_SESSION_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Default cap on concurrent MCP sessions; LRU is evicted past it. */
+export const DEFAULT_MAX_SESSIONS = 1000;
+/**
+ * Default per-identity session cap. Past it the identity's own LRU
+ * session is evicted, so one tenant can't churn everyone else's
+ * sessions out of the global table.
+ */
+export const DEFAULT_MAX_SESSIONS_PER_IDENTITY = 32;
+
 export type HttpTransportConfig = {
   /** Port to bind. Required when HTTP transport is enabled. */
   readonly port: number;
@@ -81,6 +102,36 @@ export type HttpTransportConfig = {
   /** Per-agent token store. When provided, replaces the static
    *  bearerToken check with a lookup that returns identity + scopes. */
   readonly tokenStore?: TokenStore | undefined;
+  /**
+   * Origins allowed to make cross-origin requests
+   * (`IARSMA_MCP_HTTP_CORS_ORIGINS`, comma-separated, exact match).
+   * Default: none — no `Access-Control-Allow-Origin` is ever sent, so
+   * only same-origin and non-browser clients can read responses.
+   */
+  readonly corsOrigins?: readonly string[];
+  /**
+   * Legacy agent-management endpoints (`POST /agents/register`,
+   * `GET /agents`, `DELETE /agents/{id}`). Only meaningful with the
+   * file token store (`tokens.json`); the caller enables them by
+   * passing this object, otherwise they answer 404. Callers must
+   * present a Stalwart user bearer that validates against
+   * `jmapBaseUrl`; the JMAP API URL used to mint / destroy the
+   * per-agent Stalwart API key comes from that session, never from
+   * the request.
+   */
+  readonly agentManagement?: {
+    readonly jmapBaseUrl?: string | undefined;
+    /** Override `fetch` for tests. */
+    readonly fetch?: typeof fetch;
+  };
+  /** Request-body cap in bytes. Default `DEFAULT_MAX_BODY_BYTES`. */
+  readonly maxBodyBytes?: number;
+  /** Idle lifetime of an MCP session. Default `DEFAULT_SESSION_IDLE_TTL_MS`. */
+  readonly sessionIdleTtlMs?: number;
+  /** Concurrent-session cap. Default `DEFAULT_MAX_SESSIONS`. */
+  readonly maxSessions?: number;
+  /** Per-identity session cap. Default `DEFAULT_MAX_SESSIONS_PER_IDENTITY`. */
+  readonly maxSessionsPerIdentity?: number;
 };
 
 /**
@@ -88,7 +139,8 @@ export type HttpTransportConfig = {
  * `IARSMA_MCP_HTTP_PORT` is unset — the caller skips HTTP setup and
  * runs stdio-only. `IARSMA_MCP_HTTP_TOKEN` is optional; when unset,
  * the caller must wire a tokenStore (introspection or file) or no
- * requests will authenticate.
+ * requests will authenticate. `IARSMA_MCP_HTTP_CORS_ORIGINS` is an
+ * optional comma-separated origin allowlist.
  */
 export function loadHttpTransportConfig(
   env: NodeJS.ProcessEnv,
@@ -104,6 +156,10 @@ export function loadHttpTransportConfig(
     );
   }
   const tokenRaw = env['IARSMA_MCP_HTTP_TOKEN'];
+  const corsOrigins = (env['IARSMA_MCP_HTTP_CORS_ORIGINS'] ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o !== '');
   return {
     port,
     ...(tokenRaw !== undefined && tokenRaw !== '' ? { bearerToken: tokenRaw } : {}),
@@ -111,21 +167,36 @@ export function loadHttpTransportConfig(
     env['IARSMA_MCP_HTTP_HOST'] !== ''
       ? { host: env['IARSMA_MCP_HTTP_HOST'] }
       : {}),
+    ...(corsOrigins.length > 0 ? { corsOrigins } : {}),
   };
 }
 
 export type StartHttpTransportResult = {
   /** Actual port (useful when port=0 was requested for ephemeral binding). */
   readonly port: number;
-  /** Stop the listener. Resolves when sockets are closed. */
+  /** Number of live MCP sessions (ops / tests). */
+  readonly sessionCount: () => number;
+  /** Stop the listener and close every session. Resolves when sockets are closed. */
   readonly close: () => Promise<void>;
 };
 
+type Session = {
+  readonly transport: StreamableHTTPServerTransport;
+  readonly server: McpServer;
+  /** Identity that initialized the session; later requests must match. */
+  readonly ownerId: string;
+  lastSeen: number;
+  /** Requests (incl. open SSE streams) currently being served. */
+  inFlight: number;
+};
+
+/** Identity id used for requests authenticated by the legacy shared secret. */
+const LEGACY_OWNER_ID = 'static-token';
+
 /**
- * Start the HTTP listener. Connects the supplied MCP server to a
- * fresh `StreamableHTTPServerTransport` (stateless). Routes every
- * `POST /mcp` through the transport after verifying the bearer
- * token.
+ * Start the HTTP listener. Each authenticated `initialize` POST to
+ * `/mcp` gets a fresh Server+Transport pair (see the header comment);
+ * later requests are routed by `Mcp-Session-Id`.
  *
  * NOT a long-lived promise — returns once the socket is listening.
  * The caller holds the `close` handle for shutdown.
@@ -137,69 +208,203 @@ export async function startHttpTransport(opts: {
   readonly createServer?: () => McpServer;
 }): Promise<StartHttpTransportResult> {
   const { config } = opts;
+  const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const idleTtlMs = config.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS;
+  const maxSessions = Math.max(1, config.maxSessions ?? DEFAULT_MAX_SESSIONS);
+  const maxPerIdentity = Math.max(
+    1,
+    config.maxSessionsPerIdentity ?? DEFAULT_MAX_SESSIONS_PER_IDENTITY,
+  );
+  const corsOrigins = new Set(config.corsOrigins ?? []);
 
-  // Per-session transport+server pairs. The MCP SDK couples Server 1:1
-  // with a Transport, so each concurrent client needs its own pair.
-  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  // Live sessions in least-recently-used-first order: `touch` re-inserts
+  // a session at the end, so the first key is always the LRU.
+  const sessions = new Map<string, Session>();
 
-  async function createSession(): Promise<StreamableHTTPServerTransport> {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => crypto.randomUUID(),
-    });
-    transport.onerror = (err: Error) => {
+  function touch(id: string, session: Session): void {
+    session.lastSeen = Date.now();
+    sessions.delete(id);
+    sessions.set(id, session);
+  }
+
+  function evict(id: string, session: Session, reason: string): void {
+    sessions.delete(id);
+    // eslint-disable-next-line no-console
+    console.error(`[iarsma-mcp-http] evicting session ${id}: ${reason}`);
+    closeSession(session);
+  }
+
+  /** Make room for one more session owned by `ownerId`. */
+  function makeRoom(ownerId: string): void {
+    // The identity's own sessions first, oldest first …
+    const owned = [...sessions].filter(([, s]) => s.ownerId === ownerId);
+    while (owned.length >= maxPerIdentity) {
+      const [id, s] = owned.shift()!;
+      evict(id, s, `per-identity cap ${maxPerIdentity} reached`);
+    }
+    // … then the global LRU.
+    while (sessions.size >= maxSessions) {
+      const [id, s] = sessions.entries().next().value as [string, Session];
+      evict(id, s, `session cap ${maxSessions} reached`);
+    }
+  }
+
+  function closeSession(session: Session): void {
+    // Server.close → transport.close → transport.onclose, which removes
+    // the map entry. Errors here only mean the pair was already gone.
+    session.server.close().catch((err: unknown) => {
       // eslint-disable-next-line no-console
-      console.error('[iarsma-mcp-http] transport error:', err);
-    };
+      console.error('[iarsma-mcp-http] session close failed:', err);
+    });
+  }
+
+  async function createSession(ownerId: string): Promise<Session> {
     const server = opts.createServer !== undefined
       ? opts.createServer()
       : opts.mcpServer;
+    const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      onsessioninitialized: (id: string) => {
+        // Make room before registering so the caps are hard bounds.
+        makeRoom(ownerId);
+        sessions.set(id, session);
+        // eslint-disable-next-line no-console
+        console.error(`[iarsma-mcp-http] new session: ${id} (${sessions.size} active)`);
+      },
+    });
+    const session: Session = { transport, server, ownerId, lastSeen: Date.now(), inFlight: 0 };
+    transport.onerror = (err: Error) => {
+      // eslint-disable-next-line no-console
+      console.error('[iarsma-mcp-http] transport error:', err.message);
+    };
+    // Set before `connect`: the SDK's Protocol chains a pre-existing
+    // onclose rather than replacing it.
+    transport.onclose = () => {
+      const id = transport.sessionId;
+      if (id !== undefined && sessions.get(id) === session) {
+        sessions.delete(id);
+        // eslint-disable-next-line no-console
+        console.error(`[iarsma-mcp-http] closed session: ${id} (${sessions.size} active)`);
+      }
+    };
     await server.connect(transport as unknown as Parameters<typeof server.connect>[0]);
-    return transport;
+    return session;
+  }
+
+  function sweepIdleSessions(): void {
+    const cutoff = Date.now() - idleTtlMs;
+    for (const [id, session] of sessions) {
+      // LRU order: the first non-expired session ends the sweep.
+      if (session.lastSeen > cutoff) break;
+      // A long tool call or an open SSE stream is not idleness.
+      if (session.inFlight > 0) continue;
+      sessions.delete(id);
+      // eslint-disable-next-line no-console
+      console.error(`[iarsma-mcp-http] idle session expired: ${id}`);
+      closeSession(session);
+    }
+  }
+  const sweepTimer = setInterval(sweepIdleSessions, Math.min(idleTtlMs, 60_000));
+  sweepTimer.unref();
+
+  async function handleMcp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // 1. Authenticate before touching any session state.
+    const identity = await authenticate(req, config);
+    if (identity === null) {
+      writeUnauthorized(res);
+      return;
+    }
+    const ownerId = identity === 'legacy' ? LEGACY_OWNER_ID : identity.id;
+
+    // 2. Parse the body (bounded) so the transport can dispatch it.
+    let body: unknown;
+    if (req.method === 'POST') {
+      const parsed = await readBodyOrReject(req, res, maxBodyBytes);
+      if (!parsed.ok) return;
+      body = parsed.value;
+    }
+
+    // 3. Route to an existing session, or start one on `initialize`.
+    const sessionId = header(req, 'mcp-session-id');
+    let session: Session;
+    if (sessionId !== undefined) {
+      const existing = sessions.get(sessionId);
+      if (existing === undefined || existing.ownerId !== ownerId) {
+        writeJsonRpcError(res, 404, -32001, 'Session not found');
+        return;
+      }
+      touch(sessionId, existing);
+      session = existing;
+    } else {
+      const messages = Array.isArray(body) ? body : [body];
+      if (req.method !== 'POST' || !messages.some((m) => isInitializeRequest(m))) {
+        writeJsonRpcError(res, 400, -32000, 'Bad Request: Mcp-Session-Id header is required');
+        return;
+      }
+      session = await createSession(ownerId);
+    }
+
+    // Attach resolved identity to req.auth so the SDK passes it
+    // through to CallTool/ListTools handlers via request context.
+    if (identity !== 'legacy') {
+      (req as unknown as Record<string, unknown>).auth = identity;
+    }
+
+    session.inFlight++;
+    res.once('close', () => {
+      session.inFlight--;
+      const id = session.transport.sessionId;
+      if (id !== undefined && sessions.get(id) === session) touch(id, session);
+    });
+    try {
+      await session.transport.handleRequest(req, res, body);
+    } finally {
+      // An `initialize` the SDK rejected (bad Accept header, batched
+      // init, …) or that threw never gets a session id — release the
+      // pair now rather than leaking it.
+      if (sessionId === undefined && session.transport.sessionId === undefined) {
+        closeSession(session);
+      }
+    }
   }
 
   const httpServer = createServer(async (req, res) => {
     try {
-      const url = req.url ?? '';
+      const path = (req.url ?? '').split('?')[0]!;
 
-      // Non-MCP paths (healthz, agents) don't need session management.
-      if (!url.startsWith('/mcp')) {
-        await handleRequest({ req, res, transport: undefined as unknown as StreamableHTTPServerTransport, ...(config.bearerToken !== undefined ? { expectedToken: config.bearerToken } : {}), tokenStore: config.tokenStore });
+      // Health check — useful for ops without exposing the MCP surface.
+      if (req.method === 'GET' && path === '/healthz') {
+        res.writeHead(200, { 'content-type': 'text/plain' });
+        res.end('ok');
         return;
       }
 
-      // Session routing: look up existing session or create a new one.
-      const sessionId = req.headers['mcp-session-id'] as string | undefined;
-      let transport: StreamableHTTPServerTransport;
-
-      if (sessionId !== undefined && sessions.has(sessionId)) {
-        transport = sessions.get(sessionId)!;
-      } else {
-        // New session — create a fresh Server+Transport pair.
-        transport = await createSession();
+      applyCors(req, res, corsOrigins);
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
       }
 
-      await handleRequest({ req, res, transport, ...(config.bearerToken !== undefined ? { expectedToken: config.bearerToken } : {}), tokenStore: config.tokenStore });
-      // Squelch the no-op fallthrough below.
-
-      // After handling, capture the session ID the transport assigned
-      // (returned in the response header) and register it.
-      const newSessionId = res.getHeader('mcp-session-id') as string | undefined;
-      if (newSessionId !== undefined && !sessions.has(newSessionId)) {
-        sessions.set(newSessionId, transport);
-        // eslint-disable-next-line no-console
-        console.error(`[iarsma-mcp-http] new session: ${newSessionId} (${sessions.size} active)`);
+      if (path === '/agents' || path.startsWith('/agents/')) {
+        await handleAgentEndpoint({ req, res, config, maxBodyBytes });
+        return;
       }
+
+      if (path === '/mcp' || path.startsWith('/mcp/')) {
+        await handleMcp(req, res);
+        return;
+      }
+
+      writeJson(res, 404, { error: 'not_found', message: 'Use /mcp.' });
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('[iarsma-mcp-http] unhandled error:', e);
       if (!res.headersSent) {
-        res.writeHead(500, { 'content-type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            error: 'internal_error',
-            message: e instanceof Error ? e.message : String(e),
-          }),
-        );
+        writeJson(res, 500, {
+          error: 'internal_error',
+          message: e instanceof Error ? e.message : String(e),
+        });
       }
     }
   });
@@ -218,164 +423,130 @@ export async function startHttpTransport(opts: {
 
   return {
     port: boundPort,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
+    sessionCount: () => sessions.size,
+    close: () => {
+      clearInterval(sweepTimer);
+      for (const session of [...sessions.values()]) closeSession(session);
+      sessions.clear();
+      return new Promise<void>((resolve, reject) => {
         httpServer.close((err: unknown) => (err !== undefined && err !== null ? reject(err) : resolve()));
-      }),
+        // Open SSE streams would otherwise hold `close` open forever.
+        httpServer.closeAllConnections();
+      });
+    },
   };
 }
 
-async function handleRequest(args: {
-  readonly req: IncomingMessage;
-  readonly res: ServerResponse;
-  readonly transport: StreamableHTTPServerTransport;
-  /**
-   * Legacy shared bearer. When undefined, every authenticated request
-   * must resolve via the tokenStore — there is no fallback.
-   */
-  readonly expectedToken?: string;
-  readonly tokenStore?: TokenStore | undefined;
-}): Promise<void> {
-  const { req, res, transport, expectedToken, tokenStore } = args;
-
-  // Health check — useful for ops without exposing the MCP surface.
-  if (req.method === 'GET' && req.url === '/healthz') {
-    res.writeHead(200, { 'content-type': 'text/plain' });
-    res.end('ok');
-    return;
-  }
-
-  // CORS — needed for webmail UI to call /agents/* endpoints.
-  res.setHeader('access-control-allow-origin', req.headers.origin ?? '*');
-  res.setHeader('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('access-control-allow-headers', 'content-type, authorization');
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  // Agent management REST endpoints — authenticated with the user's
-  // Stalwart bearer token (not an agent token).
-  if (req.url?.startsWith('/agents')) {
-    await handleAgentEndpoint({
-      req, res, tokenStore,
-      ...(expectedToken !== undefined ? { expectedToken } : {}),
-    });
-    return;
-  }
-
-  // MCP endpoints all live at /mcp.
-  if (!req.url?.startsWith('/mcp')) {
-    res.writeHead(404, { 'content-type': 'application/json' });
-    res.end(
-      JSON.stringify({ error: 'not_found', message: 'Use /mcp or /agents/*.' }),
-    );
-    return;
-  }
-
-  // Auth: try token store first (per-agent tokens), fall back to
-  // static bearer (legacy single-token mode). When expectedToken is
-  // unset, the introspection-only path applies — no static fallback.
+/**
+ * Agent auth shared by `/mcp` and the approval-poll endpoint: try the
+ * token store first (per-agent tokens), fall back to the legacy static
+ * bearer. Returns the resolved identity, `'legacy'` for a static-secret
+ * match, or `null` when unauthenticated.
+ */
+async function authenticate(
+  req: IncomingMessage,
+  config: HttpTransportConfig,
+): Promise<ResolvedIdentity | 'legacy' | null> {
   const bearer = extractBearer(req.headers.authorization);
-  let resolvedAgent: ResolvedIdentity | null = null;
-  if (bearer !== null && tokenStore !== undefined) {
-    resolvedAgent = await tokenStore.resolve(bearer);
+  if (bearer === null) return null;
+  if (config.tokenStore !== undefined) {
+    const resolved = await config.tokenStore.resolve(bearer);
+    if (resolved !== null) return resolved;
   }
-  const legacyOk = expectedToken !== undefined &&
-    verifyBearer(req.headers.authorization, expectedToken);
-  if (resolvedAgent === null && !legacyOk) {
-    res.writeHead(401, {
-      'content-type': 'application/json',
-      'www-authenticate': 'Bearer realm="iarsma-mcp"',
-    });
-    res.end(
-      JSON.stringify({
-        error: 'unauthorized',
-        message:
-          'Missing or invalid Authorization header. Use `Authorization: Bearer <token>`.',
-      }),
-    );
-    return;
+  if (config.bearerToken !== undefined && verifyBearer(req.headers.authorization, config.bearerToken)) {
+    return 'legacy';
   }
-
-  // Attach resolved identity to req.auth so the SDK passes it
-  // through to CallTool/ListTools handlers via request context.
-  if (resolvedAgent !== null) {
-    (req as unknown as Record<string, unknown>).auth = resolvedAgent;
-  }
-
-  // Pre-parse the JSON body for POST so the transport can dispatch
-  // synchronously. The SDK's `handleRequest` accepts the parsed body
-  // as a third argument, which we pass here.
-  let body: unknown;
-  if (req.method === 'POST') {
-    try {
-      body = await readJson(req);
-    } catch (e) {
-      res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          error: 'invalid_request',
-          message: e instanceof Error ? e.message : 'Bad request body.',
-        }),
-      );
-      return;
-    }
-  }
-
-  await transport.handleRequest(req, res, body);
+  return null;
 }
 
 async function handleAgentEndpoint(args: {
   readonly req: IncomingMessage;
   readonly res: ServerResponse;
-  readonly tokenStore?: TokenStore | undefined;
-  readonly expectedToken?: string;
+  readonly config: HttpTransportConfig;
+  readonly maxBodyBytes: number;
 }): Promise<void> {
-  const { req, res, tokenStore } = args;
+  const { req, res, config, maxBodyBytes } = args;
+  const path = (req.url ?? '').split('?')[0]!;
 
-  // All agent endpoints require auth — the user's Stalwart token.
-  const bearer = extractBearer(req.headers.authorization);
-  if (bearer === null) {
-    res.writeHead(401, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'unauthorized', message: 'Bearer token required.' }));
+  // GET /agents/approvals/{id} — poll approval status (Phase 3b). This
+  // is agent-facing (the `pollUrl` in a `pending_approval` tool result),
+  // so it authenticates exactly like `/mcp`.
+  const approvalMatch = req.method === 'GET' && /^\/agents\/approvals\/([^/]+)$/.exec(path);
+  if (approvalMatch) {
+    if ((await authenticate(req, config)) === null) {
+      writeUnauthorized(res);
+      return;
+    }
+    let approvalId: string;
+    try {
+      approvalId = decodeURIComponent(approvalMatch[1]!);
+    } catch {
+      writeJson(res, 400, { error: 'invalid_request', message: 'Malformed approval id.' });
+      return;
+    }
+    const approval = readApproval(approvalId);
+    if (approval === null) {
+      writeJson(res, 404, { error: 'not_found', message: `Approval ${approvalId} not found.` });
+      return;
+    }
+    writeJson(res, 200, approval);
     return;
   }
 
-  if (tokenStore === undefined) {
-    res.writeHead(503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'not_configured', message: 'Token store not configured (set IARSMA_TOKENS_FILE).' }));
+  // Everything else is legacy agent management, which only exists in
+  // file-token-store mode. Elsewhere Stalwart owns the agent-token
+  // lifecycle (D-058) and these routes are simply absent.
+  const management = config.agentManagement;
+  const tokenStore = config.tokenStore;
+  if (management === undefined || tokenStore === undefined) {
+    writeJson(res, 404, { error: 'not_found', message: 'Unknown agent endpoint.' });
+    return;
+  }
+  if (management.jmapBaseUrl === undefined) {
+    writeJson(res, 503, {
+      error: 'not_configured',
+      message: 'Agent management needs a Stalwart JMAP base URL to authenticate callers.',
+    });
+    return;
+  }
+
+  // The caller must hold a bearer Stalwart accepts — validated against
+  // the configured server, never a URL the request supplies.
+  const bearer = extractBearer(req.headers.authorization);
+  const fetchFn = management.fetch ?? globalThis.fetch;
+  const apiUrl = bearer === null
+    ? null
+    : await resolveStalwartApiUrl(management.jmapBaseUrl, bearer, fetchFn);
+  if (bearer === null || apiUrl === null) {
+    writeUnauthorized(res);
     return;
   }
 
   // POST /agents/register — create agent token + Stalwart API key
-  if (req.method === 'POST' && req.url === '/agents/register') {
-    let body: Record<string, unknown>;
-    try {
-      body = (await readJson(req)) as Record<string, unknown>;
-    } catch {
-      res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'invalid_request', message: 'Invalid JSON body.' }));
-      return;
-    }
+  if (req.method === 'POST' && path === '/agents/register') {
+    const parsed = await readBodyOrReject(req, res, maxBodyBytes);
+    if (!parsed.ok) return;
+    const body = (parsed.value ?? {}) as Record<string, unknown>;
 
-    const name = body.name as string | undefined;
-    const scopes = body.scopes as string[] | undefined;
-    const jmapUrl = body.jmapUrl as string | undefined;
-    if (typeof name !== 'string' || !Array.isArray(scopes) || typeof jmapUrl !== 'string') {
-      res.writeHead(400, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'invalid_request', message: 'Required: name (string), scopes (string[]), jmapUrl (string).' }));
+    const name = body['name'];
+    const scopes = body['scopes'];
+    if (
+      typeof name !== 'string' ||
+      !Array.isArray(scopes) ||
+      !scopes.every((s): s is string => typeof s === 'string')
+    ) {
+      writeJson(res, 400, { error: 'invalid_request', message: 'Required: name (string), scopes (string[]).' });
       return;
     }
 
     try {
       // Create scoped Stalwart API key using the user's token
       const stalwartKey = await createStalwartApiKey({
-        jmapUrl,
+        jmapUrl: apiUrl,
         userToken: bearer,
         description: `iarsma-agent: ${name}`,
         scopes,
+        fetch: fetchFn,
       });
 
       // Generate agent secret
@@ -398,86 +569,133 @@ async function handleAgentEndpoint(args: {
       // eslint-disable-next-line no-console
       console.error(`[iarsma-mcp] registered agent '${name}' (${tokenId}) with scopes: ${scopes.join(', ')}`);
 
-      res.writeHead(201, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
-        tokenId,
-        secret: agentSecret,
-        name,
-        scopes,
-      }));
+      writeJson(res, 201, { tokenId, secret: agentSecret, name, scopes });
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.error('[iarsma-mcp] agent registration failed:', e);
-      res.writeHead(500, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({
+      console.error('[iarsma-mcp] agent registration failed:', e instanceof Error ? e.message : e);
+      writeJson(res, 500, {
         error: 'registration_failed',
         message: e instanceof Error ? e.message : String(e),
-      }));
+      });
     }
     return;
   }
 
   // DELETE /agents/{tokenId} — revoke agent + destroy Stalwart key
-  const deleteMatch = req.method === 'DELETE' && req.url?.match(/^\/agents\/([^/]+)$/);
+  const deleteMatch = req.method === 'DELETE' && /^\/agents\/([^/]+)$/.exec(path);
   if (deleteMatch) {
     const tokenId = deleteMatch[1]!;
     const removed = tokenStore.remove(tokenId);
     if (removed === null) {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'not_found', message: `Token ${tokenId} not found.` }));
+      writeJson(res, 404, { error: 'not_found', message: `Token ${tokenId} not found.` });
       return;
     }
 
     // Destroy the Stalwart API key
     if (removed.stalwartKeyId !== undefined) {
-      const url = new URL(req.url!, `http://${req.headers.host}`);
-      const jmap = url.searchParams.get('jmapUrl');
-      if (jmap !== null) {
-        try {
-          await destroyStalwartApiKey({ jmapUrl: jmap, userToken: bearer, keyId: removed.stalwartKeyId });
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error('[iarsma-mcp] Stalwart key cleanup failed (agent removed anyway):', e);
-        }
+      try {
+        await destroyStalwartApiKey({
+          jmapUrl: apiUrl,
+          userToken: bearer,
+          keyId: removed.stalwartKeyId,
+          fetch: fetchFn,
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error(
+          '[iarsma-mcp] Stalwart key cleanup failed (agent removed anyway):',
+          e instanceof Error ? e.message : e,
+        );
       }
     }
 
     // eslint-disable-next-line no-console
     console.error(`[iarsma-mcp] revoked agent '${removed.name}' (${tokenId})`);
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ revoked: tokenId }));
+    writeJson(res, 200, { revoked: tokenId });
     return;
   }
 
   // GET /agents — list all agents (no secrets)
-  if (req.method === 'GET' && req.url === '/agents') {
-    const list = tokenStore.list().map((e) => ({
-      tokenId: e.tokenId,
-      name: e.name,
-      scopes: e.scopes,
-    }));
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(list));
+  if (req.method === 'GET' && path === '/agents') {
+    writeJson(
+      res,
+      200,
+      tokenStore.list().map((e) => ({ tokenId: e.tokenId, name: e.name, scopes: e.scopes })),
+    );
     return;
   }
 
-  // GET /agents/approvals/{id} — poll approval status (Phase 3b)
-  const approvalMatch = req.method === 'GET' && req.url?.match(/^\/agents\/approvals\/([^?]+)/);
-  if (approvalMatch) {
-    const approvalId = decodeURIComponent(approvalMatch[1]!);
-    const approval = readApproval(approvalId);
-    if (approval === null) {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'not_found', message: `Approval ${approvalId} not found.` }));
-      return;
-    }
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(approval));
-    return;
-  }
+  writeJson(res, 404, { error: 'not_found', message: 'Unknown agent endpoint.' });
+}
 
-  res.writeHead(404, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ error: 'not_found', message: 'Unknown agent endpoint.' }));
+/**
+ * Validate a Stalwart user bearer against the configured server's JMAP
+ * session endpoint and return its absolute `apiUrl`, or `null` when the
+ * bearer is not accepted (or Stalwart is unreachable — fail closed).
+ */
+async function resolveStalwartApiUrl(
+  jmapBaseUrl: string,
+  bearer: string,
+  fetchFn: typeof fetch,
+): Promise<string | null> {
+  const sessionUrl = `${jmapBaseUrl.replace(/\/$/, '')}/.well-known/jmap`;
+  try {
+    const r = await fetchFn(sessionUrl, {
+      method: 'GET',
+      headers: { accept: 'application/json', authorization: `Bearer ${bearer}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!r.ok) return null;
+    const body = (await r.json()) as { apiUrl?: unknown };
+    if (typeof body.apiUrl !== 'string') return null;
+    return new URL(body.apiUrl, sessionUrl).toString();
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[iarsma-mcp] agent-management session check failed:', e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+function applyCors(req: IncomingMessage, res: ServerResponse, allowed: ReadonlySet<string>): void {
+  res.setHeader('vary', 'Origin');
+  const origin = req.headers.origin;
+  if (origin === undefined || !allowed.has(origin)) return;
+  res.setHeader('access-control-allow-origin', origin);
+  res.setHeader('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader(
+    'access-control-allow-headers',
+    'content-type, authorization, mcp-session-id, mcp-protocol-version, last-event-id',
+  );
+  res.setHeader('access-control-expose-headers', 'mcp-session-id');
+}
+
+function header(req: IncomingMessage, name: string): string | undefined {
+  const v = req.headers[name];
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function writeJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+function writeUnauthorized(res: ServerResponse): void {
+  res.writeHead(401, {
+    'content-type': 'application/json',
+    'www-authenticate': 'Bearer realm="iarsma-mcp"',
+  });
+  res.end(
+    JSON.stringify({
+      error: 'unauthorized',
+      message:
+        'Missing or invalid Authorization header. Use `Authorization: Bearer <token>`.',
+    }),
+  );
+}
+
+/** JSON-RPC error envelope, shaped like the SDK transport's own errors. */
+function writeJsonRpcError(res: ServerResponse, status: number, code: number, message: string): void {
+  writeJson(res, status, { jsonrpc: '2.0', error: { code, message }, id: null });
 }
 
 function extractBearer(header: string | undefined): string | null {
@@ -506,12 +724,66 @@ function verifyBearer(
   return mismatch === 0;
 }
 
-function readJson(req: IncomingMessage): Promise<unknown> {
+class BodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`Request body exceeds ${limit} bytes.`);
+  }
+}
+
+/**
+ * Read + parse a JSON body, answering 413 / 400 itself on failure.
+ * `ok: false` means the response has already been written.
+ */
+async function readBodyOrReject(
+  req: IncomingMessage,
+  res: ServerResponse,
+  maxBytes: number,
+): Promise<{ readonly ok: true; readonly value: unknown } | { readonly ok: false }> {
+  try {
+    return { ok: true, value: await readJson(req, maxBytes) };
+  } catch (e) {
+    if (e instanceof BodyTooLargeError) {
+      // Don't keep the socket around to drain an oversized upload.
+      res.setHeader('connection', 'close');
+      writeJson(res, 413, { error: 'payload_too_large', message: e.message });
+    } else {
+      writeJson(res, 400, {
+        error: 'invalid_request',
+        message: e instanceof Error ? e.message : 'Bad request body.',
+      });
+    }
+    return { ok: false };
+  }
+}
+
+function readJson(req: IncomingMessage, maxBytes: number): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    const declared = Number(req.headers['content-length']);
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      reject(new BodyTooLargeError(maxBytes));
+      return;
+    }
     const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('error', reject);
+    let size = 0;
+    let done = false;
+    req.on('data', (c: Buffer) => {
+      if (done) return;
+      size += c.length;
+      if (size > maxBytes) {
+        done = true;
+        chunks.length = 0;
+        reject(new BodyTooLargeError(maxBytes));
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('error', (e) => {
+      done = true;
+      reject(e);
+    });
     req.on('end', () => {
+      if (done) return;
+      done = true;
       try {
         const raw = Buffer.concat(chunks).toString('utf-8');
         if (raw === '') {
