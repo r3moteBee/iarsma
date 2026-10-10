@@ -687,6 +687,24 @@ mod tests {
     }
 
     #[test]
+    fn preserves_typical_newsletter_styles_verbatim() {
+        // Guard against over-blocking: common real-world declarations
+        // (vendor / mso- properties, quoted font lists, functions,
+        // !important, `;` inside a string) come through byte-for-byte.
+        let style = "font-family: 'Helvetica Neue', Arial, sans-serif; \
+                     mso-line-height-rule: exactly; -webkit-text-size-adjust: 100%; \
+                     width: calc(100% - 20px) !important; \
+                     background-color: rgba(0, 0, 0, .5); \
+                     background-image: linear-gradient(#fff, #eee); \
+                     font-family: \"semi;colon\"; position: relative; z-index: 1";
+        let out = sanitize(
+            &format!("<div style=\"{}\">x</div>", style.replace('"', "&quot;")),
+            false,
+        );
+        assert!(out.contains(&style.replace('"', "&quot;")), "got {out:?}");
+    }
+
+    #[test]
     fn preserves_links_with_safe_schemes() {
         for scheme in ["http", "https", "mailto", "tel"] {
             let html = format!("<a href=\"{scheme}:example\">x</a>");
