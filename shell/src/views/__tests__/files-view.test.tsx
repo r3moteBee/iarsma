@@ -207,10 +207,13 @@ describe('FilesView — content', () => {
     });
     expect(monacoMocks.loaderConfig).toHaveBeenCalledTimes(1);
     const [arg] = monacoMocks.loaderConfig.mock.calls[0] as [Record<string, unknown>];
-    // Module namespace objects are not the factory's object, so compare by
-    // the sentinel's members; and no `paths` key, which would re-point the
-    // loader at a script URL instead of the in-bundle module.
-    expect(arg['monaco']).toMatchObject(monacoMocks.bundledMonaco);
+    // `import * as monaco` yields a module namespace, not the factory's
+    // object, so compare the sentinel's members by identity; and no `paths`
+    // key, which would re-point the loader at a script URL instead of the
+    // in-bundle module.
+    const passed = arg['monaco'] as typeof monacoMocks.bundledMonaco;
+    expect(passed.editor).toBe(monacoMocks.bundledMonaco.editor);
+    expect(passed.languages).toBe(monacoMocks.bundledMonaco.languages);
     expect(arg).not.toHaveProperty('paths');
     expect(self.MonacoEnvironment?.getWorker).toBe(monacoMocks.createMonacoWorker);
   });
