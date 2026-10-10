@@ -627,7 +627,7 @@ So this PR isn't backtracking PR 36 — it's the realization that the OAuth path
 - New tools whose undo restores mailbox membership return `previousMailboxesByEmail` and reuse `mailboxInverse` in `undo-registry.ts`.
 - `mail.restore-mailboxes` is in `DESTRUCTIVE_TOOLS` (so its replay is logged as a commit and gets its own inverse) and invalidates the same caches as a move.
 
-## D-060 — Meta CSP + bundled Monaco; no runtime third-party code
+## D-061 — Meta CSP + bundled Monaco; no runtime third-party code
 
 **Date:** 2026-10-10
 **Decision:** The shell ships a Content-Security-Policy as a `<meta http-equiv>` in `shell/index.html` (`default-src 'self'`; `script-src 'self' 'wasm-unsafe-eval'` + a hash for the inline theme bootstrap; full table in `docs/deployment.md`), and `<meta name="referrer" content="no-referrer">`. Monaco is loaded from the bundled `monaco-editor` package via `loader.config({ monaco })` with Vite `?worker` workers; `@monaco-editor/loader`'s jsdelivr default is blanked at build time. Release builds emit no sourcemaps.
