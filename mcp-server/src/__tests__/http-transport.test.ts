@@ -407,6 +407,26 @@ describe('startHttpTransport — request body cap', () => {
     expect(h.serversCreated()).toBe(0);
   });
 
+  it('413 for an oversized chunked body (no Content-Length to pre-check)', async () => {
+    h = await startHarness({ maxBodyBytes: 1024 });
+    const chunk = new TextEncoder().encode('x'.repeat(512));
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent++ < 8) controller.enqueue(chunk);
+        else controller.close();
+      },
+    });
+    const r = await fetch(`${h.baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...MCP_HEADERS, authorization: 'Bearer agent-a-token' },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    expect(r.status).toBe(413);
+    expect(h.serversCreated()).toBe(0);
+  });
+
   it('a body within the cap still goes through', async () => {
     h = await startHarness({ maxBodyBytes: 1024 });
     await initialize(h);
@@ -530,6 +550,8 @@ describe('startHttpTransport — CORS', () => {
     h = await startHarness({ corsOrigins: ['https://mail.example.test'] });
     const ok = await fetch(`${h.baseUrl}/mcp`, { method: 'OPTIONS', headers: { origin: 'https://mail.example.test' } });
     expect(ok.headers.get('access-control-allow-origin')).toBe('https://mail.example.test');
+    expect(ok.headers.get('access-control-allow-headers')).toContain('mcp-session-id');
+    expect(ok.headers.get('access-control-expose-headers')).toBe('mcp-session-id');
     const evil = await fetch(`${h.baseUrl}/mcp`, { method: 'OPTIONS', headers: { origin: 'https://evil.example' } });
     expect(evil.headers.get('access-control-allow-origin')).toBeNull();
   });

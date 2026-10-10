@@ -647,7 +647,11 @@ function applyCors(req: IncomingMessage, res: ServerResponse, allowed: ReadonlyS
   if (origin === undefined || !allowed.has(origin)) return;
   res.setHeader('access-control-allow-origin', origin);
   res.setHeader('access-control-allow-methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('access-control-allow-headers', 'content-type, authorization');
+  res.setHeader(
+    'access-control-allow-headers',
+    'content-type, authorization, mcp-session-id, mcp-protocol-version, last-event-id',
+  );
+  res.setHeader('access-control-expose-headers', 'mcp-session-id');
 }
 
 function header(req: IncomingMessage, name: string): string | undefined {
