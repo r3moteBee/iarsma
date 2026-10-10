@@ -266,6 +266,26 @@ describe('buildInverse', () => {
     });
   });
 
+  it('ignores repeated email ids and non-own / malformed membership entries', () => {
+    const inv = buildInverse(
+      'mail.modify',
+      {
+        emailIds: ['em-in', 'em-sent', 'em-in', 'constructor', 'em-bad'],
+        patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+      },
+      {
+        modifiedCount: 2,
+        previousMailboxesByEmail: { 'em-in': ['Mb-inbox'], 'em-sent': ['Mb-sent'], 'em-bad': 'Mb-inbox' },
+      },
+    );
+    expect(inv?.inverseParams).toEqual({
+      groups: [
+        { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
+        { emailIds: ['em-sent'], mailboxIds: { 'Mb-archive': false } },
+      ],
+    });
+  });
+
   it('inverts mail.restore-mailboxes per email (redo from the Activity log)', () => {
     const inv = buildInverse(
       'mail.restore-mailboxes',

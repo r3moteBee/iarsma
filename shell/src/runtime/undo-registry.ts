@@ -239,10 +239,17 @@ function mailboxInverse(
   keywords?: Readonly<Record<string, boolean | null>>,
 ): { readonly inverseAction: string; readonly inverseParams: unknown } | null {
   const groups = new Map<string, { emailIds: string[]; mailboxIds: Record<string, boolean> }>();
+  const seen = new Set<string>();
   for (const group of forward) {
     for (const emailId of group.emailIds) {
-      const before = previous[emailId];
-      if (before === undefined) continue;
+      // A repeated id would land in one group twice (or two groups),
+      // which mail.restore-mailboxes rejects — the first patch wins.
+      if (seen.has(emailId)) continue;
+      seen.add(emailId);
+      const before = Object.prototype.hasOwnProperty.call(previous, emailId)
+        ? previous[emailId]
+        : undefined;
+      if (!Array.isArray(before)) continue;
       const had = new Set(before);
       const inverse: Record<string, boolean> = {};
       for (const [mailboxId, added] of Object.entries(group.mailboxIds)) {

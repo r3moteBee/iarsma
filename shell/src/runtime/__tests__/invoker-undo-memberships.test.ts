@@ -154,6 +154,22 @@ describe('mail.restore-mailboxes', () => {
     });
   });
 
+  it('dry-run previews without touching JMAP', async () => {
+    const { inv, calls } = invokerWith([]);
+    const result = await inv.invoke(
+      'mail.restore-mailboxes',
+      {
+        groups: [
+          { emailIds: ['em-1', 'em-2'], mailboxIds: { 'Mb-inbox': true } },
+          { emailIds: ['em-3'], mailboxIds: { 'Mb-sent': true } },
+        ],
+      },
+      { dryRun: true },
+    );
+    expect(result).toEqual({ affectedCount: 3, emails: [] });
+    expect(calls).toHaveLength(0);
+  });
+
   it('rejects an email listed in two groups', async () => {
     const { inv } = invokerWith([emailGetMemberships({ 'em-1': ['Mb-a'] })]);
     await expect(

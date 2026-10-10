@@ -466,6 +466,14 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
           // Captures memberships too, so the restore is itself
           // undoable (redo from the Activity log).
           const params = _input as unknown as MailRestoreMailboxesInput;
+          if (_options.dryRun === true) {
+            // Same preview shape as mail.delete — never fall through
+            // to the commit on a dry run.
+            return {
+              affectedCount: params.groups.reduce((n, g) => n + g.emailIds.length, 0),
+              emails: [],
+            } as unknown as O | DryRunPreview<O>;
+          }
           const session = await getSession();
           const previousMailboxesByEmail = await capturePreviousMailboxes(
             session,
