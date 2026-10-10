@@ -221,6 +221,8 @@ The Tauri build wraps the same bundle in a native shell. No web server is requir
 3. The resulting `.dmg` (macOS), `.AppImage` / `.deb` (Linux), `.msi` (Windows), `.ipa` (iOS), or `.apk` (Android) ships the bundle inside the native app.
 4. On first launch, the user (or an MDM profile) configures the JMAP endpoint URL.
 
+The bundle's CSP (see [Content-Security-Policy](#content-security-policy)) only allows same-origin `connect-src` plus explicit build-time origins, and in the Tauri webview the JMAP server is never same-origin. Until the runtime server picker exists, build the Tauri bundle with the target server: `IARSMA_CSP_CONNECT_SRC="https://mail.example.com" pnpm tauri build`.
+
 ### Code signing
 - macOS: Apple Developer ID required for distribution outside the App Store.
 - Windows: code signing certificate recommended to avoid SmartScreen warnings.

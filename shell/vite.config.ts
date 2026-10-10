@@ -50,10 +50,21 @@ const basePath = rawBase === '/' || rawBase === './' ? rawBase : rawBase.endsWit
 // src/security/csp.ts and docs/deployment.md.
 function iarsmaCsp(): Plugin {
   let command: 'build' | 'serve' = 'build';
+  let extraConnectSrc: string[] = [];
   return {
     name: 'iarsma-csp',
     configResolved(config) {
       command = config.command;
+      // `config.env` holds the VITE_* values Vite loaded from .env files
+      // as well as the shell env (process.env alone misses .env.local);
+      // IARSMA_CSP_CONNECT_SRC isn't VITE_-prefixed, so it comes from the
+      // shell env only, keeping it out of import.meta.env.
+      if (command === 'build') {
+        extraConnectSrc = cspConnectOrigins({
+          ...config.env,
+          IARSMA_CSP_CONNECT_SRC: process.env['IARSMA_CSP_CONNECT_SRC'],
+        });
+      }
     },
     transform(code, id) {
       if (!id.includes('@monaco-editor/loader') || !code.includes('cdn.jsdelivr.net')) return null;
@@ -62,10 +73,7 @@ function iarsmaCsp(): Plugin {
     transformIndexHtml: {
       order: 'pre',
       handler(html) {
-        return transformCspMeta(html, {
-          command,
-          extraConnectSrc: command === 'build' ? cspConnectOrigins(process.env) : [],
-        });
+        return transformCspMeta(html, { command, extraConnectSrc });
       },
     },
   };
