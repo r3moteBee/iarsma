@@ -90,7 +90,18 @@ fn builder(allow_external_images: bool) -> Builder<'static> {
     // Attribute allowlist: real HTML mail uses `style`, alignment +
     // size on table cells, `colspan`/`rowspan`, `bgcolor`. Allowed
     // here; `style` values get filtered to a safe subset below.
-    b.add_generic_attributes(["style", "class", "title", "lang", "dir"]);
+    b.add_generic_attributes(["style", "title", "lang", "dir"]);
+
+    // `class` is NOT generic: the body is rendered inside the shell's
+    // DOM, so a sender-chosen class would pick up the app's own CSS
+    // (CSS-module names are deterministic and ship in the bundle) —
+    // e.g. a `position: fixed` overlay rule, sidestepping the inline-
+    // style screening. Received mail can't carry a stylesheet (`<style>`
+    // is stripped), so its classes are inert anyway. The exceptions are
+    // Squire's formatting-span classes (its default `classNames`): the
+    // composer routes its own HTML through this sanitizer and Squire
+    // recognizes font / size / colour / highlight spans by them.
+    b.add_allowed_classes("span", ["colour", "font", "size", "highlight"]);
     b.add_tag_attributes(
         "table",
         [
@@ -862,6 +873,16 @@ mod tests {
             let out = sanitize(&html, false);
             assert!(!out.contains("style="), "{style:?} kept: {out:?}");
         }
+    }
+
+    #[test]
+    fn strips_classes_except_squire_formatting_spans() {
+        // A sender could otherwise borrow the app's own CSS-module rules.
+        let out = sanitize(r#"<div class="_overlay_1x2y3_10 modal">x</div>"#, false);
+        assert!(!out.contains("class"), "got {out:?}");
+        let out = sanitize(r#"<span class="font _overlay_1x2y3_10">x</span>"#, false);
+        assert!(out.contains(r#"class="font""#), "got {out:?}");
+        assert!(!out.contains("_overlay"), "got {out:?}");
     }
 
     // ──────────────────────────────────────────────────────────────────
