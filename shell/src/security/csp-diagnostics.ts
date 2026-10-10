@@ -31,7 +31,7 @@ export function connectSrcAllows(sources: readonly string[], target: string, sel
   const httpProtocol = WS_TO_HTTP[url.protocol] ?? url.protocol;
   const httpOrigin = `${httpProtocol}//${url.host}`;
   return sources.some((source) => {
-    if (source === "'self'") return httpOrigin === selfOrigin || url.origin === selfOrigin;
+    if (source === "'self'") return httpOrigin === selfOrigin;
     if (source === '*') return ['http:', 'https:'].includes(httpProtocol);
     if (/^[a-z][a-z0-9+.-]*:$/i.test(source)) {
       return source === url.protocol || source === httpProtocol || (source === 'http:' && httpProtocol === 'https:');
