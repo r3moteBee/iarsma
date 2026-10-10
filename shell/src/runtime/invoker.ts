@@ -47,6 +47,7 @@ import {
   fetchMailDeleteCommit,
   fetchMailDraftCommit,
   fetchMailModifyCommit,
+  fetchMailRestoreMailboxesCommit,
   fetchMailSendCommit,
   fetchMailboxCreateCommit,
   fetchMailboxUpdateCommit,
@@ -85,6 +86,7 @@ import {
   type MailDraftInput,
   type MailDraftResult,
   type MailModifyInput,
+  type MailModifyCommitResult,
   type MailModifyResult,
   type IdentityPatch,
   type MailSendInput,
@@ -95,6 +97,7 @@ import {
   type ThreadList,
 } from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
+import { MAIL_RESTORE_MAILBOXES, type MailRestoreMailboxesInput } from './undo-registry.js';
 import {
   labelList,
   labelCreate,
@@ -418,10 +421,40 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             return makeMailModifyPreview(params) as unknown as O | DryRunPreview<O>;
           }
           const session = await getSession();
-          const result: MailModifyResult = await fetchMailModifyCommit({
+          // A mailbox patch (move / restore) also captures each email's
+          // prior memberships so buildInverse can undo per email: a
+          // bulk selection expands threads into every message, and
+          // those rarely share one source mailbox (Inbox + Sent).
+          const result: MailModifyCommitResult = await fetchMailModifyCommit({
             ...opts,
             session,
             params,
+            captureMemberships:
+              params.patch.mailboxIds !== undefined &&
+              Object.keys(params.patch.mailboxIds).length > 0,
+          });
+          return result as unknown as O;
+        }
+        case MAIL_RESTORE_MAILBOXES: {
+          // UI-only (not a tool contract): the per-email undo of a move
+          // or delete whose emails came from different mailboxes. One
+          // Email/set with a distinct mailboxIds patch per group; it
+          // captures the memberships it overwrites, so the restore is
+          // itself undoable (redo from the Activity log).
+          const params = _input as unknown as MailRestoreMailboxesInput;
+          if (_options.dryRun === true) {
+            // Same preview shape as mail.delete — never fall through
+            // to the commit on a dry run.
+            return {
+              affectedCount: params.groups.reduce((n, g) => n + g.emailIds.length, 0),
+              emails: [],
+            } as unknown as O | DryRunPreview<O>;
+          }
+          const session = await getSession();
+          const result: MailModifyCommitResult = await fetchMailRestoreMailboxesCommit({
+            ...opts,
+            session,
+            groups: params.groups,
           });
           return result as unknown as O;
         }
@@ -1003,12 +1036,10 @@ function makeMailModifyPreview(params: MailModifyInput): {
  * single `mailboxIds` patch that moves every selected email into
  * Trash and out of the union of source mailboxes.
  *
- * Limitation: when callers delete a heterogeneous batch (e.g., one
- * email from Inbox and another from Archive), the combined patch
- * removes the email from *both* mailboxes — the Archive email
- * effectively loses its Archive membership too. The common case
- * (delete N from one mailbox) is unaffected. Heterogeneous batches
- * are a v2 refinement.
+ * A heterogeneous batch (one email from Inbox, another from Archive)
+ * still lands every email in Trash only — removing a membership an
+ * email lacks is a no-op. Undo is per email: buildInverse restores
+ * each email's own captured memberships, not the union (D-060).
  */
 function buildSoftDeletePatch(
   trashId: string,

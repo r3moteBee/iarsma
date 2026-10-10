@@ -474,11 +474,11 @@ The contract change is strictly safer for every existing caller — they all now
 **How to apply:**
 - New deletion-like tools (`event.delete`, `contact.delete`, etc.) follow the same shape when they enter the undo registry: soft-delete via the resource's equivalent of Trash, with a separate `*.purge` for the destroy. Until that lands, those tools remain irreversible.
 - The soft-delete commit returns `{ modifiedCount, previousMailboxesByEmail, trashMailboxId }`. The `previousMailboxesByEmail` field is what the UndoRegistry's `buildInverse` reads — keep it on every future tool that wants its undo derived from a captured pre-state.
-- Heterogeneous bulk deletes (one email from Inbox, another from Archive) currently use a combined `mailboxIds` patch that strips the union of source mailboxes from every email. Common case (delete N from one mailbox) works; mixed batches lose the Archive email's Archive membership. Per-email modifies via `Promise.all` is the v2 fix; flag in the buildSoftDeletePatch comment.
+- Heterogeneous bulk deletes (one email from Inbox, another from Archive) use a combined `mailboxIds` patch that strips the union of source mailboxes from every email — harmless forward (removing a membership an email lacks is a no-op), and since D-060 the undo restores each email's own mailboxes rather than the union.
 - The MCP server's `mail.delete` handler routes through the shell's `mail.delete` tool (which now soft-deletes) but constructs its own JMAP calls in some paths. Those paths don't return `previousMailboxesByEmail` to the loggingInvoker, so MCP-driven deletes don't get an undo registration. Acceptable for v1 — the human's UI-driven deletes are the high-value case; agents are stuck with "I can't undo what I did" by design, which matches the rest of the agent posture.
 
 **Out of scope (follow-ups):**
-- Per-email-memberships modify (`Promise.all` over N updates) for heterogeneous bulk deletes.
+- ~~Per-email-memberships modify for heterogeneous bulk deletes.~~ Done for undo in D-060.
 - MCP handler routing `previousMailboxesByEmail` through so agent deletes also become undoable for the human.
 - Trash retention policy (auto-purge after N days). Today the Trash mailbox is forever-until-explicitly-purged.
 - Surfacing `mail.purge` on the Trash view ("Empty trash" + per-row "Delete forever"). PR 19 only lands the tool; the UI affordance is a follow-up.
@@ -614,3 +614,14 @@ So this PR isn't backtracking PR 36 — it's the realization that the OAuth path
 - Nested labels (flat list in v1; nested label names flatten to a single slug key at import time).
 - Per-label notification/filter rules.
 - A `parentId`-style reparent on labels.
+
+## D-060 — Undo restores each email's own mailboxes (per-email inverse)
+**Date:** 2026-10-10
+**Decision:** Mailbox undo is computed per email from memberships captured before the action. `mail.modify` with a `mailboxIds` patch (move / restore) now captures them too — an `Email/get` of `mailboxIds` riding ahead of the `Email/set` in the same JMAP request — and returns `previousMailboxesByEmail` like `mail.delete` (D-055). `buildInverse` gives each email back exactly what the forward patch changed for it (re-add a membership it lost, remove one it gained, omit the rest) and groups identical inverses. One group stays a plain `mail.modify`; several dispatch to `mail.restore-mailboxes`, a **UI-only** tool (no contract, no MCP handler, like `mail.purge`) that applies a distinct patch per group in one `Email/set`, captures what it overwrites, and is itself reversible (redo from Activity).
+
+**Why:** Bulk actions expand threads into every message, and a thread usually spans Inbox + Sent. The old inverses applied one patch to all emails — delete restored the union of prior mailboxes, a move just flipped its patch on the false assumption that the selection shared one source — so undo filed Sent replies into Inbox and Inbox mail into Sent. A patch (not exact `mailboxIds` replacement) keeps memberships the action never touched, including changes made since. Same-request capture avoids an extra round trip on every move and the read/write race.
+
+**How to apply:**
+- A mailbox-moving action with no captured memberships registers no undo when it spans 2+ emails (a single email falls back to the flip). No undo beats a corrupting one — same rule as bulk keyword patches.
+- New tools whose undo restores mailbox membership return `previousMailboxesByEmail` and reuse `mailboxInverse` in `undo-registry.ts`.
+- `mail.restore-mailboxes` is in `DESTRUCTIVE_TOOLS` (so its replay is logged as a commit and gets its own inverse) and invalidates the same caches as a move.

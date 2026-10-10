@@ -80,6 +80,14 @@ describe('cacheInvalidationsFor (v0.13.1 write-invalidation)', () => {
     ]);
   });
 
+  it('a per-email undo restore (mail.restore-mailboxes) invalidates like a move', () => {
+    expect(
+      cacheInvalidationsFor('mail.restore-mailboxes', {
+        groups: [{ emailIds: ['e1'], mailboxIds: { inbox: true, archive: false } }],
+      }),
+    ).toEqual(['threads', 'searchResults', 'mailboxes']);
+  });
+
   it('label apply/delete invalidate keyword-filtered views but not mailbox counts', () => {
     expect(cacheInvalidationsFor('label.apply', { emailIds: ['e1'], add: ['work'] })).toEqual([
       'threads',
