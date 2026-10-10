@@ -234,7 +234,7 @@ fn link_scheme(value: &str) -> Option<String> {
         .chars()
         .filter(|c| !c.is_whitespace() && !c.is_control())
         .collect();
-    css_url_scheme(&compact)
+    url_scheme(&compact)
 }
 
 /// Filter a `style` attribute value to a safe subset.
@@ -455,7 +455,7 @@ fn screen_style_declaration(decl: &str, allow_external_images: bool) -> Option<C
         let arg_start = url_start + "url(".len();
         let (url, consumed) = parse_css_url_arg(&decl[arg_start..])?;
         let url_end = arg_start + consumed;
-        match css_url_scheme(url).as_deref() {
+        match url_scheme(url).as_deref() {
             Some("cid") | Some("data") => {}
             Some("http") | Some("https") if allow_external_images => {}
             Some("http") | Some("https") => blocked_remote.push(url_start..url_end),
@@ -516,7 +516,7 @@ fn parse_css_url_arg(rest: &str) -> Option<(&str, usize)> {
 
 /// The lowercased scheme of a URL (`https` for `https://x`), or `None`
 /// when the URL is relative (no `scheme:` prefix per RFC 3986).
-fn css_url_scheme(url: &str) -> Option<String> {
+fn url_scheme(url: &str) -> Option<String> {
     let url = url.trim();
     let (scheme, _) = url.split_once(':')?;
     let mut chars = scheme.chars();
