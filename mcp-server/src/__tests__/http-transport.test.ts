@@ -198,6 +198,8 @@ type Harness = {
   readonly baseUrl: string;
   readonly sessionCount: () => number;
   readonly serversCreated: () => number;
+  /** Servers the factory produced that are still attached to a transport. */
+  readonly serversConnected: () => number;
   readonly close: () => Promise<void>;
 };
 
@@ -205,10 +207,11 @@ async function startHarness(
   config: Partial<Parameters<typeof startHttpTransport>[0]['config']> = {},
 ): Promise<Harness> {
   const tools = await loadTools(toolsDir);
-  let created = 0;
+  const servers: ReturnType<typeof createIarsmaMcpServer>[] = [];
   const makeServer = () => {
-    created++;
-    return createIarsmaMcpServer({ tools });
+    const s = createIarsmaMcpServer({ tools });
+    servers.push(s);
+    return s;
   };
   const r = await startHttpTransport({
     config: { port: 0, host: '127.0.0.1', tokenStore: stubTokenStore(), ...config },
@@ -218,7 +221,8 @@ async function startHarness(
   return {
     baseUrl: `http://127.0.0.1:${r.port}`,
     sessionCount: r.sessionCount,
-    serversCreated: () => created,
+    serversCreated: () => servers.length,
+    serversConnected: () => servers.filter((s) => s.transport !== undefined).length,
     close: r.close,
   };
 }
@@ -321,6 +325,8 @@ describe('startHttpTransport — session lifecycle', () => {
     });
     expect(r.status).toBe(406);
     expect(h.sessionCount()).toBe(0);
+    expect(h.serversCreated()).toBe(1);
+    await vi.waitFor(() => expect(h!.serversConnected()).toBe(0));
   });
 
   it('DELETE closes the session and prunes it from the table', async () => {
@@ -332,6 +338,7 @@ describe('startHttpTransport — session lifecycle', () => {
     });
     expect(d.status).toBe(200);
     expect(h.sessionCount()).toBe(0);
+    expect(h.serversConnected()).toBe(0);
     expect((await listTools(h, id)).status).toBe(404);
   });
 

@@ -312,13 +312,15 @@ export async function startHttpTransport(opts: {
       (req as unknown as Record<string, unknown>).auth = identity;
     }
 
-    await session.transport.handleRequest(req, res, body);
-
-    // An `initialize` the SDK rejected (bad Accept header, batched
-    // init, …) never gets a session id — release the pair now rather
-    // than leaking it.
-    if (sessionId === undefined && session.transport.sessionId === undefined) {
-      closeSession(session);
+    try {
+      await session.transport.handleRequest(req, res, body);
+    } finally {
+      // An `initialize` the SDK rejected (bad Accept header, batched
+      // init, …) or that threw never gets a session id — release the
+      // pair now rather than leaking it.
+      if (sessionId === undefined && session.transport.sessionId === undefined) {
+        closeSession(session);
+      }
     }
   }
 
