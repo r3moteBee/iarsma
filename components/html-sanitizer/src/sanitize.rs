@@ -30,9 +30,8 @@ use std::collections::HashSet;
 ///
 /// `allow_external_images`:
 ///   - `false` (default for incoming mail): `<img>` tags with `http(s):`
-///     `src` are stripped, and so are inline-style declarations that
-///     `url(...)` anything other than `cid:` / `data:`. `cid:` and
-///     `data:` URIs pass through.
+///     `src` are stripped, and inline-style `url(http(s):...)` becomes
+///     `none`. `cid:` and `data:` URIs pass through.
 ///   - `true`: `http(s):` `src` and `url(http(s):...)` allowed too. The
 ///     user opted in.
 pub fn sanitize(html: &str, allow_external_images: bool) -> String {
