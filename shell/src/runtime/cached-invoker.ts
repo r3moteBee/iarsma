@@ -233,6 +233,11 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
       await opts.store.put<O>(purpose, cacheKey, value);
       return;
     }
+    // The account changed while the fetch was in flight (sign-out, or
+    // another tab signed in someone else and the token layer picked their
+    // tokens up): we can't tell whose token fetched `value`, so don't
+    // file it under either account.
+    if (currentOwner() !== owner) return;
     await opts.store.put<OwnedRow<O>>(purpose, cacheKey, { owner, value });
   }
 

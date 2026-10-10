@@ -476,3 +476,19 @@ describe('cachedInvoker — account isolation (getOwner)', () => {
     expect(calls).toEqual(['alice-sub', 'bob-sub']);
   });
 });
+
+describe('cachedInvoker — account change during a fetch', () => {
+  it('does not write a result through when the owner changed mid-flight', async () => {
+    let owner: string | null = 'alice-sub';
+    const invoker: Invoker = {
+      async invoke() {
+        // The token layer switched accounts while this request ran.
+        owner = 'bob-sub';
+        return [{ id: 'whose-is-this' }] as never;
+      },
+    };
+    const wrapped = cachedInvoker({ inner: invoker, store: cache, getOwner: () => owner });
+    expect(await wrapped.invoke('mailbox.list', {})).toEqual([{ id: 'whose-is-this' }]);
+    expect(await cache.get('mailboxes', '{}')).toBeNull();
+  });
+});
