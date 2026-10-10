@@ -17,8 +17,12 @@
  *   - One refresh in flight per storage instance; concurrent callers (read
  *     hooks, the push stream, the approval store) share its promise, so an
  *     expiry triggers exactly one token-endpoint POST per tab.
- *   - The record is re-read from the persistent backing before refreshing:
- *     another tab may already have refreshed and rotated the refresh token.
+ *   - Across tabs the refresh runs under a Web Lock, and the record is
+ *     re-read from the persistent backing inside it: another tab may already
+ *     have refreshed and rotated the refresh token. Two tabs never spend the
+ *     same refresh token (with reuse detection that revokes the session).
+ *   - The token request times out, so a request hung by sleep / network
+ *     change can't stall every caller sharing the refresh.
  *   - Tokens are cleared only when the token endpoint rejects the grant
  *     (400 / 401 / `invalid_grant`) or no refresh token exists. Network
  *     errors and 5xx keep the tokens and reject with `refresh_failed` so
@@ -75,7 +79,14 @@ export type OAuthDeps = {
    * on-screen state with the other's credentials.
    */
   readonly onAccountChanged?: () => void | Promise<void>;
+  /** Override the cross-tab refresh lock for tests (defaults to Web Locks). */
+  readonly refreshLock?: RefreshLock;
+  /** Override the token-request timeout for tests. */
+  readonly refreshTimeoutMs?: number;
 };
+
+/** Runs `fn` while holding a lock shared by every tab of the origin. */
+export type RefreshLock = <T>(fn: () => Promise<T>) => Promise<T>;
 
 type DiscoveredAs = oauth.AuthorizationServer;
 
@@ -306,6 +317,24 @@ const EXPIRY_SKEW_MS = 30_000;
  */
 const UNAUTHORIZED_GRACE_MS = 10_000;
 
+/** Abort a token request that hasn't answered in this long (retryable). */
+const REFRESH_TIMEOUT_MS = 20_000;
+
+const REFRESH_LOCK_NAME = 'iarsma.auth.refresh';
+
+/** Web Locks when available; otherwise (Node tests, old browsers) none. */
+function defaultRefreshLock(): RefreshLock {
+  const locks =
+    typeof navigator !== 'undefined'
+      ? (navigator as { locks?: LockManager }).locks
+      : undefined;
+  if (locks === undefined) return (fn) => fn();
+  // lib.dom types `request` as Promise<Promise<T>> for an async callback;
+  // at runtime it resolves with the callback's settled value.
+  return <T>(fn: () => Promise<T>) =>
+    locks.request(REFRESH_LOCK_NAME, fn) as unknown as Promise<T>;
+}
+
 /** In-flight refresh per storage instance (see module doc). */
 const refreshInFlight = new WeakMap<AuthStorage, Promise<string | null>>();
 
@@ -358,7 +387,8 @@ function sharedRefresh(
 ): Promise<string | null> {
   const existing = refreshInFlight.get(storage);
   if (existing !== undefined) return existing;
-  const promise = runRefresh(deps, storage, afterUnauthorized);
+  const lock = deps.refreshLock ?? defaultRefreshLock();
+  const promise = lock(() => runRefresh(deps, storage, afterUnauthorized));
   refreshInFlight.set(storage, promise);
   const release = () => {
     if (refreshInFlight.get(storage) === promise) refreshInFlight.delete(storage);
@@ -453,22 +483,20 @@ export async function refreshTokens(
   const as = await discover(deps);
   const c = client(deps.config);
 
-  const fetchOpts = makeFetchOpts(deps) as Parameters<
-    typeof oauth.refreshTokenGrantRequest
-  >[4];
+  const fetchOpts = {
+    ...(makeFetchOpts(deps) as object | undefined),
+    signal: AbortSignal.timeout(deps.refreshTimeoutMs ?? REFRESH_TIMEOUT_MS),
+  } as Parameters<typeof oauth.refreshTokenGrantRequest>[4];
 
   let response: Response;
   try {
-    response =
-      fetchOpts === undefined
-        ? await oauth.refreshTokenGrantRequest(as, c, oauth.None(), refreshToken)
-        : await oauth.refreshTokenGrantRequest(
-            as,
-            c,
-            oauth.None(),
-            refreshToken,
-            fetchOpts,
-          );
+    response = await oauth.refreshTokenGrantRequest(
+      as,
+      c,
+      oauth.None(),
+      refreshToken,
+      fetchOpts,
+    );
   } catch (e) {
     throw makeError('refresh_failed', `refresh fetch failed: ${describe(e)}`);
   }

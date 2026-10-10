@@ -20,6 +20,7 @@ import {
   refreshAfterUnauthorized,
   signOut,
   startSignIn,
+  type RefreshLock,
 } from '../oauth.js';
 
 const STALWART_DISCOVERY = {
@@ -211,7 +212,7 @@ function fakeIssuer(initialRefreshToken: string) {
     validRefreshToken: initialRefreshToken,
     tokenPosts: 0,
     issued: 0,
-    mode: 'ok' as 'ok' | 'network-error' | 'server-error',
+    mode: 'ok' as 'ok' | 'network-error' | 'server-error' | 'hang',
     /** Resolves pending token responses; null = respond immediately. */
     gate: null as Promise<void> | null,
   };
@@ -227,6 +228,12 @@ function fakeIssuer(initialRefreshToken: string) {
       state.tokenPosts += 1;
       if (state.gate !== null) await state.gate;
       if (state.mode === 'network-error') throw new TypeError('Failed to fetch');
+      if (state.mode === 'hang') {
+        // Never answers; only the request's abort signal ends it.
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        });
+      }
       if (state.mode === 'server-error') {
         return new Response('<html>bad gateway</html>', { status: 502 });
       }
@@ -450,6 +457,48 @@ describe('getAccessToken — refresh', () => {
     expect(tb).toBe('at-1');
     expect(onSessionEnded).not.toHaveBeenCalled();
     expect(backing.disk()?.refreshToken).toBe('rt-1');
+  });
+
+  it('a hung token request times out without stalling the shared refresh', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    issuer.state.mode = 'hang';
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(EXPIRED);
+    const deps = {
+      config: CONFIG,
+      storage,
+      fetch: issuer.fetch,
+      now: () => NOW,
+      refreshTimeoutMs: 20,
+    };
+    await expect(Promise.all([getAccessToken(deps), getAccessToken(deps)])).rejects.toMatchObject({
+      code: 'refresh_failed',
+    });
+    expect(storage.loadTokens()).toEqual(EXPIRED);
+    // The next call starts a fresh attempt rather than joining the dead one.
+    issuer.state.mode = 'ok';
+    expect(await getAccessToken(deps)).toBe('at-1');
+  });
+
+  it('with the cross-tab lock, two tabs refreshing at once spend the refresh token once', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const backing = sharedBacking(EXPIRED);
+    // Minimal stand-in for navigator.locks: FIFO mutual exclusion.
+    let tail: Promise<unknown> = Promise.resolve();
+    const refreshLock: RefreshLock = (fn) => {
+      const run = tail.then(fn, fn);
+      tail = run.catch(() => {});
+      return run;
+    };
+    const deps = { config: CONFIG, fetch: issuer.fetch, now: () => NOW, refreshLock };
+    const results = await Promise.all([
+      getAccessToken({ ...deps, storage: backing.tab() }),
+      getAccessToken({ ...deps, storage: backing.tab() }),
+    ]);
+    expect(results).toEqual(['at-1', 'at-1']);
+    expect(issuer.state.tokenPosts).toBe(1);
   });
 
   it('ends the session when another tab signed out', async () => {
