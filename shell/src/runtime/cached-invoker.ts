@@ -30,10 +30,19 @@
  *     transient revalidation failures as user-visible errors. A future
  *     `onRevalidationError` callback can opt back into surfacing them.
  *   - Inner-fetch errors during a cache miss propagate normally.
+ *
+ * Account isolation (`getOwner`):
+ *   - Cache keys are the canonical input only, and `mailbox.list {}` is the
+ *     same key for every account. With `getOwner` set, each row is stored
+ *     as `{ owner, value }` and served only to the same owner (the signed-in
+ *     subject); rows from another account, or written before scoping
+ *     existed, are a miss. A null owner (signed out / no stable identity)
+ *     bypasses the cache entirely. This holds even when a sign-out path
+ *     failed to `clearAll()` before the next user signed in.
  */
 
 import { canonicalize } from './canonical.js';
-import type { CacheStorage } from './cache-storage.js';
+import type { CachePurposeKey, CacheStorage } from './cache-storage.js';
 import { cacheInvalidationsFor, purposeFor } from './cache-policy.js';
 import type { InvocationOptions, Invoker } from './invoker.js';
 import type { DryRunPreview } from './types.js';
@@ -46,7 +55,18 @@ export type CachedInvokerOptions = {
    * (silent). Tests use this to assert revalidation dispatched at all.
    */
   readonly onRevalidationError?: (toolName: string, error: unknown) => void;
+  /**
+   * Identity the cached rows belong to (see "Account isolation" above).
+   * Omitted → rows are unscoped (single-account tests).
+   */
+  readonly getOwner?: () => string | null;
 };
+
+/** On-disk row shape when `getOwner` is set. */
+type OwnedRow<O> = { readonly owner: string; readonly value: O };
+
+/** Sentinel: caching is disabled for this call (no owner). */
+const NO_OWNER = Symbol('no-owner');
 
 export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
   // Two dedup maps with different responsibilities:
@@ -72,7 +92,9 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
       options: InvocationOptions = {},
     ): Promise<O | DryRunPreview<O>> {
       const purpose = purposeFor(name);
-      const isCacheable = purpose !== null && options.dryRun !== true;
+      const owner = currentOwner();
+      const isCacheable =
+        purpose !== null && options.dryRun !== true && owner !== NO_OWNER;
 
       if (!isCacheable) {
         const result = await opts.inner.invoke<I, O>(name, input, options);
@@ -98,7 +120,7 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
       }
 
       const cacheKey = canonicalize(input);
-      const dedupKey = `${name}|${cacheKey}`;
+      const dedupKey = dedupKeyFor(name, cacheKey, owner);
 
       // PR 58 — bypassCache is a "give me fresh data" signal from
       // useReadHook on push-generation refetches. We still write
@@ -114,7 +136,7 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
         const promise = (async () => {
           try {
             const result = (await opts.inner.invoke<I, O>(name, input, options)) as O;
-            await opts.store.put<O>(purpose, cacheKey, result);
+            await putRow(purpose, cacheKey, owner, result);
             return result;
           } finally {
             inFlight.delete(dedupKey);
@@ -134,11 +156,11 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
 
       const promise = (async () => {
         try {
-          const cached = await opts.store.get<O>(purpose, cacheKey);
-          if (cached !== null) {
+          const cached = await getRow<O>(purpose, cacheKey, owner);
+          if (cached !== MISS) {
             // Stale-while-revalidate. Return cached; kick off (or join)
             // the background revalidation tracked in `inRevalidate`.
-            void scheduleRevalidate<I, O>(name, input, cacheKey, purpose);
+            void scheduleRevalidate<I, O>(name, input, cacheKey, purpose, owner);
             return cached;
           }
           const result = (await opts.inner.invoke<I, O>(
@@ -146,7 +168,7 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
             input,
             options,
           )) as O;
-          await opts.store.put<O>(purpose, cacheKey, result);
+          await putRow(purpose, cacheKey, owner, result);
           return result;
         } finally {
           inFlight.delete(dedupKey);
@@ -173,19 +195,61 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
       : {}),
   };
 
+  /** `undefined` = unscoped, `NO_OWNER` = don't cache, string = scoped. */
+  function currentOwner(): string | undefined | typeof NO_OWNER {
+    if (opts.getOwner === undefined) return undefined;
+    return opts.getOwner() ?? NO_OWNER;
+  }
+
+  function dedupKeyFor(name: string, cacheKey: string, owner: string | undefined): string {
+    // JSON-encode the owner so no subject string can collide with
+    // another (owner, input) pair.
+    return owner === undefined
+      ? `${name}|${cacheKey}`
+      : `${name}|${JSON.stringify(owner)}|${cacheKey}`;
+  }
+
+  async function getRow<O>(
+    purpose: CachePurposeKey,
+    cacheKey: string,
+    owner: string | undefined,
+  ): Promise<O | typeof MISS> {
+    if (owner === undefined) {
+      const raw = await opts.store.get<O>(purpose, cacheKey);
+      return raw === null ? MISS : raw;
+    }
+    const row = await opts.store.get<unknown>(purpose, cacheKey);
+    if (!isOwnedRow(row) || row.owner !== owner) return MISS;
+    return row.value as O;
+  }
+
+  async function putRow<O>(
+    purpose: CachePurposeKey,
+    cacheKey: string,
+    owner: string | undefined,
+    value: O,
+  ): Promise<void> {
+    if (owner === undefined) {
+      await opts.store.put<O>(purpose, cacheKey, value);
+      return;
+    }
+    await opts.store.put<OwnedRow<O>>(purpose, cacheKey, { owner, value });
+  }
+
   function scheduleRevalidate<I, O>(
     name: string,
     input: I,
     cacheKey: string,
-    purpose: NonNullable<ReturnType<typeof purposeFor>>,
+    purpose: CachePurposeKey,
+    owner: string | undefined,
   ): Promise<void> {
-    const dedupKey = `${name}|${cacheKey}`;
+    const dedupKey = dedupKeyFor(name, cacheKey, owner);
     const existing = inRevalidate.get(dedupKey);
     if (existing !== undefined) return existing;
     const promise = (async () => {
       try {
         const result = (await opts.inner.invoke<I, O>(name, input, {})) as O;
-        await opts.store.put<O>(purpose, cacheKey, result);
+        await putRow(purpose, cacheKey, owner, result);
       } catch (e) {
         opts.onRevalidationError?.(name, e);
       } finally {
@@ -195,4 +259,16 @@ export function cachedInvoker(opts: CachedInvokerOptions): Invoker {
     inRevalidate.set(dedupKey, promise);
     return promise;
   }
+}
+
+/** Sentinel for a cache miss (a cached value may itself be `null`). */
+const MISS = Symbol('miss');
+
+function isOwnedRow(row: unknown): row is OwnedRow<unknown> {
+  return (
+    row !== null &&
+    typeof row === 'object' &&
+    typeof (row as { owner?: unknown }).owner === 'string' &&
+    'value' in row
+  );
 }

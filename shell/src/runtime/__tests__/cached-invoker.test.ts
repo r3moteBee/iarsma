@@ -400,3 +400,79 @@ describe('cachedInvoker — revalidation errors', () => {
     expect(calls.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe('cachedInvoker — account isolation (getOwner)', () => {
+  it("never serves one account's cached rows to another account", async () => {
+    let owner: string | null = 'alice-sub';
+    let mailbox = 'alice-inbox';
+    const { invoker, calls } = inner({
+      'mailbox.list': () => [{ id: mailbox }],
+    });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache, getOwner: () => owner });
+
+    expect(await wrapped.invoke('mailbox.list', {})).toEqual([{ id: 'alice-inbox' }]);
+    await flush();
+
+    // Bob signs in on the same browser; the cache was NOT cleared.
+    owner = 'bob-sub';
+    mailbox = 'bob-inbox';
+    const out = await wrapped.invoke('mailbox.list', {});
+    expect(out).toEqual([{ id: 'bob-inbox' }]);
+    // A miss for Bob (fetched synchronously), not Alice's row + SWR.
+    expect(calls).toHaveLength(2);
+  });
+
+  it('serves a hit to the same owner (stale-while-revalidate still works)', async () => {
+    const { invoker, calls } = inner({ 'mailbox.list': () => [{ id: 'inbox' }] });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache, getOwner: () => 'alice-sub' });
+    await wrapped.invoke('mailbox.list', {});
+    await flush();
+    expect(await wrapped.invoke('mailbox.list', {})).toEqual([{ id: 'inbox' }]);
+    await flush();
+    // Initial miss + background revalidation of the hit.
+    expect(calls).toHaveLength(2);
+  });
+
+  it('treats unscoped rows written before scoping existed as a miss', async () => {
+    await cache.put('mailboxes', '{}', [{ id: 'legacy-row-of-unknown-owner' }]);
+    const { invoker } = inner({ 'mailbox.list': () => [{ id: 'fresh' }] });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache, getOwner: () => 'alice-sub' });
+    expect(await wrapped.invoke('mailbox.list', {})).toEqual([{ id: 'fresh' }]);
+  });
+
+  it('bypasses the cache entirely when there is no owner', async () => {
+    await cache.put('mailboxes', '{}', { owner: 'alice-sub', value: [{ id: 'alice' }] });
+    const { invoker, calls } = inner({ 'mailbox.list': () => [{ id: 'anon' }] });
+    const wrapped = cachedInvoker({ inner: invoker, store: cache, getOwner: () => null });
+    expect(await wrapped.invoke('mailbox.list', {})).toEqual([{ id: 'anon' }]);
+    expect(calls).toHaveLength(1);
+    // Nothing written for the owner-less call.
+    expect(await cache.get('mailboxes', '{}')).toEqual({ owner: 'alice-sub', value: [{ id: 'alice' }] });
+  });
+
+  it('does not share an in-flight fetch across owners', async () => {
+    let owner = 'alice-sub';
+    let resolveAlice: (v: unknown) => void = () => {};
+    const calls: string[] = [];
+    const invoker: Invoker = {
+      async invoke() {
+        calls.push(owner);
+        if (owner === 'alice-sub') {
+          return (await new Promise<unknown>((r) => {
+            resolveAlice = r;
+          })) as never;
+        }
+        return [{ id: 'bob' }] as never;
+      },
+    };
+    const wrapped = cachedInvoker({ inner: invoker, store: cache, getOwner: () => owner });
+    const alicePromise = wrapped.invoke('mailbox.list', {});
+    await flush();
+    owner = 'bob-sub';
+    const bob = await wrapped.invoke('mailbox.list', {});
+    expect(bob).toEqual([{ id: 'bob' }]);
+    resolveAlice([{ id: 'alice' }]);
+    expect(await alicePromise).toEqual([{ id: 'alice' }]);
+    expect(calls).toEqual(['alice-sub', 'bob-sub']);
+  });
+});
