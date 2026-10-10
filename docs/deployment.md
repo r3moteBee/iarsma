@@ -58,6 +58,8 @@ The bundle enforces a CSP from a `<meta http-equiv>` in `index.html` (Stalwart's
 | `worker-src` | `'self'` | Monaco's language workers and the service worker are same-origin chunks. |
 | `object-src` / `base-uri` / `form-action` | `'none'` / `'none'` / `'self'` | No plugins, no `<base>` hijack, no off-site form posts. |
 
+Browser floor: `'wasm-unsafe-eval'` is understood by Chrome/Edge 97+, Firefox 102+ and Safari 16+; older engines treat WebAssembly compilation as eval and the shell can't start. The `es2022` build target already needs Safari 16.4, so in practice this only drops Chromium 94–96.
+
 Plus `<meta name="referrer" content="no-referrer">`, so remote images and links opened from mail never leak the webmail URL.
 
 **Cross-origin JMAP/OIDC (Paths B, C, E with a `config.json` pointing at another host):** `connect-src 'self'` will block those calls. Build with the extra origins, which the `iarsma-csp` Vite plugin appends to `connect-src`:
