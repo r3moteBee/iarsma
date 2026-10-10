@@ -139,4 +139,151 @@ describe('stalwartSessionTokenStore', () => {
     await store.resolve('tok');
     expect(calls).toBe(2);
   });
+
+  it('does not cache 5xx failures — the next request re-validates', async () => {
+    let calls = 0;
+    const fetchFn = makeFetch(() => {
+      calls++;
+      return calls === 1
+        ? new Response('', { status: 503 })
+        : ok({ username: 'u', primaryAccounts: {} });
+    });
+    const store = stalwartSessionTokenStore({ jmapBaseUrl: BASE, fetch: fetchFn });
+    expect(await store.resolve('tok')).toBeNull();
+    expect(await store.resolve('tok')).not.toBeNull();
+    expect(calls).toBe(2);
+  });
+
+  it('does not cache network errors or unparseable bodies', async () => {
+    let calls = 0;
+    const fetchFn = makeFetch(() => {
+      calls++;
+      if (calls === 1) throw new TypeError('fetch failed');
+      if (calls === 2) return new Response('not json', { status: 200 });
+      return ok({ username: 'u', primaryAccounts: {} });
+    });
+    const store = stalwartSessionTokenStore({ jmapBaseUrl: BASE, fetch: fetchFn });
+    expect(await store.resolve('tok')).toBeNull();
+    expect(await store.resolve('tok')).toBeNull();
+    expect(await store.resolve('tok')).not.toBeNull();
+    expect(calls).toBe(3);
+  });
+
+  it('re-validates a revoked token once its negative entry expires', async () => {
+    let calls = 0;
+    const fetchFn = makeFetch(() => {
+      calls++;
+      return new Response('', { status: 403 });
+    });
+    let nowMs = 0;
+    const store = stalwartSessionTokenStore({
+      jmapBaseUrl: BASE,
+      cacheTtlMs: 1_000,
+      fetch: fetchFn,
+      now: () => nowMs,
+    });
+    await store.resolve('revoked');
+    await store.resolve('revoked');
+    expect(calls).toBe(1);
+    nowMs += 1_001;
+    await store.resolve('revoked');
+    expect(calls).toBe(2);
+  });
+
+  it('single-flight: concurrent lookups of one bearer share one upstream call', async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const fetchFn = makeFetch(async () => {
+      calls++;
+      await gate;
+      return ok({ username: 'u', primaryAccounts: {} });
+    });
+    const store = stalwartSessionTokenStore({ jmapBaseUrl: BASE, fetch: fetchFn });
+    const lookups = Promise.all([store.resolve('tok'), store.resolve('tok'), store.resolve('tok')]);
+    release();
+    const results = await lookups;
+    expect(calls).toBe(1);
+    expect(results.every((r) => r?.name === 'u')).toBe(true);
+    // A different bearer is not coalesced with it.
+    await store.resolve('other');
+    expect(calls).toBe(2);
+  });
+
+  it('single-flight does not pin a failure: the call after a 5xx goes upstream again', async () => {
+    let calls = 0;
+    const fetchFn = makeFetch(() => {
+      calls++;
+      return new Response('', { status: 502 });
+    });
+    const store = stalwartSessionTokenStore({ jmapBaseUrl: BASE, fetch: fetchFn });
+    await Promise.all([store.resolve('tok'), store.resolve('tok')]);
+    expect(calls).toBe(1);
+    await store.resolve('tok');
+    expect(calls).toBe(2);
+  });
+
+  it('bounds the cache: the oldest bearer is evicted past maxCacheEntries', async () => {
+    const seen: string[] = [];
+    const fetchFn = makeFetch((init) => {
+      const h = (init?.headers ?? {}) as Record<string, string>;
+      seen.push(h['authorization'] ?? '');
+      return ok({ username: 'u', primaryAccounts: {} });
+    });
+    const store = stalwartSessionTokenStore({
+      jmapBaseUrl: BASE,
+      maxCacheEntries: 2,
+      fetch: fetchFn,
+    });
+    await store.resolve('a');
+    await store.resolve('b');
+    await store.resolve('c'); // evicts 'a'
+    await store.resolve('c');
+    await store.resolve('b');
+    expect(seen).toEqual(['Bearer a', 'Bearer b', 'Bearer c']);
+    await store.resolve('a');
+    expect(seen).toEqual(['Bearer a', 'Bearer b', 'Bearer c', 'Bearer a']);
+  });
+
+  it('sweeps expired entries before evicting live ones', async () => {
+    let calls = 0;
+    const fetchFn = makeFetch(() => {
+      calls++;
+      return ok({ username: 'u', primaryAccounts: {} });
+    });
+    let nowMs = 0;
+    const store = stalwartSessionTokenStore({
+      jmapBaseUrl: BASE,
+      cacheTtlMs: 1_000,
+      maxCacheEntries: 2,
+      fetch: fetchFn,
+      now: () => nowMs,
+    });
+    await store.resolve('old');
+    nowMs += 600;
+    await store.resolve('live');
+    nowMs += 600; // 'old' has expired, 'live' has not
+    await store.resolve('new'); // must drop 'old', keep 'live'
+    expect(calls).toBe(3);
+    await store.resolve('live');
+    expect(calls).toBe(3);
+  });
+
+  it('reload() during an in-flight validation does not repopulate the cache', async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const fetchFn = makeFetch(async () => {
+      calls++;
+      if (calls === 1) await gate;
+      return ok({ username: 'u', primaryAccounts: {} });
+    });
+    const store = stalwartSessionTokenStore({ jmapBaseUrl: BASE, fetch: fetchFn });
+    const first = store.resolve('tok');
+    store.reload();
+    release();
+    expect(await first).not.toBeNull();
+    await store.resolve('tok');
+    expect(calls).toBe(2);
+  });
 });
