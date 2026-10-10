@@ -316,6 +316,15 @@ describe('startHttpTransport — session lifecycle', () => {
     expect((await listTools(h, id, 'agent-a-token')).status).toBe(200);
   });
 
+  it('legacy shared-secret clients get sessions too, isolated from token-store identities', async () => {
+    h = await startHarness({ bearerToken: 'shared-secret' });
+    const legacy = await initialize(h, 'shared-secret');
+    expect((await listTools(h, legacy, 'shared-secret')).status).toBe(200);
+    expect((await listTools(h, legacy, 'agent-a-token')).status).toBe(404);
+    const agent = await initialize(h, 'agent-a-token');
+    expect((await listTools(h, agent, 'shared-secret')).status).toBe(404);
+  });
+
   it('a failed initialize (bad Accept header) does not leak a session', async () => {
     h = await startHarness();
     const r = await fetch(`${h.baseUrl}/mcp`, {
