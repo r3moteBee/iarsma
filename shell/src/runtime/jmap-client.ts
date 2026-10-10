@@ -12,6 +12,7 @@ import {
   session as jmapClientSession,
 } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolError } from './types.js';
+import { warnIfCspBlocksConnect } from '../security/csp-diagnostics.js';
 
 export type Session = {
   readonly username: string;
@@ -93,7 +94,14 @@ export async function fetchSession(opts: JmapClientOptions): Promise<Session> {
     );
   }
   const body = await response.text();
-  return parseSession(body);
+  const session = parseSession(body);
+  // Stalwart advertises absolute URLs built from its configured public
+  // hostname, which can differ from the host the shell was loaded from.
+  warnIfCspBlocksConnect(
+    [session.apiUrl, session.eventSourceUrl, session.downloadUrl, session.uploadUrl],
+    'The JMAP session',
+  );
+  return session;
 }
 
 /**
