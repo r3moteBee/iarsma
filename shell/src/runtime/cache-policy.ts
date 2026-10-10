@@ -51,7 +51,8 @@ export function purposeFor(toolName: string): CachePurposeKey | null {
  *
  * Scoped deliberately:
  *   - Mailbox-membership changes (`mail.modify` with a `mailboxIds`
- *     patch, restore, `mail.delete`, `mail.purge`) shift which messages
+ *     patch, restore, `mail.delete`, `mail.purge`, the per-email undo
+ *     `mail.restore-mailboxes`) shift which messages
  *     a per-mailbox `threads` list and `searchResults` return, and the
  *     unread/total counts in `mailboxes` — invalidate all three.
  *   - Keyword-membership changes (`label.apply`, `label.delete`) shift
@@ -70,6 +71,8 @@ export function cacheInvalidationsFor(
     case 'mail.delete':
     case 'mail.purge':
       return ['threads', 'threadBodies', 'searchResults', 'mailboxes'];
+    case 'mail.restore-mailboxes':
+      return ['threads', 'searchResults', 'mailboxes'];
     case 'mail.modify':
       return patchTouchesMailbox(input)
         ? ['threads', 'searchResults', 'mailboxes']

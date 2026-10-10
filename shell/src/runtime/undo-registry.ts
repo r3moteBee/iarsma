@@ -8,6 +8,8 @@
  * zero-dependency default and what the test suite drives directly.
  */
 
+import type { MailboxPatchGroup } from './jmap-client.js';
+
 export type UndoEntry = {
   /** Seq of the action-log entry this undoes. Same numeric space as
    *  StoredEntry.seq in action-log.ts. */
@@ -110,6 +112,7 @@ export function buildInverse(
   params: unknown,
   result?: unknown,
 ): { readonly inverseAction: string; readonly inverseParams: unknown } | null {
+  const previous = previousMailboxesOf(result);
   if (tool === 'mail.modify') {
     const p = params as {
       emailIds: readonly string[];
@@ -121,68 +124,161 @@ export function buildInverse(
     // Bulk keyword patches (flag/read over 2+ emails) have no exact
     // inverse: the selection's prior states can be mixed, and a
     // uniform flip would overwrite them. Register no undo rather
-    // than a corrupting one. Mailbox-only bulk patches (moves) keep
-    // their inverse — the whole selection shares one source mailbox.
+    // than a corrupting one.
     if (p.patch.keywords !== undefined && p.emailIds.length > 1) {
       return null;
     }
-    const inversePatch: {
-      mailboxIds?: Record<string, boolean>;
-      keywords?: Record<string, boolean | null>;
-    } = {};
-    if (p.patch.mailboxIds !== undefined) {
-      inversePatch.mailboxIds = flipBooleans(p.patch.mailboxIds);
+    const keywords =
+      p.patch.keywords !== undefined ? flipKeywords(p.patch.keywords) : undefined;
+    const mailboxPatch = p.patch.mailboxIds;
+    if (mailboxPatch === undefined || Object.keys(mailboxPatch).length === 0) {
+      return keywords === undefined
+        ? null
+        : {
+            inverseAction: 'mail.modify',
+            inverseParams: { emailIds: p.emailIds, patch: { keywords } },
+          };
     }
-    if (p.patch.keywords !== undefined) {
-      inversePatch.keywords = flipKeywords(p.patch.keywords);
+    if (previous === undefined) {
+      // No captured memberships (degraded read, or an inner invoker
+      // that doesn't enrich its result). A single email's flip is the
+      // best available guess; a bulk flip is not — emails in a
+      // selection need not share a source mailbox (a thread spans
+      // Inbox + Sent), so the flip would file each one into every
+      // source. No undo beats a corrupting one.
+      if (p.emailIds.length > 1) return null;
+      return {
+        inverseAction: 'mail.modify',
+        inverseParams: {
+          emailIds: p.emailIds,
+          patch: {
+            mailboxIds: flipBooleans(mailboxPatch),
+            ...(keywords !== undefined ? { keywords } : {}),
+          },
+        },
+      };
     }
-    return {
-      inverseAction: 'mail.modify',
-      inverseParams: { emailIds: p.emailIds, patch: inversePatch },
-    };
+    return mailboxInverse(
+      [{ emailIds: p.emailIds, mailboxIds: mailboxPatch }],
+      previous,
+      keywords,
+    );
   }
   if (tool === 'mail.delete') {
     // PR 22 — soft-delete inverse. mail.delete's commit return must
-    // carry `previousMailboxesByEmail` (the pre-move memberships
-    // the invoker captured). Without it we can't build a meaningful
+    // carry `previousMailboxesByEmail` (the pre-move memberships the
+    // invoker captured). Without it we can't build a meaningful
     // inverse, so we skip — better than registering a wrong one.
+    if (previous === undefined) return null;
     const p = params as { emailIds: readonly string[] };
-    const r = result as
-      | { previousMailboxesByEmail?: Readonly<Record<string, readonly string[]>> }
-      | undefined;
-    const meta = r?.previousMailboxesByEmail;
-    if (meta === undefined) return null;
-
-    // Restore the union of previousMailboxes (= true), remove Trash
-    // and anything not in the union (= false, picked up from the
-    // current patch shape via the invoker's _trashId hint or
-    // inferred at undo time). For v1 we take the simple route: the
-    // inverse patch sets every mentioned previous mailbox to true.
-    // The Activity Undo's call into mail.modify will result in a
-    // round-trip through the same JMAP update path.
-    const mailboxIds: Record<string, boolean> = {};
-    for (const ids of Object.values(meta)) {
-      for (const id of ids) mailboxIds[id] = true;
+    // Reconstruct the forward soft-delete patch (invoker.ts
+    // buildSoftDeletePatch): Trash on, every source mailbox off. The
+    // per-email inverse then restores exactly what each email lost
+    // and takes Trash off only where it was added. Without the
+    // `trashMailboxId` hint the Trash membership is left in place
+    // (degraded — the user empties that row by hand).
+    const trashId = (result as { trashMailboxId?: unknown }).trashMailboxId;
+    const forward: Record<string, boolean> = {};
+    for (const ids of Object.values(previous)) {
+      for (const id of ids) forward[id] = false;
     }
-    // Heuristic: any mailbox we don't know about goes off. The
-    // mail.delete invoker can hint at the Trash id by including it
-    // as a `previousMailboxesByEmail` value (it doesn't, since
-    // Trash isn't a previous mailbox), so the Undo-time UX is "the
-    // user lands the email back in its original mailboxes, and
-    // the Trash membership is removed by the subsequent
-    // mail.modify". For that to work the undo's mail.modify must
-    // remove Trash explicitly — which it can't know without a
-    // hint. We supply it via a result-side `trashMailboxId` field;
-    // when absent, we skip the off-set and rely on the user to
-    // manually empty the Trash row that lingers.
-    const trashHint = (r as { trashMailboxId?: string } | undefined)?.trashMailboxId;
-    if (trashHint !== undefined) mailboxIds[trashHint] = false;
-    return {
-      inverseAction: 'mail.modify',
-      inverseParams: { emailIds: p.emailIds, patch: { mailboxIds } },
-    };
+    if (typeof trashId === 'string') forward[trashId] = true;
+    return mailboxInverse([{ emailIds: p.emailIds, mailboxIds: forward }], previous);
+  }
+  if (tool === MAIL_RESTORE_MAILBOXES) {
+    // The heterogeneous undo itself — reversible the same way, so a
+    // redo from the Activity log keeps per-email memberships intact.
+    if (previous === undefined) return null;
+    const p = params as MailRestoreMailboxesInput;
+    return mailboxInverse(p.groups, previous);
   }
   return null;
+}
+
+/**
+ * UI-only tool the per-email undo of a mixed-membership action
+ * dispatches to (invoker.ts): one JMAP Email/set carrying a distinct
+ * mailboxIds patch per group of emails. Not a tool contract — agents
+ * and the MCP server never see it.
+ */
+export const MAIL_RESTORE_MAILBOXES = 'mail.restore-mailboxes';
+
+export type MailRestoreMailboxesInput = {
+  readonly groups: readonly MailboxPatchGroup[];
+};
+
+function previousMailboxesOf(
+  result: unknown,
+): Readonly<Record<string, readonly string[]>> | undefined {
+  if (typeof result !== 'object' || result === null) return undefined;
+  const meta = (result as { previousMailboxesByEmail?: unknown }).previousMailboxesByEmail;
+  if (typeof meta !== 'object' || meta === null) return undefined;
+  return meta as Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * Per-email inverse of mailbox patches, given each email's memberships
+ * from BEFORE the forward action. For each mailbox the forward patch
+ * touched, an email gets back exactly what it had: re-added where the
+ * patch removed a membership it held, removed where the patch added one
+ * it lacked; mailboxes whose membership didn't change are left out, so
+ * the inverse never files an email somewhere it never was (an Inbox→
+ * Archive move of a whole thread must not drop its Sent replies into
+ * Inbox on undo).
+ *
+ * Emails with identical inverse patches are grouped. One group becomes
+ * a plain `mail.modify` (the common single-mailbox case); several
+ * become one `mail.restore-mailboxes`. Emails with no captured
+ * memberships (absent from the server's Email/get) are skipped — the
+ * forward update could not have touched them. Returns null when no
+ * email needs restoring.
+ */
+function mailboxInverse(
+  forward: readonly MailboxPatchGroup[],
+  previous: Readonly<Record<string, readonly string[]>>,
+  keywords?: Readonly<Record<string, boolean | null>>,
+): { readonly inverseAction: string; readonly inverseParams: unknown } | null {
+  const groups = new Map<string, { emailIds: string[]; mailboxIds: Record<string, boolean> }>();
+  for (const group of forward) {
+    for (const emailId of group.emailIds) {
+      const before = previous[emailId];
+      if (before === undefined) continue;
+      const had = new Set(before);
+      const inverse: Record<string, boolean> = {};
+      for (const [mailboxId, added] of Object.entries(group.mailboxIds)) {
+        if (added && !had.has(mailboxId)) inverse[mailboxId] = false;
+        if (!added && had.has(mailboxId)) inverse[mailboxId] = true;
+      }
+      if (Object.keys(inverse).length === 0) continue;
+      const key = JSON.stringify(Object.entries(inverse).sort(([a], [b]) => (a < b ? -1 : 1)));
+      const existing = groups.get(key);
+      if (existing !== undefined) existing.emailIds.push(emailId);
+      else groups.set(key, { emailIds: [emailId], mailboxIds: inverse });
+    }
+  }
+  const list = [...groups.values()];
+  if (list.length === 0) {
+    return keywords === undefined
+      ? null
+      : {
+          inverseAction: 'mail.modify',
+          inverseParams: { emailIds: forward.flatMap((g) => g.emailIds), patch: { keywords } },
+        };
+  }
+  if (list.length === 1) {
+    const only = list[0]!;
+    return {
+      inverseAction: 'mail.modify',
+      inverseParams: {
+        emailIds: only.emailIds,
+        patch: { mailboxIds: only.mailboxIds, ...(keywords !== undefined ? { keywords } : {}) },
+      },
+    };
+  }
+  // Keywords only ever ride along on single-email patches (bulk
+  // keyword patches register no inverse), and one email is one group.
+  const inverseParams: MailRestoreMailboxesInput = { groups: list };
+  return { inverseAction: MAIL_RESTORE_MAILBOXES, inverseParams };
 }
 
 function flipBooleans(m: Readonly<Record<string, boolean>>): Record<string, boolean> {

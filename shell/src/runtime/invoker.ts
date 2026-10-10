@@ -47,6 +47,7 @@ import {
   fetchMailDeleteCommit,
   fetchMailDraftCommit,
   fetchMailModifyCommit,
+  fetchMailRestoreMailboxesCommit,
   fetchMailSendCommit,
   fetchMailboxCreateCommit,
   fetchMailboxUpdateCommit,
@@ -95,6 +96,7 @@ import {
   type ThreadList,
 } from './jmap-client.js';
 import type { DryRunPreview, ToolError } from './types.js';
+import { MAIL_RESTORE_MAILBOXES, type MailRestoreMailboxesInput } from './undo-registry.js';
 import {
   labelList,
   labelCreate,
@@ -269,6 +271,24 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
     return cachedSession;
   }
 
+  // Undo metadata for a mailbox-changing write: each email's memberships
+  // BEFORE the write, as the plain record buildInverse reads. Best-effort
+  // — a failed read must not block the move itself; buildInverse then
+  // degrades (single email: flip; bulk: no undo).
+  async function capturePreviousMailboxes(
+    session: Session,
+    emailIds: readonly string[],
+  ): Promise<Record<string, readonly string[]> | undefined> {
+    try {
+      const memberships = await fetchEmailMailboxMemberships({ ...opts, session, emailIds });
+      return Object.fromEntries(memberships);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[iarsma] could not capture mailbox memberships for undo:', e);
+      return undefined;
+    }
+  }
+
   return {
     async invoke<I, O>(
       name: string,
@@ -418,12 +438,49 @@ export function jmapInvoker(opts: JmapInvokerOptions): Invoker {
             return makeMailModifyPreview(params) as unknown as O | DryRunPreview<O>;
           }
           const session = await getSession();
+          // A mailbox patch (move / restore) captures each email's
+          // memberships first so buildInverse can undo per email: a
+          // bulk selection expands threads into every message, and
+          // those rarely share one source mailbox (Inbox + Sent).
+          const touchesMailboxes =
+            params.patch.mailboxIds !== undefined &&
+            Object.keys(params.patch.mailboxIds).length > 0;
+          const previousMailboxesByEmail = touchesMailboxes
+            ? await capturePreviousMailboxes(session, params.emailIds)
+            : undefined;
           const result: MailModifyResult = await fetchMailModifyCommit({
             ...opts,
             session,
             params,
           });
-          return result as unknown as O;
+          return (
+            previousMailboxesByEmail !== undefined
+              ? { ...result, previousMailboxesByEmail }
+              : result
+          ) as unknown as O;
+        }
+        case MAIL_RESTORE_MAILBOXES: {
+          // UI-only (not a tool contract): the per-email undo of a move
+          // or delete whose emails came from different mailboxes. One
+          // Email/set with a distinct mailboxIds patch per group.
+          // Captures memberships too, so the restore is itself
+          // undoable (redo from the Activity log).
+          const params = _input as unknown as MailRestoreMailboxesInput;
+          const session = await getSession();
+          const previousMailboxesByEmail = await capturePreviousMailboxes(
+            session,
+            params.groups.flatMap((g) => g.emailIds),
+          );
+          const result: MailModifyResult = await fetchMailRestoreMailboxesCommit({
+            ...opts,
+            session,
+            groups: params.groups,
+          });
+          return (
+            previousMailboxesByEmail !== undefined
+              ? { ...result, previousMailboxesByEmail }
+              : result
+          ) as unknown as O;
         }
         case 'mail.delete': {
           // PR 19 — soft delete. mail.delete no longer issues Email/set

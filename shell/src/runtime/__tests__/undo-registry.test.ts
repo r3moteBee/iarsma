@@ -91,15 +91,17 @@ describe('UndoRegistry (in-memory)', () => {
 });
 
 describe('buildInverse', () => {
-  it('flips boolean values in a mail.modify mailboxIds patch', () => {
+  it('flips a single-email mailboxIds patch when no memberships were captured', () => {
+    // Degraded path (inner invoker didn't enrich the result): a lone
+    // email's flip is the best available inverse.
     const inv = buildInverse('mail.modify', {
-      emailIds: ['em-1', 'em-2'],
+      emailIds: ['em-1'],
       patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
     });
     expect(inv).toEqual({
       inverseAction: 'mail.modify',
       inverseParams: {
-        emailIds: ['em-1', 'em-2'],
+        emailIds: ['em-1'],
         patch: { mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
       },
     });
@@ -146,17 +148,148 @@ describe('buildInverse', () => {
     expect(inv).toBeNull();
   });
 
-  it('still builds an inverse for bulk mailbox-only patches (moves)', () => {
-    // Bulk moves stay undoable: every selected email came from the
-    // same source mailbox, so the uniform inverse is exact.
+  it('returns null for a bulk move without captured memberships', () => {
+    // The selected emails need not share a source mailbox (a thread
+    // spans Inbox + Sent); a uniform flip would file every email into
+    // every source. No undo beats a corrupting one.
     const inv = buildInverse('mail.modify', {
       emailIds: ['em-1', 'em-2'],
       patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
     });
+    expect(inv).toBeNull();
+  });
+
+  it('builds a single mail.modify for a bulk move from one shared source', () => {
+    const inv = buildInverse(
+      'mail.modify',
+      {
+        emailIds: ['em-1', 'em-2'],
+        patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+      },
+      {
+        modifiedCount: 2,
+        previousMailboxesByEmail: { 'em-1': ['Mb-inbox'], 'em-2': ['Mb-inbox'] },
+      },
+    );
+    expect(inv).toEqual({
+      inverseAction: 'mail.modify',
+      inverseParams: {
+        emailIds: ['em-1', 'em-2'],
+        patch: { mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
+      },
+    });
+  });
+
+  it("restores each email's own mailboxes when a mixed Inbox+Sent thread is moved", () => {
+    // Bulk Inbox→Archive of a thread: em-in is an Inbox message,
+    // em-sent the user's reply (Sent only). The forward patch adds
+    // Archive to both; Inbox-off is a no-op for em-sent. Undo must
+    // NOT drop the Sent reply into Inbox.
+    const inv = buildInverse(
+      'mail.modify',
+      {
+        emailIds: ['em-in', 'em-sent'],
+        patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+      },
+      {
+        modifiedCount: 2,
+        previousMailboxesByEmail: { 'em-in': ['Mb-inbox'], 'em-sent': ['Mb-sent'] },
+      },
+    );
+    expect(inv).toEqual({
+      inverseAction: 'mail.restore-mailboxes',
+      inverseParams: {
+        groups: [
+          { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
+          { emailIds: ['em-sent'], mailboxIds: { 'Mb-archive': false } },
+        ],
+      },
+    });
+  });
+
+  it('leaves untouched a membership the email already had before the move', () => {
+    // em-1 was already in Archive as well as Inbox: undo restores
+    // Inbox but must not take Archive away.
+    const inv = buildInverse(
+      'mail.modify',
+      {
+        emailIds: ['em-1'],
+        patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+      },
+      { modifiedCount: 1, previousMailboxesByEmail: { 'em-1': ['Mb-inbox', 'Mb-archive'] } },
+    );
     expect(inv?.inverseParams).toEqual({
-      emailIds: ['em-1', 'em-2'],
+      emailIds: ['em-1'],
+      patch: { mailboxIds: { 'Mb-inbox': true } },
+    });
+  });
+
+  it('keeps the keyword inverse alongside a per-email mailbox inverse', () => {
+    const inv = buildInverse(
+      'mail.modify',
+      {
+        emailIds: ['em-1'],
+        patch: { mailboxIds: { 'Mb-trash': false, 'Mb-inbox': true }, keywords: { '$seen': true } },
+      },
+      { modifiedCount: 1, previousMailboxesByEmail: { 'em-1': ['Mb-trash'] } },
+    );
+    expect(inv?.inverseParams).toEqual({
+      emailIds: ['em-1'],
+      patch: { mailboxIds: { 'Mb-trash': true, 'Mb-inbox': false }, keywords: { '$seen': null } },
+    });
+  });
+
+  it('returns null when the move changed no email\'s memberships', () => {
+    const inv = buildInverse(
+      'mail.modify',
+      {
+        emailIds: ['em-1'],
+        patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+      },
+      { modifiedCount: 1, previousMailboxesByEmail: { 'em-1': ['Mb-archive'] } },
+    );
+    expect(inv).toBeNull();
+  });
+
+  it('skips emails absent from the captured memberships', () => {
+    const inv = buildInverse(
+      'mail.modify',
+      {
+        emailIds: ['em-1', 'em-gone'],
+        patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+      },
+      { modifiedCount: 1, previousMailboxesByEmail: { 'em-1': ['Mb-inbox'] } },
+    );
+    expect(inv?.inverseParams).toEqual({
+      emailIds: ['em-1'],
       patch: { mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
     });
+  });
+
+  it('inverts mail.restore-mailboxes per email (redo from the Activity log)', () => {
+    const inv = buildInverse(
+      'mail.restore-mailboxes',
+      {
+        groups: [
+          { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
+          { emailIds: ['em-sent'], mailboxIds: { 'Mb-archive': false } },
+        ],
+      },
+      {
+        modifiedCount: 2,
+        previousMailboxesByEmail: { 'em-in': ['Mb-archive'], 'em-sent': ['Mb-sent', 'Mb-archive'] },
+      },
+    );
+    expect(inv).toEqual({
+      inverseAction: 'mail.restore-mailboxes',
+      inverseParams: {
+        groups: [
+          { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+          { emailIds: ['em-sent'], mailboxIds: { 'Mb-archive': true } },
+        ],
+      },
+    });
+    expect(buildInverse('mail.restore-mailboxes', { groups: [] }, { modifiedCount: 0 })).toBeNull();
   });
 
   it('returns null for tools without a known inverse', () => {
@@ -166,29 +299,70 @@ describe('buildInverse', () => {
   });
 
   describe('mail.delete (PR 22)', () => {
-    it('builds the restore-mailboxes inverse from previousMailboxesByEmail', () => {
+    it('builds a single mail.modify when every email shares its memberships', () => {
       const inv = buildInverse(
         'mail.delete',
         { emailIds: ['em-1', 'em-2'] },
         {
           modifiedCount: 2,
+          previousMailboxesByEmail: { 'em-1': ['Mb-inbox'], 'em-2': ['Mb-inbox'] },
+          trashMailboxId: 'Mb-trash',
+        },
+      );
+      expect(inv).toEqual({
+        inverseAction: 'mail.modify',
+        inverseParams: {
+          emailIds: ['em-1', 'em-2'],
+          patch: { mailboxIds: { 'Mb-inbox': true, 'Mb-trash': false } },
+        },
+      });
+    });
+
+    it("restores each email's own mailboxes when a mixed Inbox+Sent thread is deleted", () => {
+      // Deleting a thread trashes every message in it. Undo must put
+      // the Inbox message back in Inbox only and the Sent reply back
+      // in Sent only — not the union into both.
+      const inv = buildInverse(
+        'mail.delete',
+        { emailIds: ['em-in', 'em-sent', 'em-both'] },
+        {
+          modifiedCount: 3,
           previousMailboxesByEmail: {
-            'em-1': ['Mb-inbox'],
-            'em-2': ['Mb-inbox', 'Mb-starred'],
+            'em-in': ['Mb-inbox'],
+            'em-sent': ['Mb-sent'],
+            'em-both': ['Mb-inbox', 'Mb-starred'],
           },
           trashMailboxId: 'Mb-trash',
         },
       );
-      expect(inv?.inverseAction).toBe('mail.modify');
-      expect(inv?.inverseParams).toEqual({
-        emailIds: ['em-1', 'em-2'],
-        patch: {
-          mailboxIds: {
-            'Mb-inbox': true,
-            'Mb-starred': true,
-            'Mb-trash': false,
-          },
+      expect(inv).toEqual({
+        inverseAction: 'mail.restore-mailboxes',
+        inverseParams: {
+          groups: [
+            { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': true, 'Mb-trash': false } },
+            { emailIds: ['em-sent'], mailboxIds: { 'Mb-sent': true, 'Mb-trash': false } },
+            {
+              emailIds: ['em-both'],
+              mailboxIds: { 'Mb-inbox': true, 'Mb-starred': true, 'Mb-trash': false },
+            },
+          ],
         },
+      });
+    });
+
+    it('keeps Trash on for an email that was already in Trash', () => {
+      const inv = buildInverse(
+        'mail.delete',
+        { emailIds: ['em-1'] },
+        {
+          modifiedCount: 1,
+          previousMailboxesByEmail: { 'em-1': ['Mb-trash', 'Mb-inbox'] },
+          trashMailboxId: 'Mb-trash',
+        },
+      );
+      expect(inv?.inverseParams).toEqual({
+        emailIds: ['em-1'],
+        patch: { mailboxIds: { 'Mb-inbox': true } },
       });
     });
 

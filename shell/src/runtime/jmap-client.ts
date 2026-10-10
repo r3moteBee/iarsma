@@ -2104,13 +2104,84 @@ export function parseMailModifyResponse(body: string): MailModifyResult {
 export async function fetchMailModifyCommit(
   opts: FetchMailModifyOptions,
 ): Promise<MailModifyResult> {
+  return postEmailSetUpdate(opts, (accountId) =>
+    buildMailModifyRequest({ accountId, params: opts.params }),
+  );
+}
+
+/**
+ * One group of a per-email mailbox restore: the `mailboxIds` patch
+ * applied to exactly these emails.
+ */
+export type MailboxPatchGroup = {
+  readonly emailIds: readonly string[];
+  readonly mailboxIds: Readonly<Record<string, boolean>>;
+};
+
+/**
+ * Build ONE `Email/set` update carrying a distinct `mailboxIds` patch
+ * per group — what the per-email undo of a mixed-membership move or
+ * delete needs (`mail.restore-mailboxes`). Pure function — no I/O.
+ * Groups must be disjoint (a later group would silently overwrite an
+ * earlier one's patch for the same email) and non-empty.
+ */
+export function buildMailRestoreMailboxesRequest(opts: {
+  readonly accountId: string;
+  readonly groups: readonly MailboxPatchGroup[];
+}): string {
+  const update: Record<string, Record<string, boolean>> = {};
+  for (const group of opts.groups) {
+    const patchObj: Record<string, boolean> = {};
+    for (const [id, value] of Object.entries(group.mailboxIds)) {
+      patchObj[`mailboxIds/${id}`] = value;
+    }
+    if (Object.keys(patchObj).length === 0) {
+      throw makeError(
+        'invalid_argument',
+        'mail.restore-mailboxes: empty mailboxIds patch in a group.',
+      );
+    }
+    for (const emailId of group.emailIds) {
+      if (update[emailId] !== undefined) {
+        throw makeError(
+          'invalid_argument',
+          `mail.restore-mailboxes: email "${emailId}" appears in more than one group.`,
+        );
+      }
+      update[emailId] = { ...patchObj };
+    }
+  }
+  if (Object.keys(update).length === 0) {
+    throw makeError('invalid_argument', 'mail.restore-mailboxes: no emails to update.');
+  }
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [['Email/set', { accountId: opts.accountId, update }, '0']],
+  });
+}
+
+/** POST the grouped restore built by `buildMailRestoreMailboxesRequest`. */
+export async function fetchMailRestoreMailboxesCommit(
+  opts: JmapClientOptions & {
+    readonly session: Session;
+    readonly groups: readonly MailboxPatchGroup[];
+  },
+): Promise<MailModifyResult> {
+  return postEmailSetUpdate(opts, (accountId) =>
+    buildMailRestoreMailboxesRequest({ accountId, groups: opts.groups }),
+  );
+}
+
+async function postEmailSetUpdate(
+  opts: JmapClientOptions & { readonly session: Session },
+  buildBody: (accountId: string) => string,
+): Promise<MailModifyResult> {
   const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
   const fetchImpl = opts.fetch ?? fetch;
-  const accountId = opts.session.primaryAccountIdMail;
-  const body = buildMailModifyRequest({ accountId, params: opts.params });
+  const body = buildBody(opts.session.primaryAccountIdMail);
 
   let response: Response;
   try {
