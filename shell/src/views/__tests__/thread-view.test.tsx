@@ -20,8 +20,9 @@
  *     fallback when html is absent.
  *
  *   - External-images toggle: the "Show external images" affordance
- *     appears only when the html contains an `src=https?:` reference,
- *     and pressing it re-runs the sanitizer with allowExternalImages=true.
+ *     appears only when the sanitizer's blocked and allowed outputs
+ *     differ (remote `<img src>` or CSS `url()`), and pressing it
+ *     renders the allowExternalImages=true output.
  *
  *   - Keyboard nav: n/ArrowDown, p/ArrowUp move focus AND auto-expand
  *     the destination message; e expands all.
@@ -50,9 +51,19 @@ vi.mock('@iarsma/wasm-bindings/action-log', () => ({
 
 // Sanitizer stub: pass-through with a marker so we can assert that the
 // component routed the body through us. The real component (PR-13) is
-// covered by 26 Rust tests; here we only need to verify the wiring.
+// covered by the Rust tests; here we only need to verify the wiring.
+// With allowExternalImages=false it blanks http(s) URLs in <img src>
+// and CSS url(), standing in for the real remote-content blocking so
+// the toggle (which compares the two modes) has something to detect.
 const sanitizeMock = vi.fn(
-  (html: string, _allowExternalImages: boolean) => `[sanitized]${html}`,
+  (html: string, allowExternalImages: boolean) =>
+    `[sanitized]${
+      allowExternalImages
+        ? html
+        : html
+            .replace(/(<img\b[^>]*\bsrc=["']?)https?:[^"'\s>]*/gi, '$1')
+            .replace(/(url\(\s*["']?)https?:[^"')]*/gi, '$1')
+    }`,
 );
 vi.mock('@iarsma/wasm-bindings/html-sanitizer', () => ({
   sanitize: {
@@ -354,7 +365,43 @@ describe('ThreadView — external content toggle', () => {
     ).toBeNull();
   });
 
-  it('clicking "Show" re-runs the sanitizer with allowExternalImages=true', async () => {
+  it('shows the affordance for a remote CSS url() background', async () => {
+    renderThreadView({
+      emails: [
+        email({
+          id: 'E1',
+          bodyHtml:
+            '<div style="background: url(\'https://tracker.example/bg.gif\')">hi</div>',
+        }),
+      ],
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /show external images/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('does NOT show the toggle when src=https only appears in text', async () => {
+    // The old raw-html regex flagged this; the sanitizer leaves it
+    // untouched in both modes, so there's nothing to reveal.
+    renderThreadView({
+      emails: [
+        email({
+          id: 'E1',
+          bodyHtml: '<p>Embed it with src=https://cdn.example/x.js</p>',
+        }),
+      ],
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('message-html-body')).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('button', { name: /show external/i }),
+    ).toBeNull();
+  });
+
+  it('clicking "Show" renders the allowExternalImages=true output', async () => {
     renderThreadView({
       emails: [
         email({
@@ -368,16 +415,24 @@ describe('ThreadView — external content toggle', () => {
         screen.getByRole('button', { name: /show external images/i }),
       ).toBeInTheDocument();
     });
-    sanitizeMock.mockClear();
+    expect(sanitizeMock).toHaveBeenCalledWith(
+      '<img src="https://x.example/p.gif">',
+      true,
+    );
+    expect(screen.getByTestId('message-html-body').innerHTML).not.toContain(
+      'x.example',
+    );
     fireEvent.click(
       screen.getByRole('button', { name: /show external images/i }),
     );
     await waitFor(() => {
-      expect(sanitizeMock).toHaveBeenCalledWith(
-        '<img src="https://x.example/p.gif">',
-        true,
+      expect(screen.getByTestId('message-html-body').innerHTML).toContain(
+        'https://x.example/p.gif',
       );
     });
+    expect(
+      screen.queryByRole('button', { name: /show external images/i }),
+    ).toBeNull();
   });
 });
 
