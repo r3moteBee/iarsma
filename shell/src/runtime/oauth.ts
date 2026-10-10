@@ -431,14 +431,16 @@ async function runRefresh(
     return refreshed.accessToken;
   } catch (e) {
     if (!isOAuthError(e) || e.code !== 'refresh_rejected') throw e;
-    // A tab racing us may have rotated the token between our re-read and
-    // our POST; its rotation is what got ours rejected. Use its result.
+    // Someone wrote a newer record between our re-read and our POST: a
+    // tab racing us (where Web Locks are unavailable) whose rotation is
+    // what got ours rejected, or a fresh sign-in. It is theirs; never
+    // clear it. Use it if it is the same account.
     const raced = await storage.reloadTokens();
-    if (
-      raced !== null &&
-      raced.refreshToken !== latest.refreshToken &&
-      isFresh(raced, now())
-    ) {
+    if (raced !== null && raced.refreshToken !== latest.refreshToken) {
+      if (isDifferentAccount(latest, raced)) {
+        await runHook(deps.onAccountChanged);
+        return null;
+      }
       return raced.accessToken;
     }
     return endSession(deps, storage);

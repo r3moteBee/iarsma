@@ -559,6 +559,43 @@ describe('getAccessToken — account changed in another tab', () => {
   });
 });
 
+describe('getAccessToken — rejected while another account signed in', () => {
+  it("keeps the newer record instead of clearing it", async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('alice-refresh-token-was-revoked');
+    const backing = sharedBacking(EXPIRED);
+    const aliceTab = backing.tab();
+    const otherTab = backing.tab();
+    let open: () => void = () => {};
+    issuer.state.gate = new Promise((r) => {
+      open = r;
+    });
+    const onAccountChanged = vi.fn();
+    const onSessionEnded = vi.fn();
+    const pending = getAccessToken({
+      config: CONFIG,
+      storage: aliceTab,
+      fetch: issuer.fetch,
+      now: () => NOW,
+      onAccountChanged,
+      onSessionEnded,
+    });
+    await vi.waitFor(() => expect(issuer.state.tokenPosts).toBe(1));
+    const BOB: StoredTokens = {
+      accessToken: 'bob-at',
+      refreshToken: 'bob-rt',
+      expiresAtMs: NOW + 3_600_000,
+      subject: 'bob-sub',
+    };
+    await otherTab.saveTokens(BOB);
+    open();
+    expect(await pending).toBeNull();
+    expect(backing.disk()).toEqual(BOB);
+    expect(onAccountChanged).toHaveBeenCalledTimes(1);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+  });
+});
+
 describe('refreshAfterUnauthorized', () => {
   const VALID: StoredTokens = { ...EXPIRED, expiresAtMs: NOW + 600_000 };
 
