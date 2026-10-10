@@ -213,6 +213,17 @@
   font-size: var(--text-md);
   line-height: 1.65;
   color: var(--text-1);
+  /* Containment — second layer behind the html sanitizer. Sender HTML
+   * is injected into our own DOM, so nothing inside may paint outside
+   * this box (negative margins, transforms, any positioning that slips
+   * past the sanitizer) or stack above the app chrome. `contain:
+   * content` = layout + paint + style: layout makes this the containing
+   * block even for position:fixed, paint clips to the box. Wide
+   * newsletter tables scroll instead of being clipped. */
+  position: relative;
+  isolation: isolate;
+  contain: content;
+  overflow-x: auto;
 }
 
 .msgBody p {
