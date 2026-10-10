@@ -38,13 +38,12 @@ import { toCalendarViewEvent } from './runtime/calendar-transform.js';
 import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import { stalwartApiKeyIssuer } from './runtime/stalwart-apikey-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
+import { getAccessToken, handleCallback, signOut } from './runtime/oauth.js';
 import {
-  getAccessToken,
-  handleCallback,
-  refreshAfterUnauthorized,
-  signOut,
-  type OAuthDeps,
-} from './runtime/oauth.js';
+  clearCapabilityCache,
+  createAuthTokenAccess,
+  type AuthTokenAccess,
+} from './runtime/auth-session.js';
 import { replaceCallbackUrlWithHome, useRouter } from './hooks/use-router.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
 import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
@@ -96,22 +95,6 @@ import layoutStyles from './styles/layout.module.css';
 import mailLayoutStyles from './styles/mail-layout.module.css';
 
 /**
- * Drop every cached capability result (D-051). Runs whenever a session
- * ends — explicit sign-out, a rejected refresh token, a 401 that a forced
- * refresh could not recover — so the next account signed in on this
- * browser never sees the previous one's mailboxes or threads. (The cached
- * invoker's owner scoping is the second line of defense if this fails.)
- */
-async function clearCapabilityCache(): Promise<void> {
-  try {
-    await cacheStorage.clearAll();
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.warn('[iarsma] failed to clear capability cache:', e);
-  }
-}
-
-/**
  * Another tab signed in a different account over this tab's session. The
  * on-screen state (mailboxes, open thread, compose identity) belongs to the
  * old account; reboot the page so nothing acts on it with the new
@@ -127,42 +110,19 @@ function cacheOwner(): string | null {
   return t?.subject ?? t?.email ?? null;
 }
 
-/**
- * Token access for every shell surface (invoker, push stream, approval
- * store). `getAuthToken` refreshes expired tokens (one shared refresh per
- * tab, see oauth.ts); `onUnauthorized` forces one refresh after a 401
- * before giving up on the session. When either concludes the session is
- * over, the capability cache is dropped and the UI flips to SignedOutView.
- * Transient refresh failures keep the tokens; callers see a retryable
- * `refresh_failed` error.
- */
-function useAuthTokenAccess(config: ShellConfig): {
-  readonly getAuthToken: () => Promise<string | null>;
-  readonly onUnauthorized: () => void;
-} {
+/** Token access for this config (see runtime/auth-session.ts). */
+function useAuthTokenAccess(config: ShellConfig): AuthTokenAccess {
   const bumpAuth = useSetAtom(authVersionAtom);
-  return useMemo(() => {
-    const deps: OAuthDeps = {
-      config,
-      storage: authStorage,
-      onSessionEnded: async () => {
-        await clearCapabilityCache();
-        bumpAuth((v) => v + 1);
-      },
-      onAccountChanged: reloadForAccountChange,
-    };
-    return {
-      getAuthToken: () => getAccessToken(deps),
-      onUnauthorized: () => {
-        void refreshAfterUnauthorized(deps).catch((e: unknown) => {
-          // Token endpoint unreachable — keep the session; the next
-          // call retries the refresh.
-          // eslint-disable-next-line no-console
-          console.warn('[iarsma] refresh after 401 failed; keeping session:', e);
-        });
-      },
-    };
-  }, [config, bumpAuth]);
+  return useMemo(
+    () =>
+      createAuthTokenAccess({
+        oauth: { config, storage: authStorage },
+        cache: cacheStorage,
+        onSessionEnded: () => bumpAuth((v) => v + 1),
+        onAccountChanged: reloadForAccountChange,
+      }),
+    [config, bumpAuth],
+  );
 }
 
 type Phase =
@@ -214,7 +174,7 @@ export function App() {
               await getAccessToken({
                 config: cfg,
                 storage: authStorage,
-                onSessionEnded: clearCapabilityCache,
+                onSessionEnded: () => clearCapabilityCache(cacheStorage),
                 onAccountChanged: reloadForAccountChange,
               });
             } catch (e) {
@@ -1173,7 +1133,7 @@ function SignedInShell({
   const onSignOut = useCallback(() => {
     void (async () => {
       await signOut({ config, storage: authStorage });
-      await clearCapabilityCache();
+      await clearCapabilityCache(cacheStorage);
       bumpAuth((v) => v + 1);
     })();
   }, [config, bumpAuth]);
