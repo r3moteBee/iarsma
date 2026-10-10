@@ -163,6 +163,7 @@ fn builder(allow_external_images: bool) -> Builder<'static> {
     //   1. Strip URL-bearing attributes whose values look like script
     //      URIs (`javascript:`, `vbscript:`, etc.) even after evasion
     //      attempts (whitespace, control chars).
+    //      Links may not use the image-only `data:` / `cid:` schemes.
     //   2. When `allow_external_images` is false, strip `<img src>`
     //      that doesn't use a `cid:` or `data:` scheme.
     //   3. Filter `style` attribute values to a safe subset.
@@ -175,6 +176,15 @@ fn builder(allow_external_images: bool) -> Builder<'static> {
         ) && looks_like_script_url(value)
         {
             return None;
+        }
+
+        // (1b) `data:` / `cid:` are allowlisted for inline images only.
+        // As a link they'd open sender-authored documents (e.g. a
+        // `data:text/html` fake sign-in page) in a new tab.
+        if element == "a" && attribute == "href" {
+            if let Some("data" | "cid") = link_scheme(value).as_deref() {
+                return None;
+            }
         }
 
         // (2) External-image gate.
@@ -214,6 +224,17 @@ fn looks_like_script_url(value: &str) -> bool {
     lower.starts_with("javascript:")
         || lower.starts_with("vbscript:")
         || lower.starts_with("livescript:")
+}
+
+/// The lowercased scheme of a link target, read the way the URL parser
+/// reads it: whitespace and control characters (which it strips or
+/// ignores) removed first, so `" d\tata:..."` still reports `data`.
+fn link_scheme(value: &str) -> Option<String> {
+    let compact: String = value
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect();
+    css_url_scheme(&compact)
 }
 
 /// Filter a `style` attribute value to a safe subset.
@@ -899,6 +920,26 @@ mod tests {
         let out = sanitize("<a href=\"https://example.net/\">x</a>", false);
         assert!(out.contains("target=\"_blank\""), "got {out:?}");
         assert!(out.contains("rel=\"noopener noreferrer\""), "got {out:?}");
+    }
+
+    #[test]
+    fn strips_image_only_schemes_from_links() {
+        for href in [
+            "data:text/html,<h1>Sign in</h1>",
+            " DATA:text/html;base64,PGgxPg==",
+            "d\tata:text/html,x",
+            "cid:part1@example",
+        ] {
+            let html = format!("<a href=\"{href}\">x</a>");
+            let out = sanitize(&html, true);
+            assert!(!out.contains("href"), "{href:?} kept: {out:?}");
+        }
+        // Still fine as inline images.
+        assert_contains(
+            "<img src=\"cid:part1@example\">",
+            false,
+            "cid:part1@example",
+        );
     }
 
     #[test]
