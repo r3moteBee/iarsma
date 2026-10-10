@@ -409,3 +409,94 @@ describe('buildInverse', () => {
     });
   });
 });
+
+describe('buildInverse — forward then undo round-trips memberships', () => {
+  // Deterministic PRNG (mulberry32) so the sweep is reproducible.
+  function rng(seed: number): () => number {
+    let a = seed;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const MAILBOXES = ['Mb-inbox', 'Mb-sent', 'Mb-archive', 'Mb-starred', 'Mb-trash'];
+
+  type State = Record<string, Set<string>>;
+  type Patch = Readonly<Record<string, boolean>>;
+
+  function apply(state: State, emailIds: readonly string[], patch: Patch): void {
+    for (const id of emailIds) {
+      const s = state[id];
+      if (s === undefined) continue;
+      for (const [mb, on] of Object.entries(patch)) {
+        if (on) s.add(mb);
+        else s.delete(mb);
+      }
+    }
+  }
+  function applyInverse(state: State, inv: { inverseAction: string; inverseParams: unknown }): void {
+    if (inv.inverseAction === 'mail.modify') {
+      const p = inv.inverseParams as { emailIds: string[]; patch: { mailboxIds: Patch } };
+      apply(state, p.emailIds, p.patch.mailboxIds);
+    } else {
+      expect(inv.inverseAction).toBe('mail.restore-mailboxes');
+      const p = inv.inverseParams as { groups: Array<{ emailIds: string[]; mailboxIds: Patch }> };
+      for (const g of p.groups) apply(state, g.emailIds, g.mailboxIds);
+    }
+  }
+  function snapshot(state: State): Record<string, string[]> {
+    return Object.fromEntries(Object.entries(state).map(([k, v]) => [k, [...v].sort()]));
+  }
+
+  it('restores every email exactly across 300 random moves and deletes', () => {
+    const next = rng(42);
+    const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(next() * xs.length)]!;
+    for (let round = 0; round < 300; round++) {
+      const state: State = {};
+      const emailIds: string[] = [];
+      const n = 1 + Math.floor(next() * 5);
+      for (let i = 0; i < n; i++) {
+        const id = `em-${i}`;
+        emailIds.push(id);
+        const mbs = MAILBOXES.filter(() => next() < 0.35);
+        state[id] = new Set(mbs.length > 0 ? mbs : [pick(MAILBOXES)]);
+      }
+      const before = snapshot(state);
+      const previousMailboxesByEmail = snapshot(state);
+      const isDelete = next() < 0.5;
+      let inv: ReturnType<typeof buildInverse>;
+      if (isDelete) {
+        // Mirror invoker.ts buildSoftDeletePatch.
+        const patch: Record<string, boolean> = { 'Mb-trash': true };
+        for (const mbs of Object.values(before)) {
+          for (const mb of mbs) if (mb !== 'Mb-trash') patch[mb] = false;
+        }
+        apply(state, emailIds, patch);
+        inv = buildInverse(
+          'mail.delete',
+          { emailIds },
+          { modifiedCount: n, previousMailboxesByEmail, trashMailboxId: 'Mb-trash' },
+        );
+      } else {
+        const from = pick(MAILBOXES);
+        const to = pick(MAILBOXES.filter((m) => m !== from));
+        const patch = { [from]: false, [to]: true };
+        apply(state, emailIds, patch);
+        inv = buildInverse(
+          'mail.modify',
+          { emailIds, patch: { mailboxIds: patch } },
+          { modifiedCount: n, previousMailboxesByEmail },
+        );
+      }
+      if (inv === null) {
+        // Only when the action changed nothing.
+        expect(snapshot(state)).toEqual(before);
+        continue;
+      }
+      applyInverse(state, inv);
+      expect(snapshot(state), `round ${round} (${isDelete ? 'delete' : 'move'})`).toEqual(before);
+    }
+  });
+});
