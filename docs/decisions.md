@@ -365,7 +365,8 @@ Stale-while-revalidate matches the project ethos better than TTL: this is offlin
 - Production reads of `mailbox.list`, `thread.list`, `thread.get` now serve from cache on subsequent loads.
 - New cacheable capabilities add themselves to a `CACHEABLE_TOOLS` set in `cache-policy.ts` with their AAD purpose; non-cacheable capabilities pass through unchanged.
 - Writes (`mail.send`, future `mail.draft.create`) bypass cache. They will (in Phase 2) emit cache-invalidation events that drop affected entries.
-- On sign-out, the cache DB is cleared alongside the token store.
+- On sign-out, the cache DB is cleared alongside the token store. This includes every path that ends a session, not only the explicit button: a rejected refresh token and a 401 that a forced refresh could not recover (`onSessionEnded` in `oauth.ts`).
+- Rows are owner-scoped: the production `cachedInvoker` gets `getOwner` (the id_token subject) and stores `{ owner, value }`, served only to the same owner. Keys stay `(toolName, canonicalize(input))`, so without scoping `mailbox.list {}` is the same row for every account on the browser; scoping keeps a missed clear from showing one account's mail to the next.
 - Tests around cached invocations should construct a `mockInvoker` and a `cachedInvoker(mock, fakeStore)` to exercise the wrapper without IDB.
 
 **Out of scope (follow-ups):**
