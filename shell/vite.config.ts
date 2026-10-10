@@ -80,9 +80,9 @@ function iarsmaCsp(): Plugin {
 }
 
 // Sourcemaps: off for release builds. The source is public, so maps leak
-// nothing, but Monaco's alone add tens of MB to the zip Stalwart serves and
-// the service worker caches, and any tag's maps can be rebuilt reproducibly
-// (D-028). `IARSMA_SOURCEMAP=hidden` emits them without the
+// nothing, but they are ~47 MB (Monaco's ~35 MB) against ~16 MB of code in
+// the zip Stalwart serves and the SW caches, and any tag's maps rebuild
+// reproducibly (D-028). `IARSMA_SOURCEMAP=hidden` emits them without the
 // sourceMappingURL comment (for an error tracker / local symbolication),
 // `IARSMA_SOURCEMAP=true` restores linked maps for debugging a build.
 const rawSourcemap = process.env['IARSMA_SOURCEMAP'];

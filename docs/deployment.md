@@ -70,7 +70,7 @@ IARSMA_CSP_CONNECT_SRC="https://mail.example.com" VITE_BASE_PATH=/ pnpm --filter
 
 The policy is stripped on the Vite dev server (its React-refresh preamble is an unhashed inline script); `vite preview` serves the built HTML with the policy, so check CSP behaviour there.
 
-**Sourcemaps** are not emitted by release builds: the source is public and any tag rebuilds reproducibly (D-028), while Monaco's maps alone add tens of MB to the zip and the service-worker cache. `IARSMA_SOURCEMAP=hidden` emits maps without the `sourceMappingURL` comment (for local symbolication); `IARSMA_SOURCEMAP=true` emits linked maps.
+**Sourcemaps** are not emitted by release builds: the source is public and any tag rebuilds reproducibly (D-028), while the maps are ~47 MB (Monaco's ~35 MB) against ~16 MB of code in the zip and the service-worker cache. `IARSMA_SOURCEMAP=hidden` emits maps without the `sourceMappingURL` comment (for local symbolication); `IARSMA_SOURCEMAP=true` emits linked maps.
 
 ---
 
