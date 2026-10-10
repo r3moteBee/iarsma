@@ -475,6 +475,41 @@ describe('getAccessToken — refresh', () => {
   });
 });
 
+describe('getAccessToken — account changed in another tab', () => {
+  it('does not adopt the other account\'s tokens and leaves them intact', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const backing = sharedBacking(EXPIRED);
+    const aliceTab = backing.tab();
+    const otherTab = backing.tab();
+    const BOB: StoredTokens = {
+      accessToken: 'bob-at',
+      refreshToken: 'bob-rt',
+      expiresAtMs: NOW + 3_600_000,
+      obtainedAtMs: NOW,
+      subject: 'bob-sub',
+      email: 'bob@example.net',
+    };
+    await otherTab.saveTokens(BOB);
+    const onAccountChanged = vi.fn();
+    const onSessionEnded = vi.fn();
+    expect(
+      await getAccessToken({
+        config: CONFIG,
+        storage: aliceTab,
+        fetch: issuer.fetch,
+        now: () => NOW,
+        onAccountChanged,
+        onSessionEnded,
+      }),
+    ).toBeNull();
+    expect(onAccountChanged).toHaveBeenCalledTimes(1);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+    expect(backing.disk()).toEqual(BOB);
+    expect(issuer.state.tokenPosts).toBe(0);
+  });
+});
+
 describe('refreshAfterUnauthorized', () => {
   const VALID: StoredTokens = { ...EXPIRED, expiresAtMs: NOW + 600_000 };
 

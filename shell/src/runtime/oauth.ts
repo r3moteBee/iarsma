@@ -66,6 +66,15 @@ export type OAuthDeps = {
    * started that refresh.
    */
   readonly onSessionEnded?: () => void | Promise<void>;
+  /**
+   * Called when re-reading the shared record shows a different account than
+   * the one this tab was using (someone signed in from another tab). The
+   * tokens are left alone — they belong to the other account's live
+   * session — and the refresh resolves null. The shell reloads the page so
+   * it boots cleanly as the new account instead of acting on one account's
+   * on-screen state with the other's credentials.
+   */
+  readonly onAccountChanged?: () => void | Promise<void>;
 };
 
 type DiscoveredAs = oauth.AuthorizationServer;
@@ -364,11 +373,16 @@ async function runRefresh(
   afterUnauthorized: boolean,
 ): Promise<string | null> {
   const now = deps.now ?? Date.now;
+  const held = storage.loadTokens();
   // Another tab may have refreshed (rotating the refresh token we hold in
   // memory) or signed out since this tab hydrated. Spending a stale refresh
   // token would get `invalid_grant` and sign every tab out.
   const latest = await storage.reloadTokens();
   if (latest === null) return endSession(deps, storage);
+  if (held !== null && isDifferentAccount(held, latest)) {
+    await runHook(deps.onAccountChanged);
+    return null;
+  }
   if (afterUnauthorized) {
     const obtainedAt = latest.obtainedAtMs;
     if (
@@ -403,15 +417,25 @@ async function runRefresh(
 
 async function endSession(deps: OAuthDeps, storage: AuthStorage): Promise<null> {
   await storage.clearTokens();
-  if (deps.onSessionEnded !== undefined) {
-    try {
-      await deps.onSessionEnded();
-    } catch {
-      // The session is over either way; a failing hook must not turn the
-      // signed-out result into an error.
-    }
-  }
+  await runHook(deps.onSessionEnded);
   return null;
+}
+
+async function runHook(hook: (() => void | Promise<void>) | undefined): Promise<void> {
+  if (hook === undefined) return;
+  try {
+    await hook();
+  } catch {
+    // The outcome stands either way; a failing hook must not turn the
+    // result into an error.
+  }
+}
+
+/** Both records name an account (subject, else email) and they differ. */
+function isDifferentAccount(a: StoredTokens, b: StoredTokens): boolean {
+  const idA = a.subject ?? a.email;
+  const idB = b.subject ?? b.email;
+  return idA !== undefined && idB !== undefined && idA !== idB;
 }
 
 /**

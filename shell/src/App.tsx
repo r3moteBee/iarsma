@@ -111,6 +111,16 @@ async function clearCapabilityCache(): Promise<void> {
   }
 }
 
+/**
+ * Another tab signed in a different account over this tab's session. The
+ * on-screen state (mailboxes, open thread, compose identity) belongs to the
+ * old account; reboot the page so nothing acts on it with the new
+ * account's credentials.
+ */
+function reloadForAccountChange(): void {
+  if (typeof window !== 'undefined') window.location.reload();
+}
+
 /** Owner of cached capability rows: the stable id_token subject, else email. */
 function cacheOwner(): string | null {
   const t = authStorage.loadTokens();
@@ -139,6 +149,7 @@ function useAuthTokenAccess(config: ShellConfig): {
         await clearCapabilityCache();
         bumpAuth((v) => v + 1);
       },
+      onAccountChanged: reloadForAccountChange,
     };
     return {
       getAuthToken: () => getAccessToken(deps),
@@ -204,6 +215,7 @@ export function App() {
                 config: cfg,
                 storage: authStorage,
                 onSessionEnded: clearCapabilityCache,
+                onAccountChanged: reloadForAccountChange,
               });
             } catch (e) {
               // eslint-disable-next-line no-console
