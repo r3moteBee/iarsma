@@ -100,7 +100,7 @@ Then set `IARSMA_WEBMAIL_MCP_URL=https://mcp.example.test/mcp` in `.env` so the 
 ## What's NOT included
 
 - **No Stalwart bring-up.** This recipe assumes Stalwart is already running and reachable. See `deployment/openbrain/README.md` for a co-deploy pattern if you need a full stack on a fresh host.
-- **No persistent state.** Every request is authenticated independently against Stalwart (a JMAP session call, cached for 30s). The only server-side state is the in-memory MCP session table — one entry per `initialize`, bound to the bearer that created it, dropped on `DELETE`, after 30 minutes idle, or LRU-evicted past 1000 sessions — and it is lost on restart (clients simply re-initialize). The tokens themselves live in Stalwart, managed entirely through the webmail UI.
+- **No persistent state.** Every request is authenticated independently against Stalwart (a JMAP session call, cached for 30s). The only server-side state is the in-memory MCP session table — one entry per `initialize`, bound to the bearer that created it, dropped on `DELETE`, after 30 minutes idle, or LRU-evicted past 32 sessions per bearer or 1000 overall — and it is lost on restart (clients simply re-initialize). The tokens themselves live in Stalwart, managed entirely through the webmail UI.
 
 ## Troubleshooting
 

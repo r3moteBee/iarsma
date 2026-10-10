@@ -18,7 +18,8 @@
  * table is bounded: sessions are dropped when the transport closes
  * (client `DELETE`, server shutdown), after `sessionIdleTtlMs` without
  * traffic, and the least-recently-used session is evicted once
- * `maxSessions` is reached.
+ * `maxSessionsPerIdentity` (that identity's own LRU) or `maxSessions`
+ * (global LRU) is reached.
  *
  * The transport is enabled when `IARSMA_MCP_HTTP_PORT` is set; see
  * `loadHttpTransportConfig` for the remaining env vars. Unset → HTTP
@@ -72,6 +73,12 @@ export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 export const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60 * 1000;
 /** Default cap on concurrent MCP sessions; LRU is evicted past it. */
 export const DEFAULT_MAX_SESSIONS = 1000;
+/**
+ * Default per-identity session cap. Past it the identity's own LRU
+ * session is evicted, so one tenant can't churn everyone else's
+ * sessions out of the global table.
+ */
+export const DEFAULT_MAX_SESSIONS_PER_IDENTITY = 32;
 
 export type HttpTransportConfig = {
   /** Port to bind. Required when HTTP transport is enabled. */
@@ -118,6 +125,8 @@ export type HttpTransportConfig = {
   readonly sessionIdleTtlMs?: number;
   /** Concurrent-session cap. Default `DEFAULT_MAX_SESSIONS`. */
   readonly maxSessions?: number;
+  /** Per-identity session cap. Default `DEFAULT_MAX_SESSIONS_PER_IDENTITY`. */
+  readonly maxSessionsPerIdentity?: number;
 };
 
 /**
@@ -195,6 +204,10 @@ export async function startHttpTransport(opts: {
   const maxBodyBytes = config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const idleTtlMs = config.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS;
   const maxSessions = Math.max(1, config.maxSessions ?? DEFAULT_MAX_SESSIONS);
+  const maxPerIdentity = Math.max(
+    1,
+    config.maxSessionsPerIdentity ?? DEFAULT_MAX_SESSIONS_PER_IDENTITY,
+  );
   const corsOrigins = new Set(config.corsOrigins ?? []);
 
   // Live sessions in least-recently-used-first order: `touch` re-inserts
@@ -205,6 +218,28 @@ export async function startHttpTransport(opts: {
     session.lastSeen = Date.now();
     sessions.delete(id);
     sessions.set(id, session);
+  }
+
+  function evict(id: string, session: Session, reason: string): void {
+    sessions.delete(id);
+    // eslint-disable-next-line no-console
+    console.error(`[iarsma-mcp-http] evicting session ${id}: ${reason}`);
+    closeSession(session);
+  }
+
+  /** Make room for one more session owned by `ownerId`. */
+  function makeRoom(ownerId: string): void {
+    // The identity's own sessions first, oldest first …
+    const owned = [...sessions].filter(([, s]) => s.ownerId === ownerId);
+    while (owned.length >= maxPerIdentity) {
+      const [id, s] = owned.shift()!;
+      evict(id, s, `per-identity cap ${maxPerIdentity} reached`);
+    }
+    // … then the global LRU.
+    while (sessions.size >= maxSessions) {
+      const [id, s] = sessions.entries().next().value as [string, Session];
+      evict(id, s, `session cap ${maxSessions} reached`);
+    }
   }
 
   function closeSession(session: Session): void {
@@ -223,14 +258,8 @@ export async function startHttpTransport(opts: {
     const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (id: string) => {
-        // Make room before registering so the cap is a hard bound.
-        while (sessions.size >= maxSessions) {
-          const [lruId, lru] = sessions.entries().next().value as [string, Session];
-          sessions.delete(lruId);
-          // eslint-disable-next-line no-console
-          console.error(`[iarsma-mcp-http] session cap ${maxSessions} reached — evicting ${lruId}`);
-          closeSession(lru);
-        }
+        // Make room before registering so the caps are hard bounds.
+        makeRoom(ownerId);
         sessions.set(id, session);
         // eslint-disable-next-line no-console
         console.error(`[iarsma-mcp-http] new session: ${id} (${sessions.size} active)`);

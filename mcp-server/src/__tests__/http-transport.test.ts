@@ -363,6 +363,20 @@ describe('startHttpTransport — session lifecycle', () => {
     expect((await listTools(h, third)).status).toBe(200);
   });
 
+  it('the per-identity cap evicts the caller\'s own oldest session, not other tenants\'', async () => {
+    h = await startHarness({ maxSessionsPerIdentity: 2, maxSessions: 10 });
+    const bSession = await initialize(h, 'agent-b-token');
+    const a1 = await initialize(h, 'agent-a-token');
+    // agent-b's session is now the global LRU; agent-a churns on.
+    const a2 = await initialize(h, 'agent-a-token');
+    const a3 = await initialize(h, 'agent-a-token');
+    expect(h.sessionCount()).toBe(3);
+    expect((await listTools(h, a1)).status).toBe(404);
+    expect((await listTools(h, a2)).status).toBe(200);
+    expect((await listTools(h, a3)).status).toBe(200);
+    expect((await listTools(h, bSession, 'agent-b-token')).status).toBe(200);
+  });
+
   it('close() shuts every open session', async () => {
     h = await startHarness();
     await initialize(h);
