@@ -2,6 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Content-Security-Policy. Stalwart's Web Apps host can't add response
+      headers, so the policy rides in a <meta>; that rules out
+      frame-ancestors / report-uri / sandbox. Rationale per directive is in
+      docs/deployment.md ("Content-Security-Policy"); shell/src/__tests__/
+      csp.test.ts pins it. Editing the inline theme script below changes its
+      hash: update the 'sha256-...' source in script-src to match (the test
+      prints the expected value). Cross-origin JMAP/OIDC deploys extend
+      connect-src at build time via IARSMA_CSP_CONNECT_SRC (vite.config.ts).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-OAEdLt6d/CWOhoNkuEBiT/YvrpEQAhKzem/bFZaVBQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://api.github.com; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'"
+    />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>Iarsma</title>
