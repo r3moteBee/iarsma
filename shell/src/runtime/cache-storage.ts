@@ -17,7 +17,7 @@
  *     separated so a corrupted thread can't decrypt as a mailbox row.
  *
  * Lifecycle:
- *   - `clearAll()` is called on sign-out alongside `clearTokens()`.
+ *   - `clearAll()` is called whenever a session ends (see auth-session.ts).
  *   - The store survives tab close. Cache from a previous sign-in
  *     survives only as long as the wrap key does — `indexedDbAuthStorage`
  *     persists the key, so cache survives reload; `inMemoryAuthStorage`
