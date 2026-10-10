@@ -16,8 +16,11 @@ import { Button, Dialog, EmptyState, Notice, Skeleton } from '../components/inde
 import styles from './files-view.module.css';
 
 // Lazy import — splits the Monaco editor bundle (~3MB) into a separate chunk.
+// Goes through ./monaco/setup so the editor comes from the bundled
+// `monaco-editor` package, never the loader's default CDN (CSP: script-src
+// 'self').
 const MonacoEditor = lazy(() =>
-  import('@monaco-editor/react').then((m) => ({ default: m.Editor })),
+  import('./monaco/setup.js').then((m) => ({ default: m.Editor })),
 );
 
 // ── Types ─────────────────────────────────────────────────────────
