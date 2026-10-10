@@ -127,6 +127,7 @@ describe('indexedDbCacheStorage — IDB blocked fallback', () => {
   const fakeAuth = {
     ready: async () => {},
     loadTokens: () => null,
+    reloadTokens: async () => null,
     saveTokens: async () => {},
     clearTokens: async () => {},
     savePkce: async () => {},

@@ -39,6 +39,11 @@ import { localTokenIssuer } from './runtime/local-token-issuer.js';
 import { stalwartApiKeyIssuer } from './runtime/stalwart-apikey-issuer.js';
 import type { AgentTokenInfo } from './runtime/agent-token-issuer.js';
 import { getAccessToken, handleCallback, signOut } from './runtime/oauth.js';
+import {
+  clearCapabilityCache,
+  createAuthTokenAccess,
+  type AuthTokenAccess,
+} from './runtime/auth-session.js';
 import { replaceCallbackUrlWithHome, useRouter } from './hooks/use-router.js';
 import { themePreferenceAtom, resolveTheme } from './runtime/theme.js';
 import { accentAtom, applyAppearance, densityAtom } from './runtime/appearance.js';
@@ -89,6 +94,37 @@ import { ThreadView } from './views/thread-view.js';
 import layoutStyles from './styles/layout.module.css';
 import mailLayoutStyles from './styles/mail-layout.module.css';
 
+/**
+ * Another tab signed in a different account over this tab's session. The
+ * on-screen state (mailboxes, open thread, compose identity) belongs to the
+ * old account; reboot the page so nothing acts on it with the new
+ * account's credentials.
+ */
+function reloadForAccountChange(): void {
+  if (typeof window !== 'undefined') window.location.reload();
+}
+
+/** Owner of cached capability rows: the stable id_token subject, else email. */
+function cacheOwner(): string | null {
+  const t = authStorage.loadTokens();
+  return t?.subject ?? t?.email ?? null;
+}
+
+/** Token access for this config (see runtime/auth-session.ts). */
+function useAuthTokenAccess(config: ShellConfig): AuthTokenAccess {
+  const bumpAuth = useSetAtom(authVersionAtom);
+  return useMemo(
+    () =>
+      createAuthTokenAccess({
+        oauth: { config, storage: authStorage },
+        cache: cacheStorage,
+        onSessionEnded: () => bumpAuth((v) => v + 1),
+        onAccountChanged: reloadForAccountChange,
+      }),
+    [config, bumpAuth],
+  );
+}
+
 type Phase =
   | { kind: 'loading' }
   | { kind: 'config_error'; message: string }
@@ -124,20 +160,29 @@ export function App() {
         } else {
           // PR 44 — proactive expiry-or-refresh gate. If tokens exist
           // and the access_token is past its TTL (or about to be),
-          // `getAccessToken` either refreshes via refresh_token or
-          // clears storage. Either way, the next render sees the
+          // `getAccessToken` either refreshes via refresh_token or,
+          // when the refresh token is rejected, clears storage (and the
+          // capability cache). Either way, the next render sees the
           // truth: a usable token, or no token (→ SignedOutView)
           // instead of a stale Bearer fired at JMAP that returns 401
-          // and triggers the browser's native Basic-auth popup.
+          // and triggers the browser's native Basic-auth popup. A
+          // transient failure (offline) keeps the tokens; the shell
+          // renders and its token accessors retry the refresh.
           const stored = authStorage.loadTokens();
           if (stored !== null) {
-            const refreshed = await getAccessToken({ config: cfg, storage: authStorage });
-            if (refreshed === null) {
-              // refresh failed or no refresh token; getAccessToken
-              // already called clearTokens(). Bump so atoms pick up
-              // the now-null tokens.
-              bumpAuth((v) => v + 1);
+            try {
+              await getAccessToken({
+                config: cfg,
+                storage: authStorage,
+                onSessionEnded: () => clearCapabilityCache(cacheStorage),
+                onAccountChanged: reloadForAccountChange,
+              });
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn('[iarsma] token refresh at startup failed; will retry:', e);
             }
+            // Bump so atoms pick up refreshed or now-null tokens.
+            bumpAuth((v) => v + 1);
           }
           if (cancelled) return;
           setPhase({ kind: 'ready' });
@@ -195,7 +240,6 @@ export function App() {
 
 function ConnectedApp({ config }: { readonly config: ShellConfig }) {
   const setAgentContext = useSetAtom(agentContextAtom);
-  const bumpAuth = useSetAtom(authVersionAtom);
   // U-4 — surface a "Moved to Trash · Undo" toast the moment a UI
   // delete commits and its inverse is registered. useSetAtom returns a
   // stable setter, so referencing it in the invoker memo below doesn't
@@ -206,17 +250,8 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
   // mailboxListDataAtom imperatively so the invoker useMemo doesn't
   // gain volatile mailbox-list deps.
   const store = useStore();
-  // PR 44 — token accessor with auto-refresh. Replaces the bare
-  // `authStorage.loadTokens()?.accessToken ?? null` at every invoker /
-  // push / approval-store wiring. `getAccessToken` checks expiresAtMs
-  // (with 30s skew), refreshes via refresh_token when expired, and
-  // clears storage on refresh failure so the next render lands on
-  // SignedOutView instead of firing 401s with a stale Bearer.
-  const getAuthTokenAsync = useCallback(
-    async (): Promise<string | null> =>
-      getAccessToken({ config, storage: authStorage }),
-    [config],
-  );
+  // PR 44 — token accessor with auto-refresh (see useAuthTokenAccess).
+  const { getAuthToken: getAuthTokenAsync, onUnauthorized } = useAuthTokenAccess(config);
   const invoker = useMemo<Invoker>(
     () =>
       // Three-layer composition (outermost → innermost):
@@ -233,6 +268,7 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
             getAuthToken: getAuthTokenAsync,
           }),
           store: cacheStorage,
+          getOwner: cacheOwner,
         }),
         log: actionLog,
         undoRegistry,
@@ -241,15 +277,12 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
           if (t === null) return null;
           return { id: t.subject ?? t.email ?? 'unknown' };
         },
-        // PR 44 — flip to SignedOutView the moment a 401 surfaces.
-        // getAccessToken() already clears storage on refresh failure,
-        // so this catches the rarer case where a token is somehow
-        // still believed-valid by the local clock but Stalwart has
-        // rotated keys / revoked the session. Best-effort; storage
-        // already might be empty.
-        onUnauthorized: () => {
-          void authStorage.clearTokens().then(() => bumpAuth((v) => v + 1));
-        },
+        // PR 44 — a 401 means the server no longer accepts our access
+        // token although the local clock thinks it is valid (revoked
+        // session, rotated keys, skewed clock). Force one refresh;
+        // only if that is rejected does the session end (→ cache
+        // cleared, SignedOutView).
+        onUnauthorized,
         // U-4 — only UI deletes/moves get the act-then-undo toast; agent
         // operations are surfaced in the Activity log instead.
         onUndoRegistered: (info) => {
@@ -278,7 +311,7 @@ function ConnectedApp({ config }: { readonly config: ShellConfig }) {
           }
         },
       }),
-    [config, getAuthTokenAsync, bumpAuth, setPendingDeleteUndo, store],
+    [config, getAuthTokenAsync, onUnauthorized, setPendingDeleteUndo, store],
   );
   // Populate the agent-context atom from config so capabilities and
   // agent-facing surfaces can read it without re-walking the config.
@@ -514,15 +547,9 @@ function SignedInShell({
   const tokens = useAtomValue(tokensAtom);
   const bumpAuth = useSetAtom(authVersionAtom);
   const invoker = useInvoker();
-  // PR 44 — shared expiry-aware token accessor for the push hook and
-  // the approval store. Mirrors the one in ConnectedApp; both call
-  // getAccessToken() so a stale access_token gets refreshed via the
-  // refresh_token before the first 401 lands.
-  const getAuthTokenAsync = useCallback(
-    async (): Promise<string | null> =>
-      getAccessToken({ config, storage: authStorage }),
-    [config],
-  );
+  // PR 44 — expiry-aware token accessor for the push hook and the
+  // approval store (same shared refresh as ConnectedApp's invoker).
+  const { getAuthToken: getAuthTokenAsync } = useAuthTokenAccess(config);
   const [crudRefresh, setCrudRefresh] = useState(0);
 
   // PR 54 — organizer identity for new/edited calendar events.
@@ -1106,12 +1133,7 @@ function SignedInShell({
   const onSignOut = useCallback(() => {
     void (async () => {
       await signOut({ config, storage: authStorage });
-      try {
-        await cacheStorage.clearAll();
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[iarsma] failed to clear capability cache on sign-out:', e);
-      }
+      await clearCapabilityCache(cacheStorage);
       bumpAuth((v) => v + 1);
     })();
   }, [config, bumpAuth]);

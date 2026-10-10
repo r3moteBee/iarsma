@@ -244,7 +244,18 @@ export function usePushSubscription(opts: UsePushSubscriptionOptions): void {
     async function open(): Promise<void> {
       close();
       if (cancelled) return;
-      const token = await getAuthTokenRef.current();
+      let token: string | null;
+      try {
+        token = await getAuthTokenRef.current();
+      } catch (e) {
+        // Transient token-refresh failure (e.g. offline right after a
+        // laptop wakes). The tokens are kept; retry on the backoff schedule.
+        // eslint-disable-next-line no-console
+        console.warn('[iarsma] push-subscription: token refresh failed; will retry', e);
+        scheduleReconnect();
+        return;
+      }
+      if (cancelled) return;
       if (token === null) {
         // eslint-disable-next-line no-console
         console.warn(

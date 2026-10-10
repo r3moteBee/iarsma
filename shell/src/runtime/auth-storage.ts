@@ -42,6 +42,14 @@ export type StoredTokens = {
   readonly idToken?: string;
   /** Unix timestamp (ms) past which the access token is presumed expired. */
   readonly expiresAtMs: number;
+  /**
+   * Unix timestamp (ms) at which the access token was issued to us (sign-in
+   * or refresh). Lets the 401-recovery path tell a token minted moments ago
+   * (a 401 is then most likely from a request that carried its predecessor)
+   * from one that has genuinely been rejected. Absent on records written
+   * before it existed.
+   */
+  readonly obtainedAtMs?: number;
   /** Stable subject claim from the id_token, if available. */
   readonly subject?: string;
   /** Email claim from the id_token / userinfo, if available. */
@@ -72,6 +80,15 @@ export interface AuthStorage {
    * by `saveTokens()`.
    */
   loadTokens(): StoredTokens | null;
+
+  /**
+   * Re-read the tokens from the persistent backing into the sync cache and
+   * return them. Another tab sharing the backing may have rotated (refresh)
+   * or removed (sign-out) the record since this instance hydrated; the
+   * refresh path calls this before spending a refresh token. Implementations
+   * without a shared backing return the cached value.
+   */
+  reloadTokens(): Promise<StoredTokens | null>;
 
   saveTokens(tokens: StoredTokens): Promise<void>;
   clearTokens(): Promise<void>;
@@ -108,6 +125,7 @@ export function inMemoryAuthStorage(): AuthStorage {
   return {
     ready: async () => {},
     loadTokens: () => tokens,
+    reloadTokens: async () => tokens,
     saveTokens: async (t) => {
       tokens = t;
     },
@@ -159,16 +177,22 @@ export function sessionAuthStorage(): AuthStorage {
 
   let tokenCache: StoredTokens | null = null;
 
+  const hydrate = (): StoredTokens | null => {
+    if (ss === null) {
+      tokenCache = null;
+      return null;
+    }
+    const raw = ss.getItem(TOKENS_KEY);
+    tokenCache = raw === null ? null : safeJsonParse<StoredTokens>(raw);
+    return tokenCache;
+  };
+
   return {
     ready: async () => {
-      if (ss === null) {
-        tokenCache = null;
-        return;
-      }
-      const raw = ss.getItem(TOKENS_KEY);
-      tokenCache = raw === null ? null : safeJsonParse<StoredTokens>(raw);
+      hydrate();
     },
     loadTokens: () => tokenCache,
+    reloadTokens: async () => hydrate(),
     saveTokens: async (tokens) => {
       tokenCache = tokens;
       ss?.setItem(TOKENS_KEY, JSON.stringify(tokens));
@@ -337,6 +361,10 @@ export function indexedDbAuthStorage(
       tokenCache = await loadTokensFromDisk();
     },
     loadTokens: () => tokenCache,
+    reloadTokens: async () => {
+      tokenCache = await loadTokensFromDisk();
+      return tokenCache;
+    },
     saveTokens: async (tokens) => {
       const wk = await loadOrCreateWrapKey();
       const env = await encryptEnvelope({
