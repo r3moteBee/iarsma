@@ -238,7 +238,7 @@ jobs:
           ls -la shell/dist
           du -sh shell/dist
 
-      - name: Verify CSP + no runtime third-party code (D-060)
+      - name: Verify CSP + no runtime third-party code (D-061)
         run: |
           grep -q 'http-equiv="Content-Security-Policy"' shell/dist/index.html \
             || (echo "::error::built index.html lost its CSP <meta>"; exit 1)

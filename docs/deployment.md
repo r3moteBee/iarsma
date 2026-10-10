@@ -46,7 +46,7 @@ For non-Stalwart consumers using bare `unzip`, the equivalent of "extract into a
 
 ### Content-Security-Policy
 
-The bundle enforces a CSP from a `<meta http-equiv>` in `index.html` (Stalwart's Web Apps host can't add response headers, so a meta tag is the only option that works on Path A; a meta CSP can't express `frame-ancestors`, `report-uri` or `sandbox`). The policy is pinned by `shell/src/__tests__/csp.test.ts` (D-060):
+The bundle enforces a CSP from a `<meta http-equiv>` in `index.html` (Stalwart's Web Apps host can't add response headers, so a meta tag is the only option that works on Path A; a meta CSP can't express `frame-ancestors`, `report-uri` or `sandbox`). The policy is pinned by `shell/src/__tests__/csp.test.ts` (D-061):
 
 | Directive | Value | Why |
 |---|---|---|

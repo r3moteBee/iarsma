@@ -615,7 +615,7 @@ So this PR isn't backtracking PR 36 — it's the realization that the OAuth path
 - Per-label notification/filter rules.
 - A `parentId`-style reparent on labels.
 
-## D-060 — Meta CSP + bundled Monaco; no runtime third-party code
+## D-061 — Meta CSP + bundled Monaco; no runtime third-party code
 
 **Date:** 2026-10-10
 **Decision:** The shell ships a Content-Security-Policy as a `<meta http-equiv>` in `shell/index.html` (`default-src 'self'`; `script-src 'self' 'wasm-unsafe-eval'` + a hash for the inline theme bootstrap; full table in `docs/deployment.md`), and `<meta name="referrer" content="no-referrer">`. Monaco is loaded from the bundled `monaco-editor` package via `loader.config({ monaco })` with Vite `?worker` workers; `@monaco-editor/loader`'s jsdelivr default is blanked at build time. Release builds emit no sourcemaps.
