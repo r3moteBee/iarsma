@@ -2,9 +2,10 @@
  * Per-email undo metadata on the jmapInvoker's mailbox writes.
  *
  * A mailbox-patching mail.modify (move / restore) captures each
- * email's memberships before the write so buildInverse can undo per
- * email; mail.restore-mailboxes applies a distinct mailboxIds patch
- * per group in ONE Email/set. The mixed Inbox+Sent thread round trip
+ * email's memberships — an Email/get riding ahead of the Email/set in
+ * the same request — so buildInverse can undo per email;
+ * mail.restore-mailboxes applies a distinct mailboxIds patch per group
+ * in ONE Email/set. The mixed Inbox+Sent thread round trip
  * proves undo no longer files a Sent reply into Inbox (or vice versa).
  */
 
@@ -19,35 +20,42 @@ const SESSION_FIXTURE = readFileSync(
   'utf8',
 );
 
-function emailGetMemberships(rows: Record<string, readonly string[]>): string {
-  return JSON.stringify({
-    methodResponses: [
-      [
-        'Email/get',
-        {
-          accountId: 'c',
-          list: Object.entries(rows).map(([id, mailboxes]) => ({
-            id,
-            mailboxIds: Object.fromEntries(mailboxes.map((m) => [m, true])),
-          })),
-        },
-        '0',
-      ],
-    ],
-  });
+type MethodResponse = readonly [string, unknown, string];
+
+function emailGetMemberships(
+  rows: Record<string, readonly string[]>,
+  callId = '0',
+): MethodResponse {
+  return [
+    'Email/get',
+    {
+      accountId: 'c',
+      list: Object.entries(rows).map(([id, mailboxes]) => ({
+        id,
+        mailboxIds: Object.fromEntries(mailboxes.map((m) => [m, true])),
+      })),
+    },
+    callId,
+  ];
 }
 
-function emailSetUpdated(ids: readonly string[]): string {
-  return JSON.stringify({
-    methodResponses: [
-      ['Email/set', { accountId: 'c', updated: Object.fromEntries(ids.map((id) => [id, null])) }, '0'],
-    ],
-  });
+function emailSetUpdated(ids: readonly string[]): MethodResponse {
+  return ['Email/set', { accountId: 'c', updated: Object.fromEntries(ids.map((id) => [id, null])) }, '0'];
+}
+
+/** A JMAP response body carrying these method responses, in order. */
+function respond(...methodResponses: MethodResponse[]): string {
+  return JSON.stringify({ methodResponses });
+}
+
+/** The update, with its memberships read riding ahead in one request. */
+function capturedUpdate(rows: Record<string, readonly string[]>): string {
+  return respond(emailGetMemberships(rows, 'prev'), emailSetUpdated(Object.keys(rows)));
 }
 
 /** Fetch mock answering each JMAP API POST with the next canned body
- *  (a number = that HTTP status); the session GET is always served. */
-function makeSequencedFetch(apiBodies: ReadonlyArray<string | number>): {
+ *  the session GET is always served. */
+function makeSequencedFetch(apiBodies: readonly string[]): {
   fetch: ReturnType<typeof vi.fn<typeof fetch>>;
   calls: string[];
 } {
@@ -65,13 +73,12 @@ function makeSequencedFetch(apiBodies: ReadonlyArray<string | number>): {
     if (next === undefined) {
       throw new Error(`unexpected API call #${i}: ${body.slice(0, 200)}`);
     }
-    if (typeof next === 'number') return new Response('', { status: next, statusText: 'err' });
     return new Response(next, { status: 200, statusText: 'OK' });
   });
   return { fetch: fetchMock, calls };
 }
 
-function invokerWith(apiBodies: ReadonlyArray<string | number>) {
+function invokerWith(apiBodies: readonly string[]) {
   const { fetch: fetchMock, calls } = makeSequencedFetch(apiBodies);
   const inv = jmapInvoker({
     baseUrl: 'https://jmap.example.test',
@@ -81,13 +88,17 @@ function invokerWith(apiBodies: ReadonlyArray<string | number>) {
   return { inv, calls };
 }
 
-/** The `update` map of an Email/set request body. */
+/** The method calls of a JMAP request body. */
+function callsOf(body: string): Array<[string, Record<string, unknown>, string]> {
+  return (JSON.parse(body) as { methodCalls: Array<[string, Record<string, unknown>, string]> })
+    .methodCalls;
+}
+
+/** The `update` map of the Email/set in a request body. */
 function updateOf(body: string): Record<string, Record<string, boolean>> {
-  const parsed = JSON.parse(body) as {
-    methodCalls: [[string, { update: Record<string, Record<string, boolean>> }, string]];
-  };
-  expect(parsed.methodCalls[0][0]).toBe('Email/set');
-  return parsed.methodCalls[0][1].update;
+  const set = callsOf(body).find(([name]) => name === 'Email/set');
+  expect(set).toBeDefined();
+  return set![1].update as Record<string, Record<string, boolean>>;
 }
 
 const THREAD = { 'em-in': ['Mb-inbox'], 'em-sent': ['Mb-sent'] } as const;
@@ -97,45 +108,60 @@ const MOVE = {
 };
 
 describe('mail.modify captures memberships for mailbox patches', () => {
-  it('reads memberships before the update and returns them', async () => {
-    const { inv, calls } = invokerWith([emailGetMemberships(THREAD), emailSetUpdated(['em-in', 'em-sent'])]);
+  it('reads memberships ahead of the update in the same request and returns them', async () => {
+    const { inv, calls } = invokerWith([capturedUpdate(THREAD)]);
     const result = await inv.invoke('mail.modify', MOVE);
     expect(result).toEqual({
       modifiedCount: 2,
       previousMailboxesByEmail: { 'em-in': ['Mb-inbox'], 'em-sent': ['Mb-sent'] },
     });
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).toMatch(/Email\/get/);
-    expect(calls[1]).toMatch(/Email\/set/);
+    // One round trip: Email/get THEN Email/set, so the read sees the
+    // state immediately before the write.
+    expect(calls).toHaveLength(1);
+    expect(callsOf(calls[0]!).map(([name, args, id]) => [name, id, args.ids ?? null])).toEqual([
+      ['Email/get', 'prev', ['em-in', 'em-sent']],
+      ['Email/set', '0', null],
+    ]);
   });
 
   it('does not read memberships for a keyword-only patch', async () => {
-    const { inv, calls } = invokerWith([emailSetUpdated(['em-1'])]);
+    const { inv, calls } = invokerWith([respond(emailSetUpdated(['em-1']))]);
     const result = await inv.invoke('mail.modify', {
       emailIds: ['em-1'],
       patch: { keywords: { $seen: true } },
     });
     expect(result).toEqual({ modifiedCount: 1 });
-    expect(calls).toHaveLength(1);
+    expect(callsOf(calls[0]!).map(([name]) => name)).toEqual(['Email/set']);
   });
 
-  it('still moves when the membership read fails (no undo metadata)', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { inv, calls } = invokerWith([500, emailSetUpdated(['em-in', 'em-sent'])]);
+  it('still moves when the server fails the membership read (no undo metadata)', async () => {
+    const { inv } = invokerWith([
+      respond(['error', { type: 'serverFail' }, 'prev'], emailSetUpdated(['em-in', 'em-sent'])),
+    ]);
     const result = await inv.invoke('mail.modify', MOVE);
     expect(result).toEqual({ modifiedCount: 2 });
-    expect(calls).toHaveLength(2);
     // Without memberships a bulk move registers no undo at all.
     expect(buildInverse('mail.modify', MOVE, result)).toBeNull();
-    warn.mockRestore();
+  });
+
+  it('still surfaces a rejected update', async () => {
+    const { inv } = invokerWith([
+      respond(emailGetMemberships(THREAD, 'prev'), [
+        'Email/set',
+        { accountId: 'c', notUpdated: { 'em-in': { type: 'notFound' } } },
+        '0',
+      ]),
+    ]);
+    await expect(inv.invoke('mail.modify', MOVE)).rejects.toMatchObject({
+      code: 'jmap_set_error',
+    });
   });
 });
 
 describe('mail.restore-mailboxes', () => {
   it('applies each group its own patch in a single Email/set', async () => {
     const { inv, calls } = invokerWith([
-      emailGetMemberships({ 'em-in': ['Mb-archive'], 'em-sent': ['Mb-sent', 'Mb-archive'] }),
-      emailSetUpdated(['em-in', 'em-sent']),
+      capturedUpdate({ 'em-in': ['Mb-archive'], 'em-sent': ['Mb-sent', 'Mb-archive'] }),
     ]);
     const result = await inv.invoke('mail.restore-mailboxes', {
       groups: [
@@ -147,8 +173,8 @@ describe('mail.restore-mailboxes', () => {
       modifiedCount: 2,
       previousMailboxesByEmail: { 'em-in': ['Mb-archive'], 'em-sent': ['Mb-sent', 'Mb-archive'] },
     });
-    expect(calls).toHaveLength(2);
-    expect(updateOf(calls[1]!)).toEqual({
+    expect(calls).toHaveLength(1);
+    expect(updateOf(calls[0]!)).toEqual({
       'em-in': { 'mailboxIds/Mb-inbox': true, 'mailboxIds/Mb-archive': false },
       'em-sent': { 'mailboxIds/Mb-archive': false },
     });
@@ -170,8 +196,8 @@ describe('mail.restore-mailboxes', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('rejects an email listed in two groups', async () => {
-    const { inv } = invokerWith([emailGetMemberships({ 'em-1': ['Mb-a'] })]);
+  it('rejects an email listed in two groups without sending anything', async () => {
+    const { inv, calls } = invokerWith([]);
     await expect(
       inv.invoke('mail.restore-mailboxes', {
         groups: [
@@ -180,21 +206,20 @@ describe('mail.restore-mailboxes', () => {
         ],
       }),
     ).rejects.toMatchObject({ code: 'invalid_argument' });
+    expect(calls).toHaveLength(0);
   });
 });
 
 describe('mixed Inbox+Sent thread: undo restores each email exactly', () => {
   it('move Inbox→Archive, then undo', async () => {
     const { inv, calls } = invokerWith([
-      emailGetMemberships(THREAD),
-      emailSetUpdated(['em-in', 'em-sent']),
-      emailGetMemberships({ 'em-in': ['Mb-archive'], 'em-sent': ['Mb-sent', 'Mb-archive'] }),
-      emailSetUpdated(['em-in', 'em-sent']),
+      capturedUpdate(THREAD),
+      capturedUpdate({ 'em-in': ['Mb-archive'], 'em-sent': ['Mb-sent', 'Mb-archive'] }),
     ]);
     const result = await inv.invoke('mail.modify', MOVE);
     const undo = buildInverse('mail.modify', MOVE, result)!;
     await inv.invoke(undo.inverseAction, undo.inverseParams);
-    expect(updateOf(calls[3]!)).toEqual({
+    expect(updateOf(calls[1]!)).toEqual({
       // Inbox mail back to Inbox, out of Archive …
       'em-in': { 'mailboxIds/Mb-inbox': true, 'mailboxIds/Mb-archive': false },
       // … the Sent reply only loses Archive — never lands in Inbox.
@@ -203,55 +228,51 @@ describe('mixed Inbox+Sent thread: undo restores each email exactly', () => {
   });
 
   it('delete (soft, to Trash), then undo', async () => {
-    const mailboxGet = JSON.stringify({
-      methodResponses: [
-        [
-          'Mailbox/get',
-          {
-            accountId: 'c',
-            list: [
-              {
-                id: 'Mb-trash',
-                name: 'Trash',
-                role: 'trash',
-                sortOrder: 0,
-                totalEmails: 0,
-                unreadEmails: 0,
-                totalThreads: 0,
-                unreadThreads: 0,
-                isSubscribed: true,
-                myRights: {
-                  mayReadItems: true,
-                  mayAddItems: true,
-                  mayRemoveItems: true,
-                  maySetSeen: true,
-                  maySetKeywords: true,
-                  mayCreateChild: false,
-                  mayRename: false,
-                  mayDelete: false,
-                  maySubmit: false,
-                },
-              },
-            ],
-          },
-          '0',
-        ],
-      ],
-    });
     const { inv, calls } = invokerWith([
-      mailboxGet,
-      emailGetMemberships(THREAD),
-      emailSetUpdated(['em-in', 'em-sent']),
-      emailGetMemberships({ 'em-in': ['Mb-trash'], 'em-sent': ['Mb-trash'] }),
-      emailSetUpdated(['em-in', 'em-sent']),
+      MAILBOX_GET_TRASH,
+      respond(emailGetMemberships(THREAD)),
+      respond(emailSetUpdated(['em-in', 'em-sent'])),
+      capturedUpdate({ 'em-in': ['Mb-trash'], 'em-sent': ['Mb-trash'] }),
     ]);
     const params = { emailIds: ['em-in', 'em-sent'] };
     const result = await inv.invoke('mail.delete', params);
     const undo = buildInverse('mail.delete', params, result)!;
     await inv.invoke(undo.inverseAction, undo.inverseParams);
-    expect(updateOf(calls[4]!)).toEqual({
+    expect(updateOf(calls[3]!)).toEqual({
       'em-in': { 'mailboxIds/Mb-inbox': true, 'mailboxIds/Mb-trash': false },
       'em-sent': { 'mailboxIds/Mb-sent': true, 'mailboxIds/Mb-trash': false },
     });
   });
 });
+
+const MAILBOX_GET_TRASH = respond([
+  'Mailbox/get',
+  {
+    accountId: 'c',
+    list: [
+      {
+        id: 'Mb-trash',
+        name: 'Trash',
+        role: 'trash',
+        sortOrder: 0,
+        totalEmails: 0,
+        unreadEmails: 0,
+        totalThreads: 0,
+        unreadThreads: 0,
+        isSubscribed: true,
+        myRights: {
+          mayReadItems: true,
+          mayAddItems: true,
+          mayRemoveItems: true,
+          maySetSeen: true,
+          maySetKeywords: true,
+          mayCreateChild: false,
+          mayRename: false,
+          mayDelete: false,
+          maySubmit: false,
+        },
+      },
+    ],
+  },
+  '0',
+]);

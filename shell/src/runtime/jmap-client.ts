@@ -307,7 +307,13 @@ export async function fetchEmailMailboxMemberships(
       'Email/get memberships: malformed methodResponse entry.',
     );
   }
-  const result = first[1] as { list?: unknown };
+  return membershipsFromEmailGet(first[1]);
+}
+
+/** Map<emailId, mailboxIds[]> from an `Email/get` (mailboxIds-only)
+ *  response's arguments. Malformed rows are skipped. */
+function membershipsFromEmailGet(args: unknown): Map<string, readonly string[]> {
+  const result = (args ?? {}) as { list?: unknown };
   const items = Array.isArray(result.list) ? result.list : [];
   const out = new Map<string, readonly string[]>();
   for (const row of items) {
@@ -1985,6 +1991,15 @@ export type MailModifyResult = { readonly modifiedCount: number };
 export type FetchMailModifyOptions = JmapClientOptions & {
   readonly session: Session;
   readonly params: MailModifyInput;
+  /** Also read each email's mailboxIds — in the SAME request, ahead of
+   *  the update — for the undo registry's per-email inverse. */
+  readonly captureMemberships?: boolean;
+};
+
+/** A mailbox write's result, plus — when requested and the server
+ *  answered the read — each email's memberships from just before it. */
+export type MailModifyCommitResult = MailModifyResult & {
+  readonly previousMailboxesByEmail?: Readonly<Record<string, readonly string[]>>;
 };
 
 /**
@@ -2103,9 +2118,11 @@ export function parseMailModifyResponse(body: string): MailModifyResult {
  */
 export async function fetchMailModifyCommit(
   opts: FetchMailModifyOptions,
-): Promise<MailModifyResult> {
-  return postEmailSetUpdate(opts, (accountId) =>
-    buildMailModifyRequest({ accountId, params: opts.params }),
+): Promise<MailModifyCommitResult> {
+  return postEmailSetUpdate(
+    opts,
+    (accountId) => buildMailModifyRequest({ accountId, params: opts.params }),
+    opts.captureMemberships === true ? opts.params.emailIds : undefined,
   );
 }
 
@@ -2160,28 +2177,54 @@ export function buildMailRestoreMailboxesRequest(opts: {
   });
 }
 
-/** POST the grouped restore built by `buildMailRestoreMailboxesRequest`. */
+/** POST the grouped restore built by `buildMailRestoreMailboxesRequest`,
+ *  capturing the memberships it overwrites (the restore is itself
+ *  undoable). */
 export async function fetchMailRestoreMailboxesCommit(
   opts: JmapClientOptions & {
     readonly session: Session;
     readonly groups: readonly MailboxPatchGroup[];
   },
-): Promise<MailModifyResult> {
-  return postEmailSetUpdate(opts, (accountId) =>
-    buildMailRestoreMailboxesRequest({ accountId, groups: opts.groups }),
+): Promise<MailModifyCommitResult> {
+  return postEmailSetUpdate(
+    opts,
+    (accountId) => buildMailRestoreMailboxesRequest({ accountId, groups: opts.groups }),
+    opts.groups.flatMap((g) => g.emailIds),
   );
 }
 
+/** Call id of the memberships read riding ahead of an Email/set update. */
+const PREVIOUS_MEMBERSHIPS_CALL_ID = 'prev';
+
+/**
+ * POST an `Email/set` update. With `captureIds`, an `Email/get` of
+ * those emails' mailboxIds is prepended to the same request: JMAP runs
+ * method calls in order, so it sees the state immediately before the
+ * update — no extra round trip, no window for a concurrent change. The
+ * read is best-effort: if the server fails it, the update still stands
+ * and the result simply carries no memberships.
+ */
 async function postEmailSetUpdate(
   opts: JmapClientOptions & { readonly session: Session },
   buildBody: (accountId: string) => string,
-): Promise<MailModifyResult> {
+  captureIds?: readonly string[],
+): Promise<MailModifyCommitResult> {
   const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
   const fetchImpl = opts.fetch ?? fetch;
-  const body = buildBody(opts.session.primaryAccountIdMail);
+  const accountId = opts.session.primaryAccountIdMail;
+  let body = buildBody(accountId);
+  if (captureIds !== undefined) {
+    const request = JSON.parse(body) as { methodCalls: unknown[] };
+    request.methodCalls.unshift([
+      'Email/get',
+      { accountId, ids: captureIds, properties: ['mailboxIds'] },
+      PREVIOUS_MEMBERSHIPS_CALL_ID,
+    ]);
+    body = JSON.stringify(request);
+  }
 
   let response: Response;
   try {
@@ -2204,7 +2247,35 @@ async function postEmailSetUpdate(
     );
   }
   const text = await response.text();
-  return parseMailModifyResponse(text);
+  if (captureIds === undefined) return parseMailModifyResponse(text);
+  return parseCapturedUpdateResponse(text);
+}
+
+/** Split a capture-prefixed response: memberships from the leading
+ *  Email/get (when it succeeded), the update result from the rest. */
+function parseCapturedUpdateResponse(text: string): MailModifyCommitResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/set update response: ${describe(e)}`,
+    );
+  }
+  const responses = (parsed as { methodResponses?: unknown } | null)?.methodResponses;
+  if (!Array.isArray(responses)) return parseMailModifyResponse(text);
+  const isCapture = (r: unknown): boolean =>
+    Array.isArray(r) && r[2] === PREVIOUS_MEMBERSHIPS_CALL_ID;
+  const capture = responses.find(isCapture) as unknown[] | undefined;
+  const result = parseMailModifyResponse(
+    JSON.stringify({ methodResponses: responses.filter((r) => !isCapture(r)) }),
+  );
+  if (capture === undefined || capture[0] !== 'Email/get') return result;
+  return {
+    ...result,
+    previousMailboxesByEmail: Object.fromEntries(membershipsFromEmailGet(capture[1])),
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────
