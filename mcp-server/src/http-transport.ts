@@ -69,8 +69,13 @@ export function readApproval(approvalId: string, filePath?: string): ApprovalSta
 
 /** Default request-body cap (1 MiB). Larger bodies get a 413. */
 export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
-/** Default idle lifetime of an MCP session (30 min without traffic). */
-export const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60 * 1000;
+/**
+ * Default idle lifetime of an MCP session (24 h without traffic). The
+ * caps below already bound memory; the TTL only reclaims sessions that
+ * clients abandoned without a DELETE, so it is generous to avoid
+ * surprising long-lived agents with a `Session not found`.
+ */
+export const DEFAULT_SESSION_IDLE_TTL_MS = 24 * 60 * 60 * 1000;
 /** Default cap on concurrent MCP sessions; LRU is evicted past it. */
 export const DEFAULT_MAX_SESSIONS = 1000;
 /**
@@ -181,6 +186,8 @@ type Session = {
   /** Identity that initialized the session; later requests must match. */
   readonly ownerId: string;
   lastSeen: number;
+  /** Requests (incl. open SSE streams) currently being served. */
+  inFlight: number;
 };
 
 /** Identity id used for requests authenticated by the legacy shared secret. */
@@ -265,7 +272,7 @@ export async function startHttpTransport(opts: {
         console.error(`[iarsma-mcp-http] new session: ${id} (${sessions.size} active)`);
       },
     });
-    const session: Session = { transport, server, ownerId, lastSeen: Date.now() };
+    const session: Session = { transport, server, ownerId, lastSeen: Date.now(), inFlight: 0 };
     transport.onerror = (err: Error) => {
       // eslint-disable-next-line no-console
       console.error('[iarsma-mcp-http] transport error:', err.message);
@@ -289,6 +296,8 @@ export async function startHttpTransport(opts: {
     for (const [id, session] of sessions) {
       // LRU order: the first non-expired session ends the sweep.
       if (session.lastSeen > cutoff) break;
+      // A long tool call or an open SSE stream is not idleness.
+      if (session.inFlight > 0) continue;
       sessions.delete(id);
       // eslint-disable-next-line no-console
       console.error(`[iarsma-mcp-http] idle session expired: ${id}`);
@@ -341,6 +350,12 @@ export async function startHttpTransport(opts: {
       (req as unknown as Record<string, unknown>).auth = identity;
     }
 
+    session.inFlight++;
+    res.once('close', () => {
+      session.inFlight--;
+      const id = session.transport.sessionId;
+      if (id !== undefined && sessions.get(id) === session) touch(id, session);
+    });
     try {
       await session.transport.handleRequest(req, res, body);
     } finally {

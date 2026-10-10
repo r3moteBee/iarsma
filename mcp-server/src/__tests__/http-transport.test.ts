@@ -350,6 +350,28 @@ describe('startHttpTransport — session lifecycle', () => {
     expect((await listTools(h, id)).status).toBe(404);
   });
 
+  it('the idle sweep spares a session with an open SSE stream', async () => {
+    h = await startHarness({ sessionIdleTtlMs: 40 });
+    const id = await initialize(h);
+    const abort = new AbortController();
+    const stream = await fetch(`${h.baseUrl}/mcp`, {
+      headers: {
+        accept: 'text/event-stream',
+        authorization: 'Bearer agent-a-token',
+        'mcp-session-id': id,
+        'mcp-protocol-version': '2025-03-26',
+      },
+      signal: abort.signal,
+    });
+    expect(stream.status).toBe(200);
+    // Several sweep intervals pass while the stream stays open.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.sessionCount()).toBe(1);
+    abort.abort();
+    // Once the stream closes, the session idles out normally.
+    await vi.waitFor(() => expect(h!.sessionCount()).toBe(0), { timeout: 2_000, interval: 20 });
+  });
+
   it('maxSessions evicts the least-recently-used session', async () => {
     h = await startHarness({ maxSessions: 2 });
     const first = await initialize(h);
