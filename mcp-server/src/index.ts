@@ -34,6 +34,7 @@ import { createThreadSearchHandler } from './handlers/thread-search.js';
 import {
   loadHttpTransportConfig,
   startHttpTransport,
+  type HttpTransportConfig,
 } from './http-transport.js';
 import type { ToolHandler } from './invocation.js';
 import { createIarsmaMcpServer } from './server.js';
@@ -166,6 +167,9 @@ async function main(): Promise<void> {
     //   3. **tokens.json** (legacy single-host): `IARSMA_TOKENS_FILE`.
     //   4. None: only the static `IARSMA_MCP_HTTP_TOKEN` verifier.
     let tokenStore: TokenStore | undefined;
+    // Legacy `/agents/*` management routes exist only for the file
+    // store; every other mode leaves them unwired (404).
+    let agentManagement: HttpTransportConfig['agentManagement'];
     let tokenStoreLabel = '<none — legacy IARSMA_MCP_HTTP_TOKEN only>';
     const adminToken = process.env['IARSMA_INTROSPECTION_ADMIN_TOKEN']?.trim();
     const introspectionIssuer =
@@ -188,6 +192,10 @@ async function main(): Promise<void> {
         const fileStore = fileTokenStore(tokensFile);
         tokenStore = fileStore;
         tokenStoreLabel = `file-store ${tokensFile}`;
+        // No JMAP base URL reaches this branch (setting one selects the
+        // session store above), so management answers 503 until the
+        // precedence changes — callers can't be authenticated without it.
+        agentManagement = {};
         process.on('SIGHUP', () => {
           // eslint-disable-next-line no-console
           console.error('[iarsma-mcp] SIGHUP received — reloading token store');
@@ -202,7 +210,11 @@ async function main(): Promise<void> {
       ...(agentContext !== null ? { agentContext } : {}),
     });
     const { port } = await startHttpTransport({
-      config: { ...httpConfig, tokenStore },
+      config: {
+        ...httpConfig,
+        tokenStore,
+        ...(agentManagement !== undefined ? { agentManagement } : {}),
+      },
       mcpServer: makeServer(),
       createServer: makeServer,
     });
