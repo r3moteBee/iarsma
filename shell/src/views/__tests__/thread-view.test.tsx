@@ -294,6 +294,35 @@ describe('ThreadView — body rendering', () => {
     expect(screen.getByText('older preview')).toBeInTheDocument();
   });
 
+  it('only sanitizes html bodies of expanded messages', async () => {
+    renderThreadView({
+      emails: [
+        email({
+          id: 'E1',
+          bodyHtml: '<p>older html</p>',
+          receivedAt: '2026-05-01T00:00:00Z',
+        }),
+        email({
+          id: 'E2',
+          bodyHtml: '<p>newer html</p>',
+          receivedAt: '2026-05-09T00:00:00Z',
+        }),
+      ],
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('message-html-body')).toBeInTheDocument();
+    });
+    const sanitizedBodies = sanitizeMock.mock.calls.map(([html]) => html);
+    expect(sanitizedBodies).toContain('<p>newer html</p>');
+    expect(sanitizedBodies).not.toContain('<p>older html</p>');
+    fireEvent.click(
+      document.querySelector('button[aria-controls="message-body-E1"]')!,
+    );
+    await waitFor(() => {
+      expect(sanitizeMock).toHaveBeenCalledWith('<p>older html</p>', false);
+    });
+  });
+
   it('clicking a collapsed message header expands it', async () => {
     renderThreadView({
       emails: [
