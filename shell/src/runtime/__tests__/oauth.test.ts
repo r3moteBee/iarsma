@@ -3,19 +3,24 @@
  *
  * The third-party `oauth4webapi` is itself well-tested upstream — these
  * tests pin the wrapper behavior we own: discovery caching, redirect URL
- * composition, PKCE persistence, callback error paths, and sign-out.
+ * composition, PKCE persistence, callback error paths, sign-out, and the
+ * refresh lifecycle (shared in-flight refresh, cross-tab rotation, and
+ * which token-endpoint failures end the session).
  * The full happy-path token-exchange is verified manually against the
  * reference Stalwart per docs/stalwart-setup.md (an automated end-to-end
  * needs a signed-id-token fixture and is deferred to Phase 1).
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { inMemoryAuthStorage } from '../auth-storage.js';
+import { inMemoryAuthStorage, type AuthStorage, type StoredTokens } from '../auth-storage.js';
 import {
   _resetDiscoveryCacheForTests,
+  getAccessToken,
   handleCallback,
+  refreshAfterUnauthorized,
   signOut,
   startSignIn,
+  type RefreshLock,
 } from '../oauth.js';
 
 const STALWART_DISCOVERY = {
@@ -188,5 +193,489 @@ describe('signOut', () => {
     await signOut({ config: CONFIG, storage });
     expect(storage.loadTokens()).toBeNull();
     expect(await storage.takePkce('s1')).toBeNull();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// Refresh lifecycle
+// ───────────────────────────────────────────────────────────────────────
+
+const NOW = 1_700_000_000_000;
+
+/**
+ * Fake issuer: serves discovery and a token endpoint that implements
+ * refresh-token rotation (each refresh token is single-use). `mode` lets a
+ * test make the endpoint unreachable or failing.
+ */
+function fakeIssuer(initialRefreshToken: string) {
+  const state = {
+    validRefreshToken: initialRefreshToken,
+    tokenPosts: 0,
+    issued: 0,
+    mode: 'ok' as 'ok' | 'network-error' | 'server-error' | 'hang',
+    /** Resolves pending token responses; null = respond immediately. */
+    gate: null as Promise<void> | null,
+  };
+  const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.endsWith('/.well-known/openid-configuration')) {
+      return new Response(JSON.stringify(STALWART_DISCOVERY), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (u === STALWART_DISCOVERY.token_endpoint) {
+      state.tokenPosts += 1;
+      if (state.gate !== null) await state.gate;
+      if (state.mode === 'network-error') throw new TypeError('Failed to fetch');
+      if (state.mode === 'hang') {
+        // Never answers; only the request's abort signal ends it.
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        });
+      }
+      if (state.mode === 'server-error') {
+        return new Response('<html>bad gateway</html>', { status: 502 });
+      }
+      const body = new URLSearchParams(String(init?.body ?? ''));
+      if (body.get('refresh_token') !== state.validRefreshToken) {
+        return new Response(JSON.stringify({ error: 'invalid_grant' }), {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      state.issued += 1;
+      state.validRefreshToken = `rt-${state.issued}`;
+      return new Response(
+        JSON.stringify({
+          access_token: `at-${state.issued}`,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          refresh_token: state.validRefreshToken,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response('not-found', { status: 404 });
+  }) as unknown as typeof fetch;
+  return { state, fetch: fetchImpl };
+}
+
+/**
+ * Two "tabs" over one persistent backing: each tab has its own in-memory
+ * token cache (like `indexedDbAuthStorage`), refreshed from the shared
+ * record only by `ready()` / `reloadTokens()`.
+ */
+function sharedBacking(initial: StoredTokens | null): {
+  tab: () => AuthStorage;
+  disk: () => StoredTokens | null;
+} {
+  let disk = initial;
+  return {
+    disk: () => disk,
+    tab: () => {
+      const base = inMemoryAuthStorage();
+      let cache: StoredTokens | null = disk;
+      return {
+        ...base,
+        ready: async () => {
+          cache = disk;
+        },
+        loadTokens: () => cache,
+        reloadTokens: async () => {
+          cache = disk;
+          return cache;
+        },
+        saveTokens: async (t) => {
+          disk = t;
+          cache = t;
+        },
+        clearTokens: async () => {
+          disk = null;
+          cache = null;
+        },
+      };
+    },
+  };
+}
+
+const EXPIRED: StoredTokens = {
+  accessToken: 'at-0',
+  refreshToken: 'rt-0',
+  expiresAtMs: NOW - 1_000,
+  obtainedAtMs: NOW - 3_600_000,
+  subject: 'alice-sub',
+  email: 'alice@example.net',
+};
+
+describe('getAccessToken — refresh', () => {
+  it('returns an unexpired token without contacting the token endpoint', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens({ ...EXPIRED, expiresAtMs: NOW + 600_000 });
+    const token = await getAccessToken({ config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW });
+    expect(token).toBe('at-0');
+    expect(issuer.state.tokenPosts).toBe(0);
+  });
+
+  it('concurrent callers share one refresh: one token POST, one result', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(EXPIRED);
+    const deps = { config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW };
+    const results = await Promise.all([
+      getAccessToken(deps),
+      getAccessToken(deps),
+      getAccessToken(deps),
+      getAccessToken(deps),
+    ]);
+    expect(results).toEqual(['at-1', 'at-1', 'at-1', 'at-1']);
+    expect(issuer.state.tokenPosts).toBe(1);
+    expect(storage.loadTokens()).toMatchObject({
+      accessToken: 'at-1',
+      refreshToken: 'rt-1',
+      expiresAtMs: NOW + 3_600_000,
+      obtainedAtMs: NOW,
+      subject: 'alice-sub',
+      email: 'alice@example.net',
+    });
+  });
+
+  it('a network error keeps the tokens and rejects with a retryable error', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    issuer.state.mode = 'network-error';
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(EXPIRED);
+    const onSessionEnded = vi.fn();
+    const deps = { config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW, onSessionEnded };
+    await expect(getAccessToken(deps)).rejects.toMatchObject({ code: 'refresh_failed' });
+    expect(storage.loadTokens()).toEqual(EXPIRED);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+    // Back online: the next call retries and succeeds.
+    issuer.state.mode = 'ok';
+    expect(await getAccessToken(deps)).toBe('at-1');
+  });
+
+  it('a 5xx from the token endpoint keeps the tokens', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    issuer.state.mode = 'server-error';
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(EXPIRED);
+    await expect(
+      getAccessToken({ config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW }),
+    ).rejects.toMatchObject({ code: 'refresh_failed' });
+    expect(storage.loadTokens()).toEqual(EXPIRED);
+  });
+
+  it('invalid_grant clears the tokens and ends the session once', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('some-other-token');
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(EXPIRED);
+    const onSessionEnded = vi.fn();
+    const deps = { config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW, onSessionEnded };
+    const results = await Promise.all([getAccessToken(deps), getAccessToken(deps)]);
+    expect(results).toEqual([null, null]);
+    expect(storage.loadTokens()).toBeNull();
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(issuer.state.tokenPosts).toBe(1);
+  });
+
+  it('an expired token without a refresh token ends the session', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const storage = inMemoryAuthStorage();
+    const { refreshToken: _omit, ...noRefresh } = EXPIRED;
+    await storage.saveTokens(noRefresh);
+    const onSessionEnded = vi.fn();
+    expect(
+      await getAccessToken({ config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW, onSessionEnded }),
+    ).toBeNull();
+    expect(storage.loadTokens()).toBeNull();
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(issuer.state.tokenPosts).toBe(0);
+  });
+
+  it("picks up a second tab's rotated token instead of spending a stale refresh token", async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const backing = sharedBacking(EXPIRED);
+    const tabA = backing.tab();
+    const tabB = backing.tab();
+    // Both tabs hydrated the same (now expired) record; tab A refreshes
+    // first, rotating rt-0 → rt-1.
+    expect(
+      await getAccessToken({ config: CONFIG, storage: tabA, fetch: issuer.fetch, now: () => NOW }),
+    ).toBe('at-1');
+    // Tab B still holds rt-0 in memory. Spending it would be invalid_grant.
+    expect(tabB.loadTokens()?.refreshToken).toBe('rt-0');
+    const onSessionEnded = vi.fn();
+    expect(
+      await getAccessToken({
+        config: CONFIG,
+        storage: tabB,
+        fetch: issuer.fetch,
+        now: () => NOW,
+        onSessionEnded,
+      }),
+    ).toBe('at-1');
+    expect(issuer.state.tokenPosts).toBe(1);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+    expect(backing.disk()?.refreshToken).toBe('rt-1');
+  });
+
+  it("uses a racing tab's rotation when our own refresh was rejected because of it", async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const backing = sharedBacking(EXPIRED);
+    const tabA = backing.tab();
+    const tabB = backing.tab();
+    // Hold both POSTs at the token endpoint so both tabs read rt-0 first.
+    let open: () => void = () => {};
+    issuer.state.gate = new Promise((r) => {
+      open = r;
+    });
+    const onSessionEnded = vi.fn();
+    const a = getAccessToken({ config: CONFIG, storage: tabA, fetch: issuer.fetch, now: () => NOW });
+    const b = getAccessToken({
+      config: CONFIG,
+      storage: tabB,
+      fetch: issuer.fetch,
+      now: () => NOW,
+      onSessionEnded,
+    });
+    await vi.waitFor(() => expect(issuer.state.tokenPosts).toBe(2));
+    open();
+    // One tab wins the rotation; the loser is rejected, then adopts the
+    // winner's token instead of signing everyone out.
+    const [ta, tb] = await Promise.all([a, b]);
+    expect(ta).toBe('at-1');
+    expect(tb).toBe('at-1');
+    expect(onSessionEnded).not.toHaveBeenCalled();
+    expect(backing.disk()?.refreshToken).toBe('rt-1');
+  });
+
+  it('a hung token request times out without stalling the shared refresh', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    issuer.state.mode = 'hang';
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(EXPIRED);
+    const deps = {
+      config: CONFIG,
+      storage,
+      fetch: issuer.fetch,
+      now: () => NOW,
+      refreshTimeoutMs: 20,
+    };
+    await expect(Promise.all([getAccessToken(deps), getAccessToken(deps)])).rejects.toMatchObject({
+      code: 'refresh_failed',
+    });
+    expect(storage.loadTokens()).toEqual(EXPIRED);
+    // The next call starts a fresh attempt rather than joining the dead one.
+    issuer.state.mode = 'ok';
+    expect(await getAccessToken(deps)).toBe('at-1');
+  });
+
+  it('with the cross-tab lock, two tabs refreshing at once spend the refresh token once', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const backing = sharedBacking(EXPIRED);
+    // Minimal stand-in for navigator.locks: FIFO mutual exclusion.
+    let tail: Promise<unknown> = Promise.resolve();
+    const refreshLock: RefreshLock = (fn) => {
+      const run = tail.then(fn, fn);
+      tail = run.catch(() => {});
+      return run;
+    };
+    const deps = { config: CONFIG, fetch: issuer.fetch, now: () => NOW, refreshLock };
+    const results = await Promise.all([
+      getAccessToken({ ...deps, storage: backing.tab() }),
+      getAccessToken({ ...deps, storage: backing.tab() }),
+    ]);
+    expect(results).toEqual(['at-1', 'at-1']);
+    expect(issuer.state.tokenPosts).toBe(1);
+  });
+
+  it('ends the session when another tab signed out', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const backing = sharedBacking(EXPIRED);
+    const tabA = backing.tab();
+    const tabB = backing.tab();
+    await signOut({ config: CONFIG, storage: tabA });
+    const onSessionEnded = vi.fn();
+    expect(
+      await getAccessToken({
+        config: CONFIG,
+        storage: tabB,
+        fetch: issuer.fetch,
+        now: () => NOW,
+        onSessionEnded,
+      }),
+    ).toBeNull();
+    expect(tabB.loadTokens()).toBeNull();
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(issuer.state.tokenPosts).toBe(0);
+  });
+});
+
+describe('getAccessToken — account changed in another tab', () => {
+  it('does not adopt the other account\'s tokens and leaves them intact', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const backing = sharedBacking(EXPIRED);
+    const aliceTab = backing.tab();
+    const otherTab = backing.tab();
+    const BOB: StoredTokens = {
+      accessToken: 'bob-at',
+      refreshToken: 'bob-rt',
+      expiresAtMs: NOW + 3_600_000,
+      obtainedAtMs: NOW,
+      subject: 'bob-sub',
+      email: 'bob@example.net',
+    };
+    await otherTab.saveTokens(BOB);
+    const onAccountChanged = vi.fn();
+    const onSessionEnded = vi.fn();
+    expect(
+      await getAccessToken({
+        config: CONFIG,
+        storage: aliceTab,
+        fetch: issuer.fetch,
+        now: () => NOW,
+        onAccountChanged,
+        onSessionEnded,
+      }),
+    ).toBeNull();
+    expect(onAccountChanged).toHaveBeenCalledTimes(1);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+    expect(backing.disk()).toEqual(BOB);
+    expect(issuer.state.tokenPosts).toBe(0);
+  });
+});
+
+describe('getAccessToken — rejected while another account signed in', () => {
+  it("keeps the newer record instead of clearing it", async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('alice-refresh-token-was-revoked');
+    const backing = sharedBacking(EXPIRED);
+    const aliceTab = backing.tab();
+    const otherTab = backing.tab();
+    let open: () => void = () => {};
+    issuer.state.gate = new Promise((r) => {
+      open = r;
+    });
+    const onAccountChanged = vi.fn();
+    const onSessionEnded = vi.fn();
+    const pending = getAccessToken({
+      config: CONFIG,
+      storage: aliceTab,
+      fetch: issuer.fetch,
+      now: () => NOW,
+      onAccountChanged,
+      onSessionEnded,
+    });
+    await vi.waitFor(() => expect(issuer.state.tokenPosts).toBe(1));
+    const BOB: StoredTokens = {
+      accessToken: 'bob-at',
+      refreshToken: 'bob-rt',
+      expiresAtMs: NOW + 3_600_000,
+      subject: 'bob-sub',
+    };
+    await otherTab.saveTokens(BOB);
+    open();
+    expect(await pending).toBeNull();
+    expect(backing.disk()).toEqual(BOB);
+    expect(onAccountChanged).toHaveBeenCalledTimes(1);
+    expect(onSessionEnded).not.toHaveBeenCalled();
+  });
+});
+
+describe('refreshAfterUnauthorized', () => {
+  const VALID: StoredTokens = { ...EXPIRED, expiresAtMs: NOW + 600_000 };
+
+  it('forces one refresh of a token the local clock still considers valid', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(VALID);
+    const deps = { config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW };
+    const results = await Promise.all([
+      refreshAfterUnauthorized(deps),
+      refreshAfterUnauthorized(deps),
+      getAccessToken(deps),
+    ]);
+    expect(results).toEqual(['at-1', 'at-1', 'at-1']);
+    expect(issuer.state.tokenPosts).toBe(1);
+  });
+
+  it('does not refresh again for a 401 right after a refresh', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(VALID);
+    let now = NOW;
+    const deps = { config: CONFIG, storage, fetch: issuer.fetch, now: () => now };
+    expect(await refreshAfterUnauthorized(deps)).toBe('at-1');
+    // A request that carried at-0 comes back 401 two seconds later.
+    now = NOW + 2_000;
+    expect(await refreshAfterUnauthorized(deps)).toBe('at-1');
+    expect(issuer.state.tokenPosts).toBe(1);
+    // Past the grace window a 401 forces another refresh.
+    now = NOW + 60_000;
+    expect(await refreshAfterUnauthorized(deps)).toBe('at-2');
+    expect(issuer.state.tokenPosts).toBe(2);
+  });
+
+  it('ends the session when the forced refresh is rejected', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('revoked-elsewhere');
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(VALID);
+    const onSessionEnded = vi.fn();
+    expect(
+      await refreshAfterUnauthorized({
+        config: CONFIG,
+        storage,
+        fetch: issuer.fetch,
+        now: () => NOW,
+        onSessionEnded,
+      }),
+    ).toBeNull();
+    expect(storage.loadTokens()).toBeNull();
+    expect(onSessionEnded).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the session when the token endpoint is unreachable', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    issuer.state.mode = 'network-error';
+    const storage = inMemoryAuthStorage();
+    await storage.saveTokens(VALID);
+    await expect(
+      refreshAfterUnauthorized({ config: CONFIG, storage, fetch: issuer.fetch, now: () => NOW }),
+    ).rejects.toMatchObject({ code: 'refresh_failed' });
+    expect(storage.loadTokens()).toEqual(VALID);
+  });
+
+  it('is a no-op when already signed out', async () => {
+    _resetDiscoveryCacheForTests();
+    const issuer = fakeIssuer('rt-0');
+    const onSessionEnded = vi.fn();
+    expect(
+      await refreshAfterUnauthorized({
+        config: CONFIG,
+        storage: inMemoryAuthStorage(),
+        fetch: issuer.fetch,
+        onSessionEnded,
+      }),
+    ).toBeNull();
+    expect(onSessionEnded).not.toHaveBeenCalled();
+    expect(issuer.state.tokenPosts).toBe(0);
   });
 });

@@ -36,6 +36,7 @@ export const DESTRUCTIVE_TOOLS: ReadonlySet<string> = new Set([
   'mail.delete',
   'mail.draft',
   'mail.modify',
+  'mail.restore-mailboxes',
   'mail.send',
 ]);
 
@@ -111,6 +112,12 @@ export const AFFECTED_JSON_BUILDERS: Readonly<
     // artifact ids are returned by the JMAP Email/set update response.
     // We still register the builder so the provenance entry records the
     // tool as destructive; the affected-json is an empty array.
+    return JSON.stringify([] as AffectedArtifact[]);
+  },
+  'mail.restore-mailboxes': (_output) => {
+    // UI-only per-email undo of a move/delete (undo-registry.ts). Same
+    // `modifiedCount`-only output as mail.modify. Listed as destructive
+    // so its commit registers its own inverse (redo from Activity).
     return JSON.stringify([] as AffectedArtifact[]);
   },
   'mail.send': (output) => {

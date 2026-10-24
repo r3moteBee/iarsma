@@ -1,7 +1,8 @@
 /// <reference types="vitest" />
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
+import { cspConnectOrigins, stripMonacoCdnDefault, transformCspMeta } from './src/security/csp';
 
 // Vite is the bundler. Same as tuatha (6.4+) — muscle memory carries over.
 // The shell builds to a static-site bundle that is served by:
@@ -40,9 +41,59 @@ const httpsConfig =
 const rawBase = process.env['VITE_BASE_PATH'] ?? '/';
 const basePath = rawBase === '/' || rawBase === './' ? rawBase : rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
 
+// CSP: index.html carries the policy as a <meta> (Stalwart can't add
+// response headers). This plugin extends its connect-src for cross-origin
+// JMAP/OIDC builds (`IARSMA_CSP_CONNECT_SRC="https://mail.example.com"`,
+// plus any VITE_OIDC_ISSUER / VITE_JMAP_BASE_URL origin), strips it on the
+// dev server (inline React-refresh preamble + HMR), and blanks
+// @monaco-editor/loader's CDN default so no jsdelivr URL ships. Details in
+// src/security/csp.ts and docs/deployment.md.
+function iarsmaCsp(): Plugin {
+  let command: 'build' | 'serve' = 'build';
+  let extraConnectSrc: string[] = [];
+  return {
+    name: 'iarsma-csp',
+    configResolved(config) {
+      command = config.command;
+      // `config.env` holds the VITE_* values Vite loaded from .env files
+      // as well as the shell env (process.env alone misses .env.local);
+      // IARSMA_CSP_CONNECT_SRC isn't VITE_-prefixed, so it comes from the
+      // shell env only, keeping it out of import.meta.env.
+      if (command === 'build') {
+        extraConnectSrc = cspConnectOrigins({
+          ...config.env,
+          IARSMA_CSP_CONNECT_SRC: process.env['IARSMA_CSP_CONNECT_SRC'],
+        });
+      }
+    },
+    transform(code, id) {
+      // Only the loader module carries the CDN default; strip it there and
+      // leave every other module untouched (returning null keeps its map).
+      if (!id.includes('@monaco-editor/loader')) return null;
+      const stripped = stripMonacoCdnDefault(code);
+      return stripped === code ? null : { code: stripped, map: null };
+    },
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        return transformCspMeta(html, { command, extraConnectSrc });
+      },
+    },
+  };
+}
+
+// Sourcemaps: off for release builds. The source is public, so maps leak
+// nothing, but they are ~47 MB (Monaco's ~35 MB) against ~16 MB of code in
+// the zip Stalwart serves and the SW caches, and any tag's maps rebuild
+// reproducibly (D-028). `IARSMA_SOURCEMAP=hidden` emits them without the
+// sourceMappingURL comment (for an error tracker / local symbolication),
+// `IARSMA_SOURCEMAP=true` restores linked maps for debugging a build.
+const rawSourcemap = process.env['IARSMA_SOURCEMAP'];
+const sourcemap = rawSourcemap === 'hidden' ? 'hidden' : rawSourcemap === 'true';
+
 export default defineConfig({
   base: basePath,
-  plugins: [react()],
+  plugins: [react(), iarsmaCsp()],
   server: {
     port: 5173,
     strictPort: true,
@@ -59,7 +110,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     target: 'es2022',
-    sourcemap: true,
+    sourcemap,
   },
   // Vitest sees `vite.config.ts` and adopts its config. Exclude `e2e/`
   // so Playwright specs aren't picked up by `pnpm test` (vitest); the

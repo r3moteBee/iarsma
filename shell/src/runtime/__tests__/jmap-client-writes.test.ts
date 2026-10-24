@@ -444,7 +444,7 @@ describe('parseEventUpdateResponse', () => {
     expect(result).toEqual({ updated: true });
   });
 
-  it('throws code=jmap_set_error when notUpdated contains entries', () => {
+  it('throws code=event_not_found when notUpdated contains a notFound entry', () => {
     const body = JSON.stringify({
       methodResponses: [
         [
@@ -464,8 +464,8 @@ describe('parseEventUpdateResponse', () => {
       throw new Error('expected throw');
     } catch (e) {
       const err = e as ToolError;
-      expect(err.code).toBe('jmap_set_error');
-      expect(err.message).toContain('notFound');
+      expect(err.code).toBe('event_not_found');
+      expect(err.message).toContain('evt-123');
     }
   });
 
@@ -550,7 +550,7 @@ describe('parseEventDeleteResponse', () => {
     expect(result).toEqual({ deleted: true });
   });
 
-  it('throws code=jmap_set_error when notDestroyed contains entries', () => {
+  it('throws code=event_not_found when notDestroyed contains a notFound entry', () => {
     const body = JSON.stringify({
       methodResponses: [
         [
@@ -571,8 +571,7 @@ describe('parseEventDeleteResponse', () => {
       throw new Error('expected throw');
     } catch (e) {
       const err = e as ToolError;
-      expect(err.code).toBe('jmap_set_error');
-      expect(err.message).toContain('notDestroyed');
+      expect(err.code).toBe('event_not_found');
       expect(err.message).toContain('evt-123');
     }
   });

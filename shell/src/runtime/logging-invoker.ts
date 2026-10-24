@@ -70,9 +70,10 @@ export type LoggingInvokerOptions = {
   }) => void;
   /** PR 44 — invoked when the inner invoker throws with
    *  `code === 'unauthorized'`. The wrapper still re-throws; this
-   *  callback exists so the App can clear stored tokens + bump the
-   *  auth atom, flipping the UI to SignedOutView instead of leaving
-   *  it rendering with a stale Bearer that will keep 401-ing. */
+   *  callback exists so the App can recover the session (one forced
+   *  token refresh, `refreshAfterUnauthorized`) or, if that is
+   *  rejected, end it and flip the UI to SignedOutView instead of
+   *  leaving it rendering with a stale Bearer that will keep 401-ing. */
   readonly onUnauthorized?: () => void;
 };
 
@@ -171,7 +172,10 @@ export function loggingInvoker(opts: LoggingInvokerOptions): Invoker {
                 inverseAction: inv.inverseAction,
                 inverseParams: inv.inverseParams,
               });
-              if (opts.onUndoRegistered !== undefined) {
+              if (
+                opts.onUndoRegistered !== undefined &&
+                options.undoOfSeq === undefined
+              ) {
                 try {
                   opts.onUndoRegistered({
                     tool: name,

@@ -212,6 +212,83 @@ describe('loggingInvoker × UndoRegistry (PR 21)', () => {
     });
   });
 
+  it('registers a per-email inverse (and the move toast) for a mixed Inbox+Sent thread move', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const toasts: Array<{ tool: string; seq: number; params: unknown }> = [];
+    const inv = loggingInvoker({
+      inner: fakeInner({
+        modifiedCount: 2,
+        previousMailboxesByEmail: { 'em-in': ['Mb-inbox'], 'em-sent': ['Mb-sent'] },
+      }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+      onUndoRegistered: (info) =>
+        toasts.push({ tool: info.tool, seq: info.seq, params: info.params }),
+    });
+
+    const params = {
+      emailIds: ['em-in', 'em-sent'],
+      patch: { mailboxIds: { 'Mb-inbox': false, 'Mb-archive': true } },
+    };
+    await inv.invoke('mail.modify', params);
+
+    const u = await undoRegistry.forEntry(0);
+    expect(u?.inverseAction).toBe('mail.restore-mailboxes');
+    expect(u?.inverseParams).toEqual({
+      groups: [
+        { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': true, 'Mb-archive': false } },
+        { emailIds: ['em-sent'], mailboxIds: { 'Mb-archive': false } },
+      ],
+    });
+    // The move toast still keys off the ORIGINAL call, not the inverse.
+    expect(toasts).toEqual([{ tool: 'mail.modify', seq: 0, params }]);
+  });
+
+  it('registers the inverse of a mail.restore-mailboxes undo replay (redo) without a toast', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const toasts: unknown[] = [];
+    const inv = loggingInvoker({
+      inner: fakeInner({
+        modifiedCount: 2,
+        previousMailboxesByEmail: { 'em-in': ['Mb-trash'], 'em-sent': ['Mb-trash'] },
+      }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+      onUndoRegistered: (info) => toasts.push(info),
+    });
+
+    await inv.invoke(
+      'mail.restore-mailboxes',
+      {
+        groups: [
+          { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': true, 'Mb-trash': false } },
+          { emailIds: ['em-sent'], mailboxIds: { 'Mb-sent': true, 'Mb-trash': false } },
+        ],
+      },
+      { undoOfSeq: 3 },
+    );
+
+    const u = await undoRegistry.forEntry(0);
+    expect(u?.inverseAction).toBe('mail.restore-mailboxes');
+    expect(u?.inverseParams).toEqual({
+      groups: [
+        { emailIds: ['em-in'], mailboxIds: { 'Mb-inbox': false, 'Mb-trash': true } },
+        { emailIds: ['em-sent'], mailboxIds: { 'Mb-sent': false, 'Mb-trash': true } },
+      ],
+    });
+    expect(toasts).toEqual([]);
+  });
+
   it('skips mail.delete registration when previousMailboxesByEmail is absent', async () => {
     const log = createActionLog({
       store: inMemoryActionLogStore(),
@@ -250,5 +327,35 @@ describe('loggingInvoker × UndoRegistry (PR 21)', () => {
         patch: { mailboxIds: { 'Mb-inbox': false } },
       }),
     ).resolves.toEqual({ modifiedCount: 1 });
+  });
+
+  it('does NOT fire onUndoRegistered for an undo replay (undoOfSeq set)', async () => {
+    const log = createActionLog({
+      store: inMemoryActionLogStore(),
+      sha384: async () => 'h',
+      now: () => 1000,
+    });
+    const undoRegistry = inMemoryUndoRegistry();
+    const calls: Array<{ tool: string; seq: number }> = [];
+    const inv = loggingInvoker({
+      inner: fakeInner({ modifiedCount: 1 }),
+      log,
+      undoRegistry,
+      getIdentity: () => ALICE,
+      onUndoRegistered: (info) => calls.push({ tool: info.tool, seq: info.seq }),
+    });
+
+    await inv.invoke(
+      'mail.modify',
+      { emailIds: ['em-1'], patch: { mailboxIds: { 'Mb-inbox': true, 'Mb-trash': false } } },
+      { undoOfSeq: 7 },
+    );
+
+    // The replay is still logged and its own inverse still registered
+    // (redo from the Activity log must keep working) …
+    expect(await undoRegistry.forEntry(0)).not.toBeNull();
+    // … but no toast hook fires — an undo must not spawn a fresh
+    // act-then-undo toast.
+    expect(calls).toEqual([]);
   });
 });

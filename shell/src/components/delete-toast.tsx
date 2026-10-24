@@ -34,12 +34,15 @@ export function DeleteToast({ onUndo }: { readonly onUndo: (seq: number) => void
   if (pending === null) return null;
 
   const label =
-    pending.count === 1
-      ? 'Message moved to Trash'
-      : `${pending.count} messages moved to Trash`;
+    pending.message ??
+    (pending.count === 1 ? 'Message moved to Trash' : `${pending.count} messages moved to Trash`);
+
+  const isMove = pending.message !== undefined;
+  const regionLabel = isMove ? 'Recently moved' : 'Recently deleted';
+  const undoLabel = isMove ? 'Undo' : 'Undo delete';
 
   return (
-    <div className={styles['stack']} role="region" aria-label="Recently deleted">
+    <div className={styles['stack']} role="region" aria-label={regionLabel}>
       <div className={styles['toast']} role="status" aria-live="polite">
         <span className={styles['label']}>{label}</span>
         <Button
@@ -49,7 +52,7 @@ export function DeleteToast({ onUndo }: { readonly onUndo: (seq: number) => void
             onUndo(pending.seq);
             setPending(null);
           }}
-          aria-label="Undo delete"
+          aria-label={undoLabel}
         >
           Undo
         </Button>

@@ -12,6 +12,7 @@ import {
   MarkReadIcon,
   MarkUnreadIcon,
   TrashIcon,
+  FlagIcon,
 } from './icons.js';
 import styles from './bulk-action-bar.module.css';
 
@@ -21,6 +22,8 @@ export type BulkActionBarProps = {
   readonly labels: ReadonlyArray<{ readonly key: string; readonly name: string }>;
   readonly onMarkRead: () => void;
   readonly onMarkUnread: () => void;
+  readonly onFlag: () => void;
+  readonly onUnflag: () => void;
   readonly onMove: (targetMailboxId: string) => void;
   readonly onLabelToggle: (labelKey: string) => void;
   readonly onDelete: () => void;
@@ -49,6 +52,12 @@ export function BulkActionBar(props: BulkActionBarProps): JSX.Element {
       <Button variant="ghost" size="sm" onClick={props.onMarkUnread} aria-label="Mark unread">
         <MarkUnreadIcon /> Mark unread
       </Button>
+      <Button variant="ghost" size="sm" onClick={props.onFlag} aria-label="Flag">
+        <FlagIcon /> Flag
+      </Button>
+      <Button variant="ghost" size="sm" onClick={props.onUnflag} aria-label="Unflag">
+        <FlagIcon /> Unflag
+      </Button>
       {props.moveTargets.length > 0 ? (
         <MenuButton
           size="sm"
@@ -59,7 +68,7 @@ export function BulkActionBar(props: BulkActionBarProps): JSX.Element {
             onSelect: () => props.onMove(m.id),
           }))}
         >
-          <MoveToFolderIcon />
+          <MoveToFolderIcon /> Move
         </MenuButton>
       ) : null}
       {props.labels.length > 0 ? (
@@ -72,7 +81,7 @@ export function BulkActionBar(props: BulkActionBarProps): JSX.Element {
             onSelect: () => props.onLabelToggle(lbl.key),
           }))}
         >
-          <LabelTagIcon />
+          <LabelTagIcon /> Label
         </MenuButton>
       ) : null}
       <Button variant="destructive" size="sm" onClick={props.onDelete} aria-label="Delete selected">

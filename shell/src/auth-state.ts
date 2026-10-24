@@ -57,8 +57,10 @@ export const authStorage: AuthStorage = isBrowser
  * Wired into the production invoker via `cachedInvoker(jmapInvoker, ...)`
  * in App.tsx.
  *
- * On sign-out, App.tsx calls `cacheStorage.clearAll()` alongside
- * `authStorage.clearTokens()` to drop all cached email data.
+ * Cleared (`clearAll()`) whenever a session ends: explicit sign-out in
+ * App.tsx, and every token-layer session end via `runtime/auth-session.ts`
+ * (rejected refresh, unrecoverable 401, sign-out in another tab). Rows are
+ * also owner-scoped by the cached invoker (`getOwner`).
  */
 export const cacheStorage: CacheStorage = isBrowser
   ? indexedDbCacheStorage({ auth: authStorage })

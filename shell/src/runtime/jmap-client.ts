@@ -12,6 +12,7 @@ import {
   session as jmapClientSession,
 } from '@iarsma/wasm-bindings/jmap-client';
 import type { ToolError } from './types.js';
+import { warnIfCspBlocksConnect } from '../security/csp-diagnostics.js';
 
 export type Session = {
   readonly username: string;
@@ -93,7 +94,14 @@ export async function fetchSession(opts: JmapClientOptions): Promise<Session> {
     );
   }
   const body = await response.text();
-  return parseSession(body);
+  const session = parseSession(body);
+  // Stalwart advertises absolute URLs built from its configured public
+  // hostname, which can differ from the host the shell was loaded from.
+  warnIfCspBlocksConnect(
+    [session.apiUrl, session.eventSourceUrl, session.downloadUrl, session.uploadUrl],
+    'The JMAP session',
+  );
+  return session;
 }
 
 /**
@@ -307,7 +315,13 @@ export async function fetchEmailMailboxMemberships(
       'Email/get memberships: malformed methodResponse entry.',
     );
   }
-  const result = first[1] as { list?: unknown };
+  return membershipsFromEmailGet(first[1]);
+}
+
+/** Map<emailId, mailboxIds[]> from an `Email/get` (mailboxIds-only)
+ *  response's arguments. Malformed rows are skipped. */
+function membershipsFromEmailGet(args: unknown): Map<string, readonly string[]> {
+  const result = (args ?? {}) as { list?: unknown };
   const items = Array.isArray(result.list) ? result.list : [];
   const out = new Map<string, readonly string[]>();
   for (const row of items) {
@@ -1985,6 +1999,15 @@ export type MailModifyResult = { readonly modifiedCount: number };
 export type FetchMailModifyOptions = JmapClientOptions & {
   readonly session: Session;
   readonly params: MailModifyInput;
+  /** Also read each email's mailboxIds — in the SAME request, ahead of
+   *  the update — for the undo registry's per-email inverse. */
+  readonly captureMemberships?: boolean;
+};
+
+/** A mailbox write's result, plus — when requested and the server
+ *  answered the read — each email's memberships from just before it. */
+export type MailModifyCommitResult = MailModifyResult & {
+  readonly previousMailboxesByEmail?: Readonly<Record<string, readonly string[]>>;
 };
 
 /**
@@ -2103,14 +2126,117 @@ export function parseMailModifyResponse(body: string): MailModifyResult {
  */
 export async function fetchMailModifyCommit(
   opts: FetchMailModifyOptions,
-): Promise<MailModifyResult> {
+): Promise<MailModifyCommitResult> {
+  return postEmailSetUpdate(
+    opts,
+    (accountId) => buildMailModifyRequest({ accountId, params: opts.params }),
+    opts.captureMemberships === true ? opts.params.emailIds : undefined,
+  );
+}
+
+/**
+ * One group of a per-email mailbox restore: the `mailboxIds` patch
+ * applied to exactly these emails.
+ */
+export type MailboxPatchGroup = {
+  readonly emailIds: readonly string[];
+  readonly mailboxIds: Readonly<Record<string, boolean>>;
+};
+
+/**
+ * Build ONE `Email/set` update carrying a distinct `mailboxIds` patch
+ * per group — what the per-email undo of a mixed-membership move or
+ * delete needs (`mail.restore-mailboxes`). Pure function — no I/O.
+ * Groups must be disjoint (a later group would silently overwrite an
+ * earlier one's patch for the same email) and non-empty.
+ */
+export function buildMailRestoreMailboxesRequest(opts: {
+  readonly accountId: string;
+  readonly groups: readonly MailboxPatchGroup[];
+}): string {
+  // A Map, not an object literal: ids are opaque server strings, and an
+  // object would treat "__proto__" / "constructor" specially.
+  const update = new Map<string, Record<string, boolean>>();
+  for (const group of opts.groups) {
+    const patchObj: Record<string, boolean> = {};
+    for (const [id, value] of Object.entries(group.mailboxIds)) {
+      patchObj[`mailboxIds/${id}`] = value;
+    }
+    if (Object.keys(patchObj).length === 0) {
+      throw makeError(
+        'invalid_argument',
+        'mail.restore-mailboxes: empty mailboxIds patch in a group.',
+      );
+    }
+    for (const emailId of group.emailIds) {
+      if (update.has(emailId)) {
+        throw makeError(
+          'invalid_argument',
+          `mail.restore-mailboxes: email "${emailId}" appears in more than one group.`,
+        );
+      }
+      update.set(emailId, { ...patchObj });
+    }
+  }
+  if (update.size === 0) {
+    throw makeError('invalid_argument', 'mail.restore-mailboxes: no emails to update.');
+  }
+  return JSON.stringify({
+    using: JMAP_USING_MAIL,
+    methodCalls: [
+      ['Email/set', { accountId: opts.accountId, update: Object.fromEntries(update) }, '0'],
+    ],
+  });
+}
+
+/** POST the grouped restore built by `buildMailRestoreMailboxesRequest`,
+ *  capturing the memberships it overwrites (the restore is itself
+ *  undoable). */
+export async function fetchMailRestoreMailboxesCommit(
+  opts: JmapClientOptions & {
+    readonly session: Session;
+    readonly groups: readonly MailboxPatchGroup[];
+  },
+): Promise<MailModifyCommitResult> {
+  return postEmailSetUpdate(
+    opts,
+    (accountId) => buildMailRestoreMailboxesRequest({ accountId, groups: opts.groups }),
+    opts.groups.flatMap((g) => g.emailIds),
+  );
+}
+
+/** Call id of the memberships read riding ahead of an Email/set update. */
+const PREVIOUS_MEMBERSHIPS_CALL_ID = 'prev';
+
+/**
+ * POST an `Email/set` update. With `captureIds`, an `Email/get` of
+ * those emails' mailboxIds is prepended to the same request: JMAP runs
+ * method calls in order, so it sees the state immediately before the
+ * update — no extra round trip, no window for a concurrent change. The
+ * read is best-effort: if the server fails it, the update still stands
+ * and the result simply carries no memberships.
+ */
+async function postEmailSetUpdate(
+  opts: JmapClientOptions & { readonly session: Session },
+  buildBody: (accountId: string) => string,
+  captureIds?: readonly string[],
+): Promise<MailModifyCommitResult> {
   const token = await opts.getAuthToken();
   if (token === null) {
     throw makeError('unauthorized', 'No auth token available.');
   }
   const fetchImpl = opts.fetch ?? fetch;
   const accountId = opts.session.primaryAccountIdMail;
-  const body = buildMailModifyRequest({ accountId, params: opts.params });
+  let body = buildBody(accountId);
+  if (captureIds !== undefined) {
+    const request = JSON.parse(body) as { methodCalls: unknown[] };
+    request.methodCalls.unshift([
+      'Email/get',
+      { accountId, ids: captureIds, properties: ['mailboxIds'] },
+      PREVIOUS_MEMBERSHIPS_CALL_ID,
+    ]);
+    body = JSON.stringify(request);
+  }
 
   let response: Response;
   try {
@@ -2133,7 +2259,35 @@ export async function fetchMailModifyCommit(
     );
   }
   const text = await response.text();
-  return parseMailModifyResponse(text);
+  if (captureIds === undefined) return parseMailModifyResponse(text);
+  return parseCapturedUpdateResponse(text);
+}
+
+/** Split a capture-prefixed response: memberships from the leading
+ *  Email/get (when it succeeded), the update result from the rest. */
+function parseCapturedUpdateResponse(text: string): MailModifyCommitResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw makeError(
+      'jmap_parse_error',
+      `Failed to parse Email/set update response: ${describe(e)}`,
+    );
+  }
+  const responses = (parsed as { methodResponses?: unknown } | null)?.methodResponses;
+  if (!Array.isArray(responses)) return parseMailModifyResponse(text);
+  const isCapture = (r: unknown): boolean =>
+    Array.isArray(r) && r[2] === PREVIOUS_MEMBERSHIPS_CALL_ID;
+  const capture = responses.find(isCapture) as unknown[] | undefined;
+  const result = parseMailModifyResponse(
+    JSON.stringify({ methodResponses: responses.filter((r) => !isCapture(r)) }),
+  );
+  if (capture === undefined || capture[0] !== 'Email/get') return result;
+  return {
+    ...result,
+    previousMailboxesByEmail: Object.fromEntries(membershipsFromEmailGet(capture[1])),
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -3221,6 +3375,7 @@ export type EventCreateResult = { readonly eventId: string };
 
 export type EventUpdateInput = {
   readonly eventId: string;
+  readonly calendarId?: string;
   readonly title?: string;
   readonly start?: string;
   readonly duration?: string;
@@ -3306,6 +3461,9 @@ export function buildEventUpdateRequest(opts: {
 }): string {
   const { accountId, params } = opts;
   const patch: Record<string, unknown> = {};
+  if (params.calendarId !== undefined) {
+    patch.calendarIds = { [params.calendarId]: true };
+  }
   if (params.title !== undefined) {
     patch.title = params.title;
   }
@@ -3482,6 +3640,9 @@ export function parseEventUpdateResponse(body: string): EventUpdateResult {
     const entries = Object.entries(result.notUpdated);
     if (entries.length > 0) {
       const [id, err] = entries[0]!;
+      if (err.type === 'notFound') {
+        throw makeError('event_not_found', `CalendarEvent ${id} not found.`, result.notUpdated);
+      }
       throw makeError(
         'jmap_set_error',
         `CalendarEvent/set update rejected for ${id}: ${err.type ?? 'unknown'}${err.description !== undefined ? ` — ${err.description}` : ''}`,
@@ -3528,17 +3689,18 @@ export function parseEventDeleteResponse(body: string): EventDeleteResult {
   };
   if (result.notDestroyed !== undefined && Object.keys(result.notDestroyed).length > 0) {
     const ids = Object.keys(result.notDestroyed);
+    const firstId = ids[0]!;
+    const firstEntry = result.notDestroyed[firstId]!;
+    if (firstEntry.type === 'notFound') {
+      throw makeError('event_not_found', `CalendarEvent ${firstId} not found.`, result.notDestroyed);
+    }
     const details = ids
       .map((id) => {
         const entry = result.notDestroyed![id]!;
         return `${id}: ${entry.type ?? 'unknown'}${entry.description !== undefined ? ` — ${entry.description}` : ''}`;
       })
       .join('; ');
-    throw makeError(
-      'jmap_set_error',
-      `CalendarEvent/set notDestroyed: ${details}`,
-      result.notDestroyed,
-    );
+    throw makeError('jmap_set_error', `CalendarEvent/set notDestroyed: ${details}`, result.notDestroyed);
   }
   return { deleted: true };
 }

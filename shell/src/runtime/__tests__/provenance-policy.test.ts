@@ -26,6 +26,7 @@ describe('DESTRUCTIVE_TOOLS', () => {
       'mail.delete',
       'mail.draft',
       'mail.modify',
+      'mail.restore-mailboxes',
       'mail.send',
     ]);
   });

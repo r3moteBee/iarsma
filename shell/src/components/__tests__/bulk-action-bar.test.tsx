@@ -12,6 +12,8 @@ function setup(overrides: Partial<Parameters<typeof BulkActionBar>[0]> = {}) {
     labels: [{ key: 'work', name: 'Work' }],
     onMarkRead: vi.fn(),
     onMarkUnread: vi.fn(),
+    onFlag: vi.fn(),
+    onUnflag: vi.fn(),
     onMove: vi.fn(),
     onLabelToggle: vi.fn(),
     onDelete: vi.fn(),
@@ -21,6 +23,23 @@ function setup(overrides: Partial<Parameters<typeof BulkActionBar>[0]> = {}) {
   render(<BulkActionBar {...props} />);
   return props;
 }
+
+describe('BulkActionBar — flag', () => {
+  it('renders Flag and Unflag and dispatches them', () => {
+    const onFlag = vi.fn();
+    const onUnflag = vi.fn();
+    render(<BulkActionBar {...{
+      count: 2, moveTargets: [], labels: [],
+      onMarkRead: () => {}, onMarkUnread: () => {}, onMove: () => {},
+      onLabelToggle: () => {}, onDelete: () => {}, onClear: () => {},
+      onFlag, onUnflag,
+    }} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^unflag$/i }));
+    expect(onFlag).toHaveBeenCalledOnce();
+    expect(onUnflag).toHaveBeenCalledOnce();
+  });
+});
 
 describe('BulkActionBar', () => {
   it('shows the selected count', () => {
@@ -52,6 +71,8 @@ describe('BulkActionBar', () => {
         labels={[{ key: 'work', name: 'Work' }]}
         onMarkRead={vi.fn()}
         onMarkUnread={vi.fn()}
+        onFlag={vi.fn()}
+        onUnflag={vi.fn()}
         onMove={vi.fn()}
         onLabelToggle={vi.fn()}
         onDelete={vi.fn()}

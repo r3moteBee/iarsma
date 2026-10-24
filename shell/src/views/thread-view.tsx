@@ -506,13 +506,29 @@ function MessageView(props: {
   const { email, isExpanded, isFocused, onToggleExpand, registerRef } = props;
   const [externalContentAllowed, setExternalContentAllowed] = useState(false);
 
-  // Run the html body through the sanitizer. Recompute when the
-  // toggle flips so allowing external content shows previously-stripped
-  // <img src="https://..."> tags.
-  const sanitized = useMemo(() => {
-    if (email.bodyHtml === undefined || email.bodyHtml.length === 0) return null;
-    return sanitizeHtml(email.bodyHtml, externalContentAllowed);
-  }, [email.bodyHtml, externalContentAllowed]);
+  // Run the html body through the sanitizer in both modes: remote
+  // content blocked (the default) and allowed (after the user presses
+  // "Show"). Comparing the two tells us exactly whether the sanitizer
+  // withheld anything remote — `<img src>` or CSS `url(...)`, however
+  // the sender obfuscated it — so the toggle appears iff pressing it
+  // would change the rendering. Only computed while expanded: the body
+  // isn't rendered otherwise, and long threads stay cheap to open.
+  const sanitizedVariants = useMemo(() => {
+    if (!isExpanded || email.bodyHtml === undefined || email.bodyHtml.length === 0) {
+      return null;
+    }
+    return {
+      blocked: sanitizeHtml(email.bodyHtml, false),
+      allowed: sanitizeHtml(email.bodyHtml, true),
+    };
+  }, [email.bodyHtml, isExpanded]);
+  const sanitized = sanitizedVariants === null
+    ? null
+    : externalContentAllowed
+      ? sanitizedVariants.allowed
+      : sanitizedVariants.blocked;
+  const hasExternalContent = sanitizedVariants !== null
+    && sanitizedVariants.blocked !== sanitizedVariants.allowed;
 
   const fromAddress = email.from?.[0];
   const senderName = fromAddress?.name ?? fromAddress?.email ?? '(no sender)';
@@ -529,15 +545,6 @@ function MessageView(props: {
     : 'human';
   const initials = initialsFor(fromAddress?.name, senderEmail);
   const avatarColor = colorFor(senderEmail || senderName, kind);
-
-  // Whether the original html had any URL-bearing image src that the
-  // default-off sanitizer would strip — used to decide whether to
-  // show the toggle. Coarse heuristic: the html body contains
-  // `src="http`, `src='http`, or `src=http`.
-  const hasExternalImages = useMemo(
-    () => email.bodyHtml !== undefined && /\bsrc\s*=\s*["']?https?:/i.test(email.bodyHtml),
-    [email.bodyHtml],
-  );
 
   return (
     <article
@@ -580,7 +587,7 @@ function MessageView(props: {
       ) : null}
       {isExpanded ? (
         <>
-          {hasExternalImages && !externalContentAllowed ? (
+          {hasExternalContent && !externalContentAllowed ? (
             <div className={styles['notice']} role="status">
               <span className={styles['noticeText']}>External images are blocked.</span>
               <Button
@@ -604,6 +611,7 @@ function MessageView(props: {
                 data-testid="message-html-body"
                 // sanitizeHtml ran above. The output is the security
                 // boundary — never bypass it for sender-controlled bytes.
+                // `.msgBody` adds CSS containment as a second layer.
                 // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: sanitized }}
               />

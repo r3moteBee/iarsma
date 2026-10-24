@@ -90,6 +90,14 @@
   padding: var(--space-md) var(--space-lg);
   min-height: 180px;
   border-bottom: 1px solid var(--border);
+  /* Replies quote the original (sender-controlled, sanitized) HTML
+   * into the editor, so it gets the same containment as the reading
+   * pane's `.msgBody` (thread-view.module.css): nothing inside paints
+   * outside this box or stacks above the compose chrome. */
+  position: relative;
+  isolation: isolate;
+  contain: content;
+  overflow-x: auto;
 }
 
 /* ── Attachments: button + chips ─────────────────────────────── */
