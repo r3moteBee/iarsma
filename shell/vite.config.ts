@@ -67,8 +67,11 @@ function iarsmaCsp(): Plugin {
       }
     },
     transform(code, id) {
-      if (!id.includes('@monaco-editor/loader') || !code.includes('cdn.jsdelivr.net')) return null;
-      return { code: stripMonacoCdnDefault(code), map: null };
+      // Only the loader module carries the CDN default; strip it there and
+      // leave every other module untouched (returning null keeps its map).
+      if (!id.includes('@monaco-editor/loader')) return null;
+      const stripped = stripMonacoCdnDefault(code);
+      return stripped === code ? null : { code: stripped, map: null };
     },
     transformIndexHtml: {
       order: 'pre',

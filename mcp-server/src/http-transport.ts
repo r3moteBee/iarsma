@@ -401,10 +401,9 @@ export async function startHttpTransport(opts: {
       // eslint-disable-next-line no-console
       console.error('[iarsma-mcp-http] unhandled error:', e);
       if (!res.headersSent) {
-        writeJson(res, 500, {
-          error: 'internal_error',
-          message: e instanceof Error ? e.message : String(e),
-        });
+        // Details stay in the server log; exception text can carry paths
+        // and internals that do not belong on the wire.
+        writeJson(res, 500, { error: 'internal_error', message: 'Internal error.' });
       }
     }
   });
@@ -575,7 +574,7 @@ async function handleAgentEndpoint(args: {
       console.error('[iarsma-mcp] agent registration failed:', e instanceof Error ? e.message : e);
       writeJson(res, 500, {
         error: 'registration_failed',
-        message: e instanceof Error ? e.message : String(e),
+        message: 'Agent registration failed; see the server log.',
       });
     }
     return;
@@ -747,10 +746,7 @@ async function readBodyOrReject(
       res.setHeader('connection', 'close');
       writeJson(res, 413, { error: 'payload_too_large', message: e.message });
     } else {
-      writeJson(res, 400, {
-        error: 'invalid_request',
-        message: e instanceof Error ? e.message : 'Bad request body.',
-      });
+      writeJson(res, 400, { error: 'invalid_request', message: 'Bad request body.' });
     }
     return { ok: false };
   }

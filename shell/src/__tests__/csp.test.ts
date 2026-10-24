@@ -33,7 +33,7 @@ function policy(): Map<string, string[]> {
 
 /** Bodies of classic inline <script> elements (no src attribute). */
 function inlineScripts(html: string): string[] {
-  return [...html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
+  return [...html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script\s*>/gi)]
     .filter((m) => !/\bsrc\s*=/.test(m[1] ?? ''))
     .map((m) => m[2] ?? '');
 }
