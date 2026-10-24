@@ -238,6 +238,17 @@ jobs:
           ls -la shell/dist
           du -sh shell/dist
 
+      - name: Verify CSP + no runtime third-party code (D-061)
+        run: |
+          grep -q 'http-equiv="Content-Security-Policy"' shell/dist/index.html \
+            || (echo "::error::built index.html lost its CSP <meta>"; exit 1)
+          if grep -rl 'cdn.jsdelivr.net' shell/dist; then
+            echo "::error::a CDN URL is in the bundle (Monaco must load from the bundle)"; exit 1
+          fi
+          if find shell/dist -name '*.map' | grep -q .; then
+            echo "::error::sourcemaps in a default build (opt in with IARSMA_SOURCEMAP)"; exit 1
+          fi
+
   # ──────────────────────────────────────────────────────────────────────
   # A11y: pa11y-ci against the built bundle.
   # Catches accessibility regressions that only show up in the production

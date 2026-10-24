@@ -21,6 +21,7 @@
  */
 
 import { z } from 'zod';
+import { warnIfCspBlocksConnect } from './security/csp-diagnostics.js';
 
 /**
  * `urn:iarsma:agent-context` value mirror (D-032). The MCP server side
@@ -73,14 +74,18 @@ let cached: ShellConfig | null = null;
  */
 export async function loadConfig(): Promise<ShellConfig> {
   if (cached !== null) return cached;
+  // Only the explicit tiers can name another origin; the same-origin
+  // defaults are 'self' by construction.
   const fromJson = await tryLoadConfigJson();
   if (fromJson !== null) {
     cached = fromJson;
+    warnIfCspBlocksConnect([cached.oidcIssuer, cached.jmapBaseUrl], 'config.json');
     return cached;
   }
   const fromEnv = tryLoadFromViteEnv();
   if (fromEnv !== null) {
     cached = fromEnv;
+    warnIfCspBlocksConnect([cached.oidcIssuer, cached.jmapBaseUrl], 'VITE_* config');
     return cached;
   }
   const fromOrigin = tryLoadFromSameOrigin();

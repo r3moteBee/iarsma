@@ -44,6 +44,36 @@ The deployer drops their `config.json` alongside `index.html` (or bakes it into 
 
 For non-Stalwart consumers using bare `unzip`, the equivalent of "extract into a named directory" is `unzip -d iarsma/ iarsma.zip`.
 
+### Content-Security-Policy
+
+The bundle enforces a CSP from a `<meta http-equiv>` in `index.html` (Stalwart's Web Apps host can't add response headers, so a meta tag is the only option that works on Path A; a meta CSP can't express `frame-ancestors`, `report-uri` or `sandbox`). The policy is pinned by `shell/src/__tests__/csp.test.ts` (D-061):
+
+| Directive | Value | Why |
+|---|---|---|
+| `default-src` | `'self'` | Everything not listed below is same-origin only. |
+| `script-src` | `'self' 'wasm-unsafe-eval' 'sha256-…'` | Bundle chunks only; `wasm-unsafe-eval` because jco instantiates the WASM components with `WebAssembly.compile`; the hash covers the inline theme bootstrap. No `unsafe-eval`, no CDN: Monaco is bundled (`shell/src/views/monaco/`). |
+| `style-src` | `'self' 'unsafe-inline'` | React `style={}` attributes, sanitized mail-body `style` attributes and Monaco's runtime `<style>` injection. CSS can't execute script; the risk accepted is CSS-based exfiltration, which the HTML sanitizer's style filter and `img-src` narrow. |
+| `img-src` | `'self' data: blob: https:` | `https:` is required by the per-message **Show external images** button: a meta CSP can't be relaxed at runtime, so the policy must allow what the opt-in allows. Remote images are blocked *by default* by the WASM sanitizer, not by the CSP. Known gap: the sanitizer keeps `style="background:url(https://…)"`, which `https:` lets load without the opt-in. |
+| `connect-src` | `'self' https://api.github.com` | JMAP, EventSource push, OIDC discovery/token and `version.json` are same-origin on Path A; the Files view calls the GitHub REST API. |
+| `worker-src` | `'self'` | Monaco's language workers and the service worker are same-origin chunks. |
+| `object-src` / `base-uri` / `form-action` | `'none'` / `'none'` / `'self'` | No plugins, no `<base>` hijack, no off-site form posts. |
+
+Browser floor: `'wasm-unsafe-eval'` is understood by Chrome/Edge 97+, Firefox 102+ and Safari 16+; older engines treat WebAssembly compilation as eval and the shell can't start. The `es2022` build target already needs Safari 16.4, so in practice this only drops Chromium 94–96.
+
+Plus `<meta name="referrer" content="no-referrer">`, so remote images and links opened from mail never leak the webmail URL.
+
+**Cross-origin JMAP/OIDC (Paths B, C, E with a `config.json` pointing at another host):** `connect-src 'self'` will block those calls. Build with the extra origins, which the `iarsma-csp` Vite plugin appends to `connect-src`:
+
+```bash
+IARSMA_CSP_CONNECT_SRC="https://mail.example.com" VITE_BASE_PATH=/ pnpm --filter @iarsma/shell build
+```
+
+(`VITE_OIDC_ISSUER` / `VITE_JMAP_BASE_URL` origins are added automatically when set at build time. Entries must be http(s)/ws(s) origins; keywords and wildcards fail the build.) With a prebuilt release zip, edit the `connect-src` list in `index.html` instead. A host that also sends a CSP header (Caddy/nginx) enforces *both* policies, so the header can only tighten the meta policy, never loosen it.
+
+The policy is stripped on the Vite dev server (its React-refresh preamble is an unhashed inline script); `vite preview` serves the built HTML with the policy, so check CSP behaviour there.
+
+**Sourcemaps** are not emitted by release builds: the source is public and any tag rebuilds reproducibly (D-028), while the maps are ~47 MB (Monaco's ~35 MB) against ~16 MB of code in the zip and the service-worker cache. `IARSMA_SOURCEMAP=hidden` emits maps without the `sourceMappingURL` comment (for local symbolication); `IARSMA_SOURCEMAP=true` emits linked maps.
+
 ---
 
 ## Path A — Stalwart Web Application (recommended default)
@@ -192,6 +222,8 @@ The Tauri build wraps the same bundle in a native shell. No web server is requir
 2. From the repo root: `pnpm tauri build` for the host platform, or `pnpm tauri build --target <triple>` for cross-compilation.
 3. The resulting `.dmg` (macOS), `.AppImage` / `.deb` (Linux), `.msi` (Windows), `.ipa` (iOS), or `.apk` (Android) ships the bundle inside the native app.
 4. On first launch, the user (or an MDM profile) configures the JMAP endpoint URL.
+
+The bundle's CSP (see [Content-Security-Policy](#content-security-policy)) only allows same-origin `connect-src` plus explicit build-time origins, and in the Tauri webview the JMAP server is never same-origin. Until the runtime server picker exists, build the Tauri bundle with the target server: `IARSMA_CSP_CONNECT_SRC="https://mail.example.com" pnpm tauri build`.
 
 ### Code signing
 - macOS: Apple Developer ID required for distribution outside the App Store.

@@ -29,10 +29,29 @@ beforeEach(() => {
   });
 });
 
+// The bundled-Monaco wiring under test: `loader.config` must receive the
+// `monaco-editor` package itself (no CDN fetch), and the worker factory must
+// be installed as `MonacoEnvironment.getWorker`. Both stand-ins are sentinels
+// so the assertions prove identity, not just "called with something".
+const monacoMocks = vi.hoisted(() => ({
+  loaderConfig: vi.fn(),
+  bundledMonaco: { editor: {}, languages: {} },
+  createMonacoWorker: vi.fn(),
+}));
+
+vi.mock('monaco-editor', () => monacoMocks.bundledMonaco);
+
+// `?worker` imports only resolve in Vite's bundler pipeline and jsdom has
+// no Worker, so the worker table is replaced wholesale.
+vi.mock('../monaco/workers.js', () => ({
+  createMonacoWorker: monacoMocks.createMonacoWorker,
+}));
+
 // Mock @monaco-editor/react so the lazy import resolves synchronously to a
 // lightweight textarea that drives onChange. This avoids loading the ~3MB
 // Monaco bundle in tests and lets us assert on the editor's value.
 vi.mock('@monaco-editor/react', () => ({
+  loader: { config: monacoMocks.loaderConfig },
   Editor: ({
     value,
     onChange,
@@ -179,6 +198,24 @@ describe('FilesView — content', () => {
       expect(screen.getByTestId('monaco-editor')).toBeInTheDocument();
     });
     expect(screen.getByTestId('monaco-editor')).toHaveValue('# Hello\n\nWorld');
+  });
+
+  it('configures the loader with the bundled monaco-editor, not the CDN', async () => {
+    renderView({ selectedPath: 'README.md', selectedContent: TEXT_CONTENT });
+    await waitFor(() => {
+      expect(screen.getByTestId('monaco-editor')).toBeInTheDocument();
+    });
+    expect(monacoMocks.loaderConfig).toHaveBeenCalledTimes(1);
+    const [arg] = monacoMocks.loaderConfig.mock.calls[0] as [Record<string, unknown>];
+    // `import * as monaco` yields a module namespace, not the factory's
+    // object, so compare the sentinel's members by identity; and no `paths`
+    // key, which would re-point the loader at a script URL instead of the
+    // in-bundle module.
+    const passed = arg['monaco'] as typeof monacoMocks.bundledMonaco;
+    expect(passed.editor).toBe(monacoMocks.bundledMonaco.editor);
+    expect(passed.languages).toBe(monacoMocks.bundledMonaco.languages);
+    expect(arg).not.toHaveProperty('paths');
+    expect(self.MonacoEnvironment?.getWorker).toBe(monacoMocks.createMonacoWorker);
   });
 
   it('binary file shows download button (no editor)', () => {
